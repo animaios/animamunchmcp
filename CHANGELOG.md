@@ -2,6 +2,50 @@
 
 All notable changes to jcodemunch-mcp are documented here.
 
+## [1.108.5] — 2026-05-12 — Watcher standby failover: second-server takeover when the lock releases
+
+Multi-server bug fix from @MariusAdrian88 ([#293](https://github.com/jgravelle/jcodemunch-mcp/pull/293)).
+Before this release, running two MCP servers against the same local repo
+left only the first one watching: whichever process won the watcher lock
+got to watch, and any server that lost the race stayed unwatched until
+restart. The losing server's index drifted out of date silently, and the
+choice of "which server has fresh data" depended on startup order.
+
+### Fixed
+
+- `WatcherManager` now tracks folders that failed lock acquisition in a
+  `_standby` set and runs a per-folder signal-file watcher so standby
+  managers can wake immediately when an active watcher releases its lock.
+- `_release_lock()` writes a per-folder `.signal` file next to the lock
+  on release. Standby managers `awatch()` the lock directory and react
+  the moment a release happens, rather than polling.
+- `_auto_watch_if_needed()` now attempts `maybe_takeover()` before
+  falling through to normal reindex + watch. Tools dispatched against a
+  standby folder pick up the lock opportunistically.
+- After takeover, the auto-watch path awaits `ensure_indexed()` before
+  returning so the tool call sees a fresh index, not a racing one.
+- `maybe_takeover()` is throttled (1 s) and respects a configurable
+  `_takeover_retry_seconds` fallback (default 30 s) so a stuck holder
+  doesn't cause a hot loop.
+
+### Hardened
+
+- `remove_folder()` now clears any orphaned standby task even when the
+  folder was never actively watched — previously a lock release could
+  unexpectedly resurrect a standby that the caller had already removed.
+- `stop()` now cancels active watch tasks and releases their locks
+  instead of leaving them tracked indefinitely.
+- `_start_watch_task()` extraction DRYs the watch-task setup across
+  `add_folder`, `maybe_takeover`, and the crash-restart path.
+
+### Tests
+
+- New `TestWatcherSignalFile`, `TestWatcherManagerStandby`,
+  `TestAutoWatchTakeover`, `TestWatcherStandbyFailover` suites covering
+  signal-file payload, standby registration + cancellation, throttle,
+  retry-interval, lock cleanup on `stop()`, and the full two-manager
+  failover handoff. CI green on Linux + Windows × Python 3.10-3.13.
+
 ## [1.108.4] — 2026-05-12 — Universal prompt: short-circuit for known first-class targets
 
 Follow-up to v1.108.3. The original `AGENT_INSTALL_UNIVERSAL.md` framing

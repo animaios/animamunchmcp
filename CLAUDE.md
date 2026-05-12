@@ -1,9 +1,9 @@
 # jcodemunch-mcp — Project Brief
 
 ## Current State
-- **Version:** 1.108.2 (Bound git-blame walk + honour git_root_identity=false — fixes the 25-30s index_folder timeouts reported on #294; the retarget block in tools/index_folder.py now checks the config before calling detect_git_root; GitBlameProvider walks at most 20k commits / 2 years with a 10s subprocess cap; new `git_blame_enabled` config (default true) skips the probe entirely on legacy histories)
+- **Version:** 1.108.5 (Watcher standby failover — `WatcherManager` tracks folders that lost the watcher lock in `_standby` and runs a per-folder signal-file watcher; `_release_lock()` writes a `.signal` next to the lock on release so standby managers wake immediately via `awatch()` instead of polling; `_auto_watch_if_needed()` calls `maybe_takeover()` before falling through to normal reindex+watch; throttled (1s) + configurable `_takeover_retry_seconds` (default 30s); `stop()` now cancels active tasks + releases locks; `remove_folder()` clears orphaned standby tasks; `_start_watch_task()` DRYs setup across add/takeover/crash-restart paths. PR #293 by @MariusAdrian88)
 - **INDEX_VERSION:** 16
-- **Tests:** 4344 passed, 7 skipped (1.108.2)
+- **Tests:** 4360 passed, 7 skipped (1.108.5)
 - **Python:** >=3.10
 - **Tool count:** 81 (1.108.0 +list_workspaces)
 
