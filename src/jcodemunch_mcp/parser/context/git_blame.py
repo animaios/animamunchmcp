@@ -1,13 +1,53 @@
-"""Git blame context provider — attaches last_author and last_modified to files."""
+"""Git blame context provider — attaches last_author and last_modified to files.
+
+History bound:
+    The naive ``git log --name-only`` walks the entire commit history, which is
+    fine on a fresh repo but pathological on a long-lived one — 25-30 s on a
+    monorepo with hundreds of thousands of commits, easily blowing past the
+    MCP client's request-timeout budget. We bound the work two ways:
+
+      * ``-n GIT_BLAME_COMMIT_LIMIT`` caps the commit count
+      * ``--since=GIT_BLAME_SINCE`` bounds the time window
+
+    Together these mean blame data covers recent activity (where it matters
+    for `last_author` / `last_modified` queries) without paying for ancient
+    history. Files untouched in the window simply won't appear in the blame
+    map, and ``get_file_context`` will return ``None`` for them — the same
+    behaviour as files outside a git working tree.
+
+Operator override:
+    Setting ``git_blame_enabled = false`` in the project or global config
+    short-circuits ``detect()`` so the provider never runs. Useful for huge
+    histories where even the bounded walk is too slow.
+"""
 
 import logging
 import subprocess
 from pathlib import Path
 from typing import Optional
 
+from ... import config as _config
 from .base import ContextProvider, FileContext, register_provider
 
 logger = logging.getLogger(__name__)
+
+
+# Walk at most this many commits when building the blame map. Combined with
+# ``GIT_BLAME_SINCE``, this keeps the load() pass bounded on legacy repos
+# with deep history. 20_000 covers ~5 years of active development for a
+# team committing a couple dozen times a day.
+GIT_BLAME_COMMIT_LIMIT = 20_000
+
+# Time window for the blame walk. ``git log --since`` accepts approximate
+# strings ("2.years.ago", "6 months ago"). Two years catches the
+# overwhelming majority of files an agent will ask about; older files
+# silently fall off the map and report no blame.
+GIT_BLAME_SINCE = "2.years.ago"
+
+# Hard wall-clock bound on the subprocess. Tight enough that we don't blow
+# past a 30-s MCP request timeout even when both bounds above fail to fire
+# (e.g. a 20 k-commit window all within the last 2 years).
+GIT_BLAME_TIMEOUT_S = 10.0
 
 
 @register_provider
@@ -15,7 +55,8 @@ class GitBlameProvider(ContextProvider):
     """Context provider that reads per-file last-commit metadata from git.
 
     Detected automatically when a ``.git`` directory is present in the indexed
-    folder.  Runs a single ``git log`` command during ``load()`` to build a
+    folder and ``git_blame_enabled`` config is true (default). Runs a single
+    bounded ``git log`` command during ``load()`` to build a
     {relative_path: (author, iso_date)} map; subsequent ``get_file_context``
     calls are O(1) dict lookups.
 
@@ -33,7 +74,9 @@ class GitBlameProvider(ContextProvider):
         return "git_blame"
 
     def detect(self, folder_path: Path) -> bool:
-        """Return True if the folder is inside a git repository."""
+        """Return True if the folder is inside a git repository and blame is enabled."""
+        if not _config.get("git_blame_enabled", True, repo=str(folder_path)):
+            return False
         return (folder_path / ".git").exists() or self._find_git_root(folder_path) is not None
 
     def _find_git_root(self, folder_path: Path) -> Optional[Path]:
@@ -53,7 +96,14 @@ class GitBlameProvider(ContextProvider):
         return None
 
     def load(self, folder_path: Path) -> None:
-        """Run one ``git log`` to populate the blame map for all tracked files."""
+        """Run one bounded ``git log`` to populate the blame map.
+
+        The walk is capped by ``GIT_BLAME_COMMIT_LIMIT`` (commit count) and
+        ``GIT_BLAME_SINCE`` (time window). On a fresh repo both bounds are
+        no-ops; on a legacy 100k-commit history they keep load() under a
+        second. Output beyond ``GIT_BLAME_TIMEOUT_S`` is dropped (with a
+        warning) rather than blowing past the indexing budget.
+        """
         self._folder = folder_path
         try:
             result = subprocess.run(
@@ -63,14 +113,25 @@ class GitBlameProvider(ContextProvider):
                     "--format=COMMIT %an|%aI",
                     "--diff-filter=AM",
                     "--no-merges",
+                    f"-n", str(GIT_BLAME_COMMIT_LIMIT),
+                    f"--since={GIT_BLAME_SINCE}",
                     "--",
                 ],
                 cwd=str(folder_path),
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=GIT_BLAME_TIMEOUT_S,
                 stdin=subprocess.DEVNULL,
             )
+        except subprocess.TimeoutExpired as exc:
+            logger.warning(
+                "GitBlameProvider: git log exceeded %.0fs budget — "
+                "blame data will be partial or empty. Set "
+                "`git_blame_enabled: false` in config to skip the probe "
+                "entirely on repos with very deep history.",
+                GIT_BLAME_TIMEOUT_S,
+            )
+            return
         except Exception as exc:
             logger.warning("GitBlameProvider: git log failed: %s", exc)
             return

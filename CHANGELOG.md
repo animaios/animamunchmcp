@@ -2,6 +2,53 @@
 
 All notable changes to jcodemunch-mcp are documented here.
 
+## [1.108.2] — 2026-05-12 — Bound git-blame history walk + honour `git_root_identity=false`
+
+Two regressions reported by @MariusAdrian88 ([#294](https://github.com/jgravelle/jcodemunch-mcp/issues/294))
+that together explained the 25-30 s `index_folder` timeouts on his
+local-only workflow.
+
+### Fixes
+
+- **`index_folder` now short-circuits the git-root probe when `git_root_identity` is false.**
+  The retarget block at the standard-path entry called
+  `detect_git_root()` (which spawns `git config --get remote.origin.url`)
+  *before* checking the config knob — so operators who opted out of
+  git-root identity still paid the probe cost on every reindex. The
+  probe is now gated on the config first.
+- **`GitBlameProvider.load()` no longer walks unbounded history.**
+  The previous `git log --name-only` had no `-n` and no `--since` and
+  a 30 s timeout, so on long-lived repos (hundreds of thousands of
+  commits) it routinely consumed the entire MCP request budget. The
+  walk is now capped at:
+  - `-n 20000` commits
+  - `--since=2.years.ago`
+  - 10 s wall-clock subprocess timeout
+  Files untouched in the window simply won't appear in the blame
+  map — `get_file_context` returns None for them, the same behaviour
+  as files outside a git working tree.
+
+### New config knob
+
+- **`git_blame_enabled`** (default `true`) — set `false` to skip the
+  blame provider entirely on repos with very deep history where even
+  the bounded walk is too slow. `git_blame` context is omitted from
+  the index; everything else builds normally. Also surfaced as
+  `JCODEMUNCH_GIT_BLAME_ENABLED` env var and documented in the
+  JSONC config template.
+
+### Notes
+- Behavior change on long-lived repos: `last_author` / `last_modified`
+  now reflect activity within the last 2 years (or 20 k commits)
+  rather than all history. For files older than that window, both
+  fields are absent from `FileContext` rather than reporting ancient
+  attribution. If the older behaviour mattered for your workflow, the
+  thresholds are exported as module-level constants
+  (`GIT_BLAME_COMMIT_LIMIT`, `GIT_BLAME_SINCE`, `GIT_BLAME_TIMEOUT_S`)
+  in `parser/context/git_blame.py` — and we'd want to hear about the
+  use case.
+- 8 new tests in `test_v1_108_2.py`. 4344 passed, 7 skipped.
+
 ## [1.108.1] — 2026-05-12 — Surface `git_root_identity` in the config template
 
 `git_root_identity` was in `DEFAULTS`, the type-validation table, and had

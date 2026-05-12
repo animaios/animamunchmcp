@@ -34,6 +34,7 @@ ENV_VAR_MAPPING = {
     "JCODEMUNCH_CONTEXT_PROVIDERS": "context_providers",
     "JCODEMUNCH_REDACT_SOURCE_ROOT": "redact_source_root",
     "JCODEMUNCH_GIT_ROOT_IDENTITY": "git_root_identity",
+    "JCODEMUNCH_GIT_BLAME_ENABLED": "git_blame_enabled",
     "JCODEMUNCH_STATS_FILE_INTERVAL": "stats_file_interval",
     "JCODEMUNCH_SHARE_SAVINGS": "share_savings",
     "JCODEMUNCH_PERF_TELEMETRY": "perf_telemetry_enabled",
@@ -373,6 +374,7 @@ DEFAULTS = {
     "log_file": None,
     "redact_source_root": False,
     "git_root_identity": True,
+    "git_blame_enabled": True,
     "stats_file_interval": 3,
     "share_savings": True,
     "perf_telemetry_enabled": False,
@@ -456,6 +458,7 @@ CONFIG_TYPES = {
     "log_file": (str, type(None)),
     "redact_source_root": bool,
     "git_root_identity": bool,
+    "git_blame_enabled": bool,
     "stats_file_interval": int,
     "share_savings": bool,
     "perf_telemetry_enabled": bool,
@@ -1615,6 +1618,16 @@ def generate_template() -> str:
   //   identity derived from the resolved path, with no retargeting.
   //   Choose `false` when you deliberately want a subdir to be its own
   //   independent index, separate from any enclosing git repo.
+  //   (v1.108.2: the git-root probe is now properly skipped when this
+  //   is false — prior versions still paid the probe cost.)
+  // "git_blame_enabled": true,
+  //   Run the git_blame context provider during indexing to attach
+  //   `last_author` and `last_modified` to each file's context. The
+  //   walk is bounded (latest 20k commits or 2 years, whichever fires
+  //   first; 10s wall-clock cap). On legacy repos with very deep
+  //   history those bounds may still not be enough — set false to
+  //   skip the probe entirely. Index still builds; only the blame
+  //   metadata is omitted.
 
   // === Privacy & Telemetry ===
   // "redact_source_root": false,

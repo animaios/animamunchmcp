@@ -889,13 +889,18 @@ def index_folder(
     # against the same clone coalesce into a single repo index.
     walk_root = folder_path
     _git_root_for_walk = ""
-    try:
-        from ..storage.git_root import detect_git_root as _detect_git_root_for_walk
-        _gr = _detect_git_root_for_walk(str(folder_path))
-    except Exception:
-        logger.debug("git-root detection failed during retarget", exc_info=True)
-        _gr = None
-    if _gr is not None and _config.get("git_root_identity", True, repo=str(folder_path)):
+    # Short-circuit when the knob is off — detect_git_root() spawns a `git`
+    # subprocess and pays its wall-clock cost on every reindex. Callers
+    # who opted out of git-root identity shouldn't have to pay that cost.
+    _gr = None
+    if _config.get("git_root_identity", True, repo=str(folder_path)):
+        try:
+            from ..storage.git_root import detect_git_root as _detect_git_root_for_walk
+            _gr = _detect_git_root_for_walk(str(folder_path))
+        except Exception:
+            logger.debug("git-root detection failed during retarget", exc_info=True)
+            _gr = None
+    if _gr is not None:
         _gr_path = Path(_gr.git_root).resolve()
         try:
             _is_subdir = folder_path != _gr_path and folder_path.is_relative_to(_gr_path)
