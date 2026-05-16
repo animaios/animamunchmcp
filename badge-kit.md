@@ -2,13 +2,15 @@
 
 Every token your team prevents from being processed shows up in our public counter. If you want, you can show that impact on your own site, your README, your sustainability report, or your email signature, using a free embed kit we put together.
 
+Whether you're on the free GitHub release or a commercial license, the community counter is the same and the badges are the same.
+
 This page tells you how.
 
 ---
 
 ## Quick version (for email)
 
-> **You're now part of the jCodeMunch-MCP impact program.**
+> **You're part of the jCodeMunch-MCP impact program.**
 >
 > Every token your team prevents adds to our public CO₂ counter, currently sitting at over 27,000 kg CO₂ saved across the community. If you want to show that on your site, grab a badge, a live widget, or an embeddable SVG from `https://j.gravelle.us/jCodeMunch/badge-kit.md`. All three are free, configurable, and link to a public verification page.
 >
@@ -143,11 +145,11 @@ The SVG includes the current number at time of download. If you need it to stay 
 
 ### Does my license tier affect what I can display?
 
-No. Every paying jCodeMunch-MCP customer (Builder, Studio, Platform, Trio) can use any of the badges, widgets, or SVGs. The community total reflects everyone's combined impact. We don't gate the badges by tier.
+No. Anyone using jCodeMunch-MCP, free GitHub release or commercial license, can use any of the badges, widgets, or SVGs. The community total reflects everyone's combined impact. We don't gate the badges by tier or by purchase status.
 
 ### Can I show my own team's contribution instead of the community total?
 
-Not yet. The current badges show the aggregate community total. Per-organization attribution is on the roadmap and will require opt-in license-key telemetry. If you want to be on the early list when that ships, reply to your license confirmation email.
+Not yet. The current badges show the aggregate community total. Per-organization attribution is on the roadmap and will require opt-in license-key telemetry. If you want to be on the early list when that ships, email `jjgravelle [at] gmail.com` with the subject line "per-team badge interest" and we will let you know when it's live.
 
 ### Can I edit the badge text?
 
