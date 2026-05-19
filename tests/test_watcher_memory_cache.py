@@ -323,3 +323,278 @@ class TestFastPathExtraIgnorePatterns:
         assert result2.get("changed", 0) >= 1, (
             f"non-ignored file should have been re-indexed: {result2}"
         )
+
+
+class TestFastPathHonorsAllDiscoveryFilters:
+    """Regression: #306 (audit follow-up to #300). The watcher fast path in
+    ``index_folder`` skipped ``discover_local_files`` entirely, so every
+    filter applied during a full walk was missing on the fast path. v1.108.19
+    fixed ``extra_ignore_patterns`` (covered by ``TestFastPathExtraIgnorePatterns``
+    above). #306 extracted ``_should_index_file`` as the single source of
+    truth and routed both paths through it. These tests lock the invariant:
+    any new filter added to ``_should_index_file`` automatically applies on
+    the fast path too — but the High/Medium risks called out in #306
+    (gitignore, size cap, symlink protection, skip-dirs) get explicit
+    coverage here so regressions surface as test failures, not silent
+    re-indexing of files the user expects to be excluded.
+    """
+
+    def test_modified_file_under_gitignore_stays_unindexed(self, tmp_path):
+        """High-risk per #306: a .gitignore-matched file modified after the
+        initial index must not be re-indexed by the fast path."""
+        from jcodemunch_mcp.tools.index_folder import index_folder
+
+        # Project shape: root .gitignore excludes build/; one file inside
+        # build/ (ignored), one outside (kept).
+        (tmp_path / ".gitignore").write_text("build/\n")
+        build_dir = tmp_path / "build"
+        build_dir.mkdir()
+        ignored_file = build_dir / "artifact.py"
+        ignored_file.write_text("def artifact():\n    return 1\n")
+        kept_file = tmp_path / "main.py"
+        kept_file.write_text("def kept():\n    return 1\n")
+
+        storage = str(tmp_path / ".code-index")
+
+        # Initial full index. The full walk already honours .gitignore, so
+        # build/artifact.py is correctly absent.
+        result = index_folder(
+            path=str(tmp_path),
+            use_ai_summaries=False,
+            storage_path=storage,
+            incremental=False,
+        )
+        assert result["success"]
+        from jcodemunch_mcp.storage import IndexStore
+        store = IndexStore(base_path=storage)
+        owner, name = result["repo"].split("/", 1)
+        index = store.load_index(owner, name)
+        files = set(index.file_hashes.keys()) if index.file_hashes else set()
+        assert "build/artifact.py" not in files, "initial walk leaked a gitignored file"
+
+        # Modify the gitignored file and trigger a fast-path reindex.
+        ignored_file.write_text("def artifact():\n    return 2  # changed\n")
+        watcher_changes = [
+            WatcherChange("modified", str(ignored_file.resolve()), "__cache_miss__"),
+        ]
+        result2 = index_folder(
+            path=str(tmp_path),
+            use_ai_summaries=False,
+            storage_path=storage,
+            incremental=True,
+            changed_paths=watcher_changes,
+        )
+        assert result2["success"]
+
+        index_after = store.load_index(owner, name)
+        files_after = set(index_after.file_hashes.keys()) if index_after.file_hashes else set()
+        assert "build/artifact.py" not in files_after, (
+            "watcher fast path re-indexed a .gitignore-matched file (#306); "
+            f"index files: {sorted(files_after)}"
+        )
+
+    def test_modified_oversize_file_skipped_by_fast_path(self, tmp_path):
+        """Medium-risk per #306: a file that exceeds the size cap must be
+        skipped on the fast path, not silently re-indexed."""
+        from jcodemunch_mcp.tools.index_folder import index_folder
+        from jcodemunch_mcp.tools import index_folder as idx_mod
+
+        kept_file = tmp_path / "main.py"
+        kept_file.write_text("def kept():\n    return 1\n")
+        # Pre-create a small placeholder; we'll grow it past the cap below.
+        big_file = tmp_path / "big.py"
+        big_file.write_text("def small():\n    return 1\n")
+
+        storage = str(tmp_path / ".code-index")
+
+        # Initial index includes big.py at its small size.
+        result = index_folder(
+            path=str(tmp_path),
+            use_ai_summaries=False,
+            storage_path=storage,
+            incremental=False,
+        )
+        assert result["success"]
+        from jcodemunch_mcp.storage import IndexStore
+        store = IndexStore(base_path=storage)
+        owner, name = result["repo"].split("/", 1)
+
+        # Grow big.py past the size cap. Patch the module-level constant so
+        # the fast-path filter config sees a low cap (real cap is 500 KB;
+        # writing that many bytes per test is wasteful).
+        original_cap = idx_mod.DEFAULT_MAX_FILE_SIZE
+        try:
+            idx_mod.DEFAULT_MAX_FILE_SIZE = 200  # bytes
+            big_file.write_text("# padding\n" * 100)  # ~1000 bytes
+            watcher_changes = [
+                WatcherChange("modified", str(big_file.resolve()), "__cache_miss__"),
+            ]
+            result2 = index_folder(
+                path=str(tmp_path),
+                use_ai_summaries=False,
+                storage_path=storage,
+                incremental=True,
+                changed_paths=watcher_changes,
+            )
+            assert result2["success"]
+            # The modify should NOT have re-parsed big.py — fast path saw
+            # too_large and skipped it. The bookkeeping signal: no parse =
+            # no "changed" increment.
+            assert result2.get("changed", 0) == 0, (
+                "watcher fast path re-indexed an oversize file (#306); "
+                f"result: {result2}"
+            )
+        finally:
+            idx_mod.DEFAULT_MAX_FILE_SIZE = original_cap
+
+    def test_added_file_under_skip_dir_not_indexed(self, tmp_path):
+        """Per #306: watchfiles can emit events under build/cache dirs that
+        os.walk would prune. The fast path must apply the skip-dirs regex."""
+        from jcodemunch_mcp.tools.index_folder import index_folder
+
+        kept_file = tmp_path / "main.py"
+        kept_file.write_text("def kept():\n    return 1\n")
+        # node_modules is one of the default skip dirs.
+        nm_dir = tmp_path / "node_modules" / "left-pad"
+        nm_dir.mkdir(parents=True)
+
+        storage = str(tmp_path / ".code-index")
+        result = index_folder(
+            path=str(tmp_path),
+            use_ai_summaries=False,
+            storage_path=storage,
+            incremental=False,
+        )
+        assert result["success"]
+
+        # Fire an "added" event for a file inside node_modules/.
+        new_file = nm_dir / "index.js"
+        new_file.write_text("module.exports = function(){};\n")
+        watcher_changes = [
+            WatcherChange("added", str(new_file.resolve()), ""),
+        ]
+        result2 = index_folder(
+            path=str(tmp_path),
+            use_ai_summaries=False,
+            storage_path=storage,
+            incremental=True,
+            changed_paths=watcher_changes,
+        )
+        assert result2["success"]
+
+        from jcodemunch_mcp.storage import IndexStore
+        store = IndexStore(base_path=storage)
+        owner, name = result["repo"].split("/", 1)
+        index_after = store.load_index(owner, name)
+        files_after = set(index_after.file_hashes.keys()) if index_after.file_hashes else set()
+        assert "node_modules/left-pad/index.js" not in files_after, (
+            "watcher fast path indexed a file under a skipped directory (#306); "
+            f"index files: {sorted(files_after)}"
+        )
+
+    def test_added_symlinked_file_skipped_when_follow_symlinks_false(self, tmp_path):
+        """Per #306: with follow_symlinks=False (the default), an 'added'
+        event for a symlink must be skipped on the fast path."""
+        from jcodemunch_mcp.tools.index_folder import index_folder
+
+        kept_file = tmp_path / "main.py"
+        kept_file.write_text("def kept():\n    return 1\n")
+
+        # Target outside the repo to make the case unambiguous, even if
+        # symlink_escape didn't fire first.
+        external_target = tmp_path.parent / f"external-{tmp_path.name}.py"
+        external_target.write_text("def external():\n    return 1\n")
+
+        storage = str(tmp_path / ".code-index")
+        result = index_folder(
+            path=str(tmp_path),
+            use_ai_summaries=False,
+            storage_path=storage,
+            incremental=False,
+        )
+        assert result["success"]
+
+        symlink_path = tmp_path / "link.py"
+        try:
+            os.symlink(str(external_target), str(symlink_path))
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks not supported on this platform/user")
+
+        watcher_changes = [
+            WatcherChange("added", str(symlink_path), ""),
+        ]
+        result2 = index_folder(
+            path=str(tmp_path),
+            use_ai_summaries=False,
+            storage_path=storage,
+            incremental=True,
+            follow_symlinks=False,
+            changed_paths=watcher_changes,
+        )
+        assert result2["success"]
+
+        from jcodemunch_mcp.storage import IndexStore
+        store = IndexStore(base_path=storage)
+        owner, name = result["repo"].split("/", 1)
+        index_after = store.load_index(owner, name)
+        files_after = set(index_after.file_hashes.keys()) if index_after.file_hashes else set()
+        assert "link.py" not in files_after, (
+            "watcher fast path indexed a symlink with follow_symlinks=False (#306); "
+            f"index files: {sorted(files_after)}"
+        )
+
+    def test_deleted_event_bypasses_filters(self, tmp_path):
+        """Per #306: deletions intentionally bypass the filter set so that
+        an entry indexed before an ignore rule existed can still be
+        removed. This locks that asymmetry — modifies are filtered, deletes
+        are not."""
+        from jcodemunch_mcp.tools.index_folder import index_folder
+
+        # Index a file, then later "ignore" it. The delete event should
+        # still remove it from the index even though the filter would now
+        # reject an "added" or "modified" event for the same path.
+        target = tmp_path / "to_remove.py"
+        target.write_text("def to_remove():\n    return 1\n")
+        kept = tmp_path / "main.py"
+        kept.write_text("def kept():\n    return 1\n")
+
+        storage = str(tmp_path / ".code-index")
+        result = index_folder(
+            path=str(tmp_path),
+            use_ai_summaries=False,
+            storage_path=storage,
+            incremental=False,
+        )
+        assert result["success"]
+        from jcodemunch_mcp.storage import IndexStore
+        store = IndexStore(base_path=storage)
+        owner, name = result["repo"].split("/", 1)
+        index = store.load_index(owner, name)
+        files = set(index.file_hashes.keys()) if index.file_hashes else set()
+        assert "to_remove.py" in files, "setup failed: file should be in initial index"
+
+        # Now delete + fire delete event. Use an ignore pattern that would
+        # have blocked add/modify, to prove deletes are unaffected.
+        target.unlink()
+        watcher_changes = [
+            WatcherChange("deleted", str((tmp_path / "to_remove.py").resolve()), ""),
+        ]
+        result2 = index_folder(
+            path=str(tmp_path),
+            use_ai_summaries=False,
+            storage_path=storage,
+            incremental=True,
+            extra_ignore_patterns=["to_remove.py"],
+            changed_paths=watcher_changes,
+        )
+        assert result2["success"]
+        assert result2.get("deleted", 0) == 1, (
+            f"delete event should remove the entry even when filter would reject "
+            f"an add/modify for the same path: {result2}"
+        )
+
+        index_after = store.load_index(owner, name)
+        files_after = set(index_after.file_hashes.keys()) if index_after.file_hashes else set()
+        assert "to_remove.py" not in files_after, (
+            "delete event failed to remove the file from the index"
+        )

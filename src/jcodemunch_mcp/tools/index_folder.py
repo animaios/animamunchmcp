@@ -1,6 +1,7 @@
 """Index local folder tool - walk, parse, summarize, save."""
 
 from collections.abc import Generator
+from dataclasses import dataclass, field
 import hashlib
 import logging
 import os
@@ -187,6 +188,177 @@ def _local_repo_name(folder_path: Path) -> str:
     """Stable local repo id derived from basename + resolved path hash."""
     digest = hashlib.sha1(str(folder_path).encode("utf-8")).hexdigest()[:8]
     return f"{folder_path.name}-{digest}"
+
+
+@dataclass
+class _IndexFilters:
+    """Pre-computed configuration for ``_should_index_file``.
+
+    Bundled so per-file call sites stay readable and so the helper does
+    not have to recompute stable values (root path strings, compiled
+    pathspecs, etc.) on every invocation. ``gitignore_specs`` is the
+    one piece that may grow during a walk and is passed alongside the
+    bundle rather than baked into it.
+    """
+    root: Path
+    root_prefix: str         # str(root) + os.sep
+    root_str_norm: str       # os.path.normcase(str(root))
+    root_prefix_norm: str    # os.path.normcase(root_prefix)
+    follow_symlinks: bool = False
+    max_size: int = DEFAULT_MAX_FILE_SIZE
+    extra_spec: Optional["pathspec.PathSpec"] = None
+    forced_paths: set = field(default_factory=set)
+    skip_dirs_regex: Optional[re.Pattern] = None
+    check_binary: bool = True
+    check_filename: bool = True
+
+
+def _build_index_filters(
+    root: Path,
+    *,
+    follow_symlinks: bool = False,
+    max_size: int = DEFAULT_MAX_FILE_SIZE,
+    extra_spec: Optional["pathspec.PathSpec"] = None,
+    forced_paths: Optional[set] = None,
+    skip_dirs_regex: Optional[re.Pattern] = None,
+    check_binary: bool = True,
+    check_filename: bool = True,
+) -> _IndexFilters:
+    """Bundle pre-computed filter config for ``_should_index_file``.
+
+    ``root`` must already be resolved by the caller.
+    """
+    root_str = str(root)
+    root_prefix = root_str + os.sep
+    return _IndexFilters(
+        root=root,
+        root_prefix=root_prefix,
+        root_str_norm=os.path.normcase(root_str),
+        root_prefix_norm=os.path.normcase(root_prefix),
+        follow_symlinks=follow_symlinks,
+        max_size=max_size,
+        extra_spec=extra_spec,
+        forced_paths=forced_paths if forced_paths is not None else set(),
+        skip_dirs_regex=skip_dirs_regex,
+        check_binary=check_binary,
+        check_filename=check_filename,
+    )
+
+
+def _should_index_file(
+    file_path: Path,
+    cfg: _IndexFilters,
+    gitignore_specs: Optional[list] = None,
+) -> tuple[bool, str, str, Optional[str]]:
+    """Single source of truth for per-file index-eligibility checks.
+
+    Used by both ``discover_local_files`` (full walk) and the watcher
+    fast path in ``index_folder``. Any new filter added to indexing
+    MUST land here so both paths apply it. This invariant is the fix
+    for #306 (filter-on-one-path-but-not-the-other, third occurrence
+    after v1.95.1 collision guards and v1.96 incremental save merge).
+
+    Returns ``(ok, reason, rel_path, warning)``:
+      - ``ok=True``: caller may index. ``rel_path`` is the posix
+        relative path; ``warning`` is None.
+      - ``ok=False``: caller must skip. ``reason`` is one of the
+        ``skip_counts`` keys (``skip_file``, ``symlink``,
+        ``symlink_escape``, ``path_traversal``, ``skip_dir``,
+        ``gitignore``, ``extra_ignore``, ``secret``, ``wrong_extension``,
+        ``too_large``, ``unreadable``, ``binary``). ``rel_path`` may
+        be empty if rejection happened before path resolution.
+        ``warning`` is a user-facing one-liner the caller should
+        append to its warnings list for the user-visible rejections
+        (``symlink_escape``, ``path_traversal``, ``secret``, ``binary``);
+        None otherwise.
+
+    Args:
+        file_path: Absolute path to the file (not necessarily resolved).
+        cfg: Pre-computed filter configuration.
+        gitignore_specs: List of ``(dir_prefix, spec)`` tuples for the
+            ``.gitignore`` files in scope. The full walk grows this list
+            as it descends; the fast path pre-loads root-level entries.
+            Pass None / empty to skip gitignore matching.
+    """
+    # 1. Filename filter (SKIP_FILES regex — lockfiles, *.pyc, etc.)
+    if cfg.check_filename and SKIP_FILES_REGEX.search(file_path.name):
+        return False, "skip_file", "", None
+
+    # 2. Symlink protection
+    is_symlink = file_path.is_symlink()
+    if is_symlink and not cfg.follow_symlinks:
+        return False, "symlink", "", None
+
+    # 3. Symlink escape (only relevant when follow_symlinks=True)
+    if is_symlink and is_symlink_escape(cfg.root, file_path):
+        return False, "symlink_escape", "", f"Skipped symlink escape: {file_path}"
+
+    # 4. Resolve once
+    try:
+        resolved = file_path.resolve()
+    except OSError:
+        return False, "unreadable", "", None
+    resolved_str = str(resolved)
+    resolved_norm = os.path.normcase(resolved_str)
+
+    # 5. Path traversal — resolved path must be under root
+    if not (
+        resolved_norm == cfg.root_str_norm
+        or resolved_norm.startswith(cfg.root_prefix_norm)
+    ):
+        return False, "path_traversal", "", f"Skipped path traversal: {file_path}"
+
+    # 6. Relative path (posix-style)
+    rel_path = (
+        resolved_str[len(cfg.root_prefix):].replace("\\", "/")
+        if resolved_norm != cfg.root_str_norm
+        else ""
+    )
+    if not rel_path:
+        # The file resolved to the root itself — degenerate case.
+        return False, "unreadable", "", None
+
+    # 7. Skipped-directory check. The full-walk caller prunes these
+    # via ``os.walk``'s ``dirnames`` mutation so files there never
+    # reach the helper; passing ``skip_dirs_regex=None`` keeps that
+    # path's behaviour identical. The fast-path caller relies on
+    # this check because watchfiles can emit events for files under
+    # build / cache directories.
+    if cfg.skip_dirs_regex is not None:
+        for part in rel_path.split("/")[:-1]:  # exclude the filename itself
+            if cfg.skip_dirs_regex.match(part):
+                return False, "skip_dir", rel_path, None
+
+    # 8. Gitignore (string-prefix specs, walk-order)
+    if gitignore_specs and _is_gitignored_fast(resolved_str, gitignore_specs):
+        return False, "gitignore", rel_path, None
+
+    # 9. Extra ignore patterns
+    if cfg.extra_spec is not None and cfg.extra_spec.match_file(rel_path):
+        return False, "extra_ignore", rel_path, None
+
+    # 10. Secret-file detection
+    if is_secret_file(rel_path):
+        return False, "secret", rel_path, f"Skipped secret file: {rel_path}"
+
+    # 11. Extension filter
+    ext = file_path.suffix
+    if ext not in LANGUAGE_EXTENSIONS and get_language_for_path(str(file_path)) is None:
+        return False, "wrong_extension", rel_path, None
+
+    # 12. Size cap (with package.json forced-path exemption)
+    try:
+        size = file_path.stat().st_size
+    except OSError:
+        return False, "unreadable", rel_path, None
+    if size > cfg.max_size and resolved_str not in cfg.forced_paths:
+        return False, "too_large", rel_path, None
+
+    # 13. Binary detection (opt-out for callers that read the file separately)
+    if cfg.check_binary and is_binary_file(file_path):
+        return False, "binary", rel_path, f"Skipped binary file: {rel_path}"
+
+    return True, "", rel_path, None
 
 
 class _CarriedSymbol:
@@ -598,6 +770,21 @@ def discover_local_files(
     # targets get the size-cap exemption. Built once before the walk.
     forced_paths = _scan_package_json_forced_paths(root)
 
+    # Build per-file filter config once. Shared with the watcher fast path
+    # via ``_should_index_file`` (see #306). ``skip_dirs_regex`` is None
+    # here because ``os.walk`` below prunes those directories before any
+    # of their files reach the helper — keeping behaviour identical.
+    filter_cfg = _build_index_filters(
+        root=root,
+        follow_symlinks=follow_symlinks,
+        max_size=max_size,
+        extra_spec=extra_spec,
+        forced_paths=forced_paths,
+        skip_dirs_regex=None,
+        check_binary=True,
+        check_filename=True,
+    )
+
     skip_dirs_regex = _build_skip_dirs_regex()
     for dirpath, dirnames, filenames in os.walk(str(root), followlinks=False):
         # Prune directories that should always be skipped before descending.
@@ -628,88 +815,18 @@ def discover_local_files(
                 pass
 
         for filename in filenames:
-            if SKIP_FILES_REGEX.search(filename):
-                skip_counts["skip_file"] += 1
-                logger.debug("SKIP skip_file: %s", os.path.join(os.path.relpath(dirpath, root_str), filename))
-                continue
             file_path = dpath / filename
-            # Symlink protection
-            if not follow_symlinks and file_path.is_symlink():
-                skip_counts["symlink"] += 1
-                logger.debug("SKIP symlink: %s", file_path)
-                continue
-            if file_path.is_symlink() and is_symlink_escape(root, file_path):
-                skip_counts["symlink_escape"] += 1
-                warnings.append(f"Skipped symlink escape: {file_path}")
-                continue
-
-            # Resolve once per file — reused for traversal check, relative path,
-            # and gitignore matching (was resolved 2-3x before this optimization).
-            try:
-                resolved = file_path.resolve()
-            except OSError:
-                skip_counts["unreadable"] += 1
-                logger.debug("SKIP unreadable (resolve failed): %s", file_path)
-                continue
-            resolved_str = str(resolved)
-            resolved_norm = os.path.normcase(resolved_str)
-
-            # Path traversal check (same logic as validate_path but avoids
-            # re-resolving root on every iteration). Uses normcase so the check
-            # is case-insensitive on Windows.
-            if not (resolved_norm == root_str_norm or resolved_norm.startswith(root_prefix_norm)):
-                skip_counts["path_traversal"] += 1
-                warnings.append(f"Skipped path traversal: {file_path}")
-                continue
-
-            # Get relative path via string slicing (avoids Path.relative_to)
-            rel_path = resolved_str[len(root_prefix):].replace("\\", "/") if resolved_norm != root_str_norm else ""
-            if not rel_path:
-                continue
-
-            # .gitignore matching (string-based, avoids Path.relative_to per spec)
-            if gitignore_str_specs and _is_gitignored_fast(resolved_str, gitignore_str_specs):
-                skip_counts["gitignore"] += 1
-                logger.debug("SKIP gitignore: %s", rel_path)
-                continue
-
-            # Extra ignore patterns
-            if extra_spec and extra_spec.match_file(rel_path):
-                skip_counts["extra_ignore"] += 1
-                logger.debug("SKIP extra_ignore: %s", rel_path)
-                continue
-
-            # Secret detection
-            if is_secret_file(rel_path):
-                skip_counts["secret"] += 1
-                logger.debug("SKIP secret: %s", rel_path)
-                warnings.append(f"Skipped secret file: {rel_path}")
-                continue
-
-            # Extension filter
-            ext = file_path.suffix
-            if ext not in LANGUAGE_EXTENSIONS and get_language_for_path(str(file_path)) is None:
-                skip_counts["wrong_extension"] += 1
-                logger.debug("SKIP wrong_extension: %s", rel_path)
-                continue
-
-            # Size limit — exempt files referenced by a package.json
-            # main/module/exports/bin field (issue #25).
-            try:
-                size = file_path.stat().st_size
-                if size > max_size and resolved_str not in forced_paths:
-                    skip_counts["too_large"] += 1
-                    logger.debug("SKIP too_large: %s", rel_path)
-                    continue
-            except OSError:
-                skip_counts["unreadable"] += 1
-                logger.debug("SKIP unreadable (stat failed): %s", rel_path)
-                continue
-
-            # Binary detection (content sniff for files with source extensions)
-            if is_binary_file(file_path):
-                skip_counts["binary"] += 1
-                warnings.append(f"Skipped binary file: {rel_path}")
+            ok, reason, rel_path, warning = _should_index_file(
+                file_path, filter_cfg, gitignore_str_specs
+            )
+            if not ok:
+                skip_counts[reason] = skip_counts.get(reason, 0) + 1
+                if warning is not None:
+                    warnings.append(warning)
+                logger.debug(
+                    "SKIP %s: %s", reason,
+                    rel_path or os.path.join(os.path.relpath(dirpath, root_str), filename),
+                )
                 continue
 
             logger.debug("ACCEPT: %s", rel_path)
@@ -999,13 +1116,24 @@ def index_folder(
         # When the watcher provides the exact change set, skip full directory
         # discovery (~3s on Windows) and only process the affected files.
         if changed_paths and incremental:
-            # Resolve extra_ignore_patterns up front for the fast path. The
-            # full-walk path (discover_local_files) applies these via pathspec;
-            # the watcher fast path skipped them entirely, so a file under an
-            # ignored prefix that was correctly absent from the initial index
-            # would slip back in on the next modify (#300 follow-up reported
-            # by @domis86). Build the spec once for use in the classification
-            # loop below.
+            # Build the same filter bundle the full walk uses (#306). The
+            # fast path previously applied only the extension check (and as
+            # of v1.108.19 extra_ignore_patterns) but skipped every other
+            # filter from ``discover_local_files`` — gitignore, size cap,
+            # symlink protection, skip-dirs, secrets, binary. A modify
+            # event on an oversize/ignored/symlinked file would silently
+            # re-index it. ``_should_index_file`` is the shared helper.
+            #
+            # Tradeoffs accepted on this path for ~50ms per-event latency:
+            #   - gitignore loads root-level only (not per-subdir). Nested
+            #     .gitignores miss; documented in #306 as a known limit.
+            #   - package.json forced-path exemption from the size cap is
+            #     skipped (would require an rglob). Initial full walk
+            #     handles the exemption; subsequent fast-path edits to a
+            #     forced file may hit the size cap.
+            #   - is_binary_file disabled — the fast path reads file bytes
+            #     immediately after; a second open for binary sniffing is
+            #     wasteful. Extension check already rejects most binaries.
             _fast_effective_extra = get_extra_ignore_patterns(
                 extra_ignore_patterns, repo=str(folder_path)
             )
@@ -1017,6 +1145,34 @@ def index_folder(
                     )
                 except Exception:
                     _fast_extra_spec = None
+
+            # Load root-level .gitignore once (string-prefix spec form).
+            _fast_gitignore_specs: list[tuple[str, "pathspec.PathSpec"]] = []
+            try:
+                _root_gitignore = folder_path / ".gitignore"
+                if _root_gitignore.is_file():
+                    _gi_content = _root_gitignore.read_text(
+                        encoding="utf-8", errors="replace"
+                    )
+                    _gi_spec = pathspec.PathSpec.from_lines(
+                        "gitignore", _gi_content.splitlines()
+                    )
+                    _fast_gitignore_specs.append(
+                        (str(folder_path.resolve()) + os.sep, _gi_spec)
+                    )
+            except Exception:
+                pass
+
+            _fast_filter_cfg = _build_index_filters(
+                root=folder_path.resolve(),
+                follow_symlinks=follow_symlinks,
+                max_size=DEFAULT_MAX_FILE_SIZE,
+                extra_spec=_fast_extra_spec,
+                forced_paths=set(),
+                skip_dirs_regex=_build_skip_dirs_regex(),
+                check_binary=False,
+                check_filename=True,
+            )
 
             # Branch detection for watcher fast-path
             _fast_branch = _get_git_branch(folder_path)
@@ -1090,23 +1246,20 @@ def index_folder(
                         rel_path = abs_path.relative_to(folder_path).as_posix()
                     except ValueError:
                         continue
-                    # Skip non-source files
-                    ext = abs_path.suffix
-                    if ext not in LANGUAGE_EXTENSIONS and get_language_for_path(str(abs_path)) is None:
-                        continue
 
-                    # extra_ignore_patterns filter for the fast path (#300 follow-up).
-                    # The full-walk discovery path applies this via pathspec already;
-                    # the watcher fast path used to skip the filter, so an "added" or
-                    # "modified" event on an ignored file would still be indexed.
-                    # Deletions are allowed through: if the file is in the index from
-                    # before the ignore-pattern was set, the deletion should still
-                    # remove it. The match keeps the indexer's bookkeeping consistent
-                    # with the user's intent.
-                    if _fast_extra_spec is not None and change_type != "deleted":
-                        if _fast_extra_spec.match_file(rel_path):
+                    # Apply the shared filter bundle (#306). Deletions bypass
+                    # filters — a file that was indexed before its ignore
+                    # rule existed should still be removed from the index
+                    # when deleted, and the file may already be gone (so
+                    # filter checks that stat the path would fail anyway).
+                    if change_type != "deleted":
+                        _ok, _reason, _hl_rel_path, _warning = _should_index_file(
+                            abs_path, _fast_filter_cfg, _fast_gitignore_specs
+                        )
+                        if not _ok:
                             logger.debug(
-                                "SKIP extra_ignore (watcher fast path): %s", rel_path
+                                "SKIP %s (watcher fast path): %s",
+                                _reason, _hl_rel_path or rel_path,
                             )
                             continue
 

@@ -96,11 +96,9 @@ is a byte the agent doesn't pay to read.
 <!-- WHATSNEW:START -->
 #### What's new
 
-- **[v1.108.11](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.11)** (2026-05-15) — drift cleanup + Windows-CI test hardening
-- **[v1.108.10](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.10)** (2026-05-15) — schema budget cleanup (post-v1.108.0/v1.108.6 drift)
-- **[v1.108.9](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.9)** (2026-05-14) — escape hatch for the `_UNDISABLEABLE_TOOLS` safety net (#299)
-- **[v1.108.8](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.8)** (2026-05-14) — `jcodemunch_guide` honors `disabled_tools` (#298)
-- **[v1.108.7](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.7)** (2026-05-12) — Windows hook path: forward slashes + path-shape-agnostic dedup
+- **[v1.108.20](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.20)** (2026-05-19) — watcher fast-path applies all discovery filters via shared helper (#306)
+- **[v1.108.19](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.19)** (2026-05-19) — watcher fast-path honors `extra_ignore_patterns` (#300 follow-up)
+- **[v1.108.18](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.18)** (2026-05-17) — summarizer runtime honors project config (#304)
 <!-- WHATSNEW:END -->
 
 ![License](https://img.shields.io/badge/license-dual--use-blue)

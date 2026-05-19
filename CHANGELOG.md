@@ -2,6 +2,90 @@
 
 All notable changes to jcodemunch-mcp are documented here.
 
+## [1.108.20] - 2026-05-19 - watcher fast-path applies all discovery filters via shared helper (#306)
+
+Patch release. Filed as a follow-up audit to #300/#1.108.19 after
+@domis86 noted that other discovery filters might also be "forgotten"
+during watcher reindex.
+
+## The audit
+
+`v1.108.19` fixed `extra_ignore_patterns` on the watcher fast path.
+That fix raised the question: which *other* filters from
+`discover_local_files` does the fast path also skip? The inventory:
+
+| Filter                                  | Full walk | Fast path (before 1.108.20) | Risk |
+|-----------------------------------------|-----------|-----------------------------|------|
+| `extra_ignore_patterns`                 | yes       | yes (v1.108.19)             | resolved |
+| `.gitignore` (root-level)               | yes       | **no**                      | High |
+| File size cap (`max_size`)              | yes       | **no**                      | Medium |
+| Symlink protection (`follow_symlinks`)  | yes       | **no**                      | Medium |
+| Symlink escape (`is_symlink_escape`)    | yes       | **no**                      | Medium |
+| `skip_dirs_regex` (node_modules, etc.)  | yes (dir prune) | **no**                | Low/Medium |
+| `SKIP_FILES_REGEX` (lockfiles, *.pyc)   | yes       | partial (via ext check)     | Low |
+| Secret-file detection                   | yes       | **no**                      | adjacent |
+| Binary-file content sniff               | yes       | **no**                      | adjacent |
+
+High-impact gap: `.gitignore`. A user with a `build/` line in
+`.gitignore` would see `build/` cleanly absent from the initial index,
+then watch the watcher re-index `build/artifact.py` on the next save.
+
+## The fix
+
+Single helper `_should_index_file(file_path, cfg, gitignore_specs)`
+holds every per-file filter check. Both code paths call it:
+
+- `discover_local_files` (full walk) — loops files in each directory,
+  hands them to the helper. `gitignore_specs` grows as `os.walk`
+  descends (per-subdir `.gitignore` files), matching prior behaviour
+  bit-for-bit.
+- Watcher fast path in `index_folder` — pre-loads the root-level
+  `.gitignore` once at fast-path entry and passes it to the helper for
+  each changed file. Deletions bypass the filter set (a file indexed
+  before its ignore rule existed should still be removed when deleted).
+
+Documented tradeoffs on the fast path, to preserve the ~50ms per-event
+latency goal:
+
+- Only the **root-level** `.gitignore` loads on the fast path. Nested
+  per-subdir `.gitignore` files are honoured by the full walk only.
+  The fast path covers the common case (one `.gitignore` at repo root);
+  monorepos with `cap/.gitignore` + `core/.gitignore` should re-run a
+  full index after editing a nested `.gitignore`.
+- `package.json` forced-path exemption from the size cap (issue #25)
+  is skipped on the fast path. The initial full walk still applies it;
+  subsequent fast-path edits to a forced file may hit the size cap.
+- `is_binary_file` content sniff is disabled on the fast path because
+  the next step reads the file bytes anyway — a second open for
+  sniffing is wasteful. Extension filtering already rejects most
+  binaries.
+
+## Lock-in
+
+The recurring pattern (filter applied on one code path but not
+another) has now bitten three releases — v1.95.1 collision guards,
+v1.96 incremental save merge, and now #306. The lock-in mechanism:
+
+- All per-file filtering goes through `_should_index_file`. Adding a
+  new filter is a single-edit operation; both code paths pick it up.
+- Five regression tests in `TestFastPathHonorsAllDiscoveryFilters`
+  cover gitignore + size cap + skip-dirs + symlink + deletion-bypass.
+  Future filters should add a matching fast-path test alongside the
+  helper edit.
+
+## Files
+
+- `src/jcodemunch_mcp/tools/index_folder.py` — new `_IndexFilters`
+  dataclass, `_build_index_filters` factory, `_should_index_file`
+  helper. `discover_local_files` inner loop refactored to call the
+  helper. Watcher fast path builds the bundle once at entry and routes
+  each non-delete event through the helper.
+- `tests/test_watcher_memory_cache.py` — new
+  `TestFastPathHonorsAllDiscoveryFilters` class, 5 tests.
+
+5 new tests; 232 passed across the indexing surface; no behaviour
+change for users on the full-walk path.
+
 ## [1.108.19] - 2026-05-19 - watcher fast-path honors `extra_ignore_patterns` (#300 follow-up)
 
 Patch release. Reported by @domis86 on #300 after v1.108.18.
