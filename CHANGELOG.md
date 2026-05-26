@@ -4,6 +4,25 @@ All notable changes to jcodemunch-mcp are documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- `is_secret_file()` no longer matches `SECRET_PATTERNS` against the full file
+  path — the broad `*secret*` glob run as a path substring caused any directory
+  whose name merely contains `secret` (e.g. a `services/secrets-manager/`
+  microservice) to drop its entire subtree from the index. Matching is now
+  basename-only, with the directory analogue handled deliberately: a file is
+  still treated as secret material when it lives under a *whole-segment*
+  `secret`/`secrets` directory **and** carries a non-source data/credential
+  extension (`.yaml`, `.json`, `.env`, `.pem`, `.tfvars`, …). This preserves
+  detection of real credentials stored as data files in conventional secret
+  stores (Kubernetes / Terraform / Docker secrets, e.g.
+  `config/secrets/database.yaml`) — which a naive basename-only fix would have
+  silently started indexing — while leaving source files (`internal/secrets/router.go`)
+  and a `secrets-manager` service directory correctly un-flagged. The
+  documentation-extension safe-list for `*secret*` is unchanged, and the rule
+  honors the existing `exclude_secret_patterns` opt-out. Addresses the report
+  behind PR #317.
+
 ## [1.108.24] - 2026-05-26 - check_edit_safe edit-safety preflight
 
 New tool `check_edit_safe`: the edit-safety companion to `check_delete_safe`.

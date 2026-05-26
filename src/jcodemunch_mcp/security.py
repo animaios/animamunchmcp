@@ -136,28 +136,67 @@ _SECRET_GLOB_SAFE_EXTENSIONS: frozenset[str] = frozenset({
 # Patterns that should NOT be applied to doc extensions (too broad for prose files).
 _SECRET_DOC_EXEMPT_PATTERNS: frozenset[str] = frozenset({"*secret*"})
 
+# Directory segments that conventionally hold credential material (Kubernetes
+# Secrets, Terraform, Docker secrets, Ansible vault dirs, …). Matched as WHOLE
+# path segments — never as substrings — so a service directory like
+# "secrets-manager" is not mistaken for a secret store.
+_SECRET_DIR_NAMES: frozenset[str] = frozenset({"secret", "secrets"})
+
+# Non-source data/config/credential extensions. A file with one of these
+# extensions sitting inside a _SECRET_DIR_NAMES directory is treated as secret
+# material even when its basename is innocuous (e.g. "secrets/database.yaml").
+# Source-code and documentation extensions are deliberately excluded: a .go/.py
+# file under "secrets/" is code that *handles* secrets, not a secret itself.
+_SECRET_BEARING_EXTENSIONS: frozenset[str] = frozenset({
+    ".yaml", ".yml", ".json", ".ini", ".cfg", ".conf", ".config",
+    ".properties", ".toml", ".xml", ".env",
+    ".tfvars", ".tfstate",
+    ".pem", ".key", ".crt", ".cer", ".der", ".p12", ".pfx",
+    ".jks", ".keystore",
+})
+
 
 def is_secret_file(file_path: str) -> bool:
     """Check if a file path matches known secret file patterns.
 
-    Uses filename/extension matching, not content inspection. The broad
-    ``*secret*`` glob is not applied to known documentation extensions
-    (.md, .rst, .txt, .adoc, .html, .ipynb, etc.) to avoid false positives
-    on files like ``docs/secrets-handling.md``.
+    Two stages, deliberately **not** a substring scan of the whole path:
+
+    1. **Basename patterns.** Every entry in :data:`SECRET_PATTERNS` is a
+       basename pattern (``.env``, ``*.pem``, ``id_rsa``, ``*secret*``, …),
+       matched against the file's basename only. The broad ``*secret*`` glob
+       used to be run against the *full* path, which dropped entire legitimate
+       subtrees — e.g. every file under a ``services/secrets-manager/``
+       microservice — because the directory name contains the substring
+       ``secret``. ``*secret*`` is still skipped for known documentation
+       extensions (.md, .rst, .txt, .adoc, .html, .ipynb, …) so a file like
+       ``docs/secrets-handling.md`` is never flagged.
+
+    2. **Secret-store directories.** Credentials are also commonly stored as
+       data/config files inside a directory whose *whole-segment* name is
+       ``secret`` or ``secrets`` (Kubernetes Secrets, Terraform, Docker
+       secrets, …) under an innocuous basename like ``database.yaml``. Such a
+       file is flagged when it lives under a ``secret``/``secrets`` path segment
+       **and** its extension is a non-source data/credential extension
+       (:data:`_SECRET_BEARING_EXTENSIONS`). Source files (``.go``, ``.rs``,
+       ``.py``, …) and docs under those directories are treated as code that
+       *handles* secrets, not as secret material, and are not flagged. Only the
+       exact segments ``secret``/``secrets`` trigger this — ``secrets-manager``
+       is a service, not a store.
 
     Args:
         file_path: Relative file path (forward slashes).
 
     Returns:
-        True if the file matches a secret pattern.
+        True if the file is judged to be a secret/credential file.
     """
     import fnmatch
 
     name = os.path.basename(file_path).lower()
-    path_lower = file_path.lower()
     _, ext = os.path.splitext(name)
 
     excluded = set(_config.get("exclude_secret_patterns", []))
+
+    # Stage 1 — basename patterns.
     for pattern in SECRET_PATTERNS:
         if pattern in excluded:
             continue
@@ -165,9 +204,15 @@ def is_secret_file(file_path: str) -> bool:
             continue
         if fnmatch.fnmatch(name, pattern):
             return True
-        # Also check full path for patterns like .env.*
-        if fnmatch.fnmatch(path_lower, pattern):
+
+    # Stage 2 — data/credential files inside a secret-store directory. Gated by
+    # the same opt-out as the broad *secret* glob, since this is its directory
+    # analogue. Whole-segment match only, so "secrets-manager" does not qualify.
+    if "*secret*" not in excluded and ext in _SECRET_BEARING_EXTENSIONS:
+        parents = os.path.dirname(file_path).lower().replace("\\", "/").split("/")
+        if any(segment in _SECRET_DIR_NAMES for segment in parents):
             return True
+
     return False
 
 

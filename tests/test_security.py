@@ -155,6 +155,96 @@ class TestSecretDetection:
         """Non-doc files with 'secret' in the name must still be caught."""
         assert is_secret_file(path) is True
 
+    # --- Substring-vs-segment regression (the secrets-manager false positive) ---
+
+    @pytest.mark.parametrize("path", [
+        # A "secrets-manager" microservice: every file under it was dropped
+        # because the old full-path *secret* substring match hit the dir name.
+        "services/secrets-manager/app/main.py",
+        "services/secrets-manager/app/handlers/auth.py",
+        "services/secret-config/foo.py",
+        "services/secret-bridge/src/bridge.py",
+        "app/secret_helpers/utils.py",
+        # Whole-segment "secret"/"secrets" dirs holding SOURCE code: that is code
+        # which handles secrets, not secret material. Must not be flagged.
+        "internal/secrets/router.go",
+        "pkg/secret/loader.rs",
+        "services/secrets/Service.java",
+        "lib/secrets/index.ts",
+        # Doc file under a secret-named dir.
+        "services/secrets-manager/README.md",
+    ])
+    def test_non_secret_source_under_secret_named_dirs_not_flagged(self, path):
+        """Source/doc files under directories whose names contain (or equal)
+        'secret' must not be excluded. Substring matching on the full path used
+        to drop entire legitimate subtrees; basename + whole-segment matching
+        with a source-extension carve-out fixes that."""
+        assert is_secret_file(path) is False
+
+    @pytest.mark.parametrize("path", [
+        # Real credentials whose BASENAME already matches a pattern — flagged by
+        # stage 1 regardless of which directory they sit in.
+        "services/secrets-manager/.env",
+        "services/secrets-manager/keys/id_rsa",
+        "services/secrets-manager/certs/server.pem",
+        "services/secrets-manager/credentials.json",
+        "deploy/secret-config/private.key",
+        "src/utils/mysecretstuff.py",
+    ])
+    def test_basename_secret_hits_flagged_anywhere(self, path):
+        """Basename pattern matches fire no matter the parent directory."""
+        assert is_secret_file(path) is True
+
+    @pytest.mark.parametrize("path", [
+        # THE HOLE the basename-only fix opens: data/config files with innocuous
+        # basenames stored inside a whole-segment secret-store directory. These
+        # were caught by the old full-path *secret* match and must STAY caught.
+        "config/secrets/database.yaml",
+        "app/secrets/oauth.json",
+        "deploy/secrets/values.yml",
+        "infra/secret/backend.tfvars",
+        "k8s/secrets/tls.crt",
+        "k8s/secrets/tls.key",
+        "ansible/secret/vault.ini",
+        "etc/secrets/app.properties",
+    ])
+    def test_data_files_in_secret_store_dirs_still_flagged(self, path):
+        """Regression for the basename-only over-correction: credential data
+        files under an exact 'secret'/'secrets' directory segment must remain
+        excluded even though their basenames match no pattern."""
+        assert is_secret_file(path) is True
+
+    @pytest.mark.parametrize("path", [
+        # "secrets-manager" / "secret-config" are service names, not stores:
+        # even data files under them are NOT auto-flagged by the directory rule
+        # (only exact 'secret'/'secrets' segments qualify).
+        "services/secrets-manager/app/config.yaml",
+        "services/secret-config/settings.json",
+    ])
+    def test_data_files_under_secretish_service_dirs_not_flagged(self, path):
+        """Only exact 'secret'/'secrets' path segments trigger the directory
+        rule; partial matches like 'secrets-manager' must not."""
+        assert is_secret_file(path) is False
+
+    def test_secret_dir_rule_respects_opt_out(self, monkeypatch):
+        """Disabling the broad *secret* glob via config also disables its
+        directory analogue, so users who opt out are not surprised."""
+        import jcodemunch_mcp.security as sec
+
+        orig_get = sec._config.get
+
+        def fake_get(key, default=None, **kwargs):
+            if key == "exclude_secret_patterns":
+                return ["*secret*"]
+            return orig_get(key, default, **kwargs)
+
+        monkeypatch.setattr(sec._config, "get", fake_get)
+        # Basename *secret* hit is suppressed, and so is the directory rule.
+        assert is_secret_file("config/secrets/database.yaml") is False
+        assert is_secret_file("src/mysecretstuff.py") is False
+        # A pattern that is NOT *secret* still fires.
+        assert is_secret_file("config/.env") is True
+
 
 # --- Binary Detection (S-05) ---
 
