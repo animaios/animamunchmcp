@@ -1,5 +1,5 @@
 > [!WARNING]
-> **PyPI install temporarily unavailable.** Bare `pip install jcodemunch-mcp` and `uvx jcodemunch-mcp` return "no versions found" while PyPI Admins review a false-positive quarantine flag triggered after the v1.108.22 release. **The one-click install badges below have been temporarily repointed at the GitHub-release wheel and work normally.** For manual install, use the wheel directly:
+> **PyPI install temporarily unavailable.** Bare `pip install jcodemunch-mcp` and `uvx jcodemunch-mcp` return "no versions found" while this project is under PyPI admin review (appeal filed). **The one-click install badges below have been temporarily repointed at the GitHub-release wheel and work normally.** For manual install, use the wheel directly:
 >
 > ```
 > pip install https://github.com/jgravelle/jcodemunch-mcp/releases/download/v1.108.24/jcodemunch_mcp-1.108.24-py3-none-any.whl
@@ -15,7 +15,7 @@
 >
 > `uvx` equivalent: `uvx --from git+https://github.com/jgravelle/jcodemunch-mcp.git jcodemunch-mcp`
 >
-> Sibling packages (`jdocmunch-mcp`, `jdatamunch-mcp`) are unaffected and install normally. Status, timeline, and live updates: [issue #308](https://github.com/jgravelle/jcodemunch-mcp/issues/308). Mike Fiedler at PSF Security is out through May 26; the broader PyPI admin queue may resolve sooner.
+> Sibling packages (`jdocmunch-mcp`, `jdatamunch-mcp`) are unaffected and install normally. Status and live updates: [issue #308](https://github.com/jgravelle/jcodemunch-mcp/issues/308).
 
 #### One-click installs:
 

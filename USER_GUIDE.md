@@ -325,8 +325,8 @@ On first `/mcp` load inside `agy`, the CLI caches each tool schema at
 editing the config.
 
 The `https://github.com/.../v1.108.24/...whl` URL is the temporary
-PyPI-quarantine workaround (see the banner at the top of README.md).
-Once the quarantine clears, swap the args back to `["jcodemunch-mcp"]`.
+PyPI-outage workaround (see the banner at the top of README.md).
+Once PyPI access is restored, swap the args back to `["jcodemunch-mcp"]`.
 
 Prefer not to track a version? Point `--from` at the repo instead and it
 always pulls the latest (requires `git`; builds from source):
