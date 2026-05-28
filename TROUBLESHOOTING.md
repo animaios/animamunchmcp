@@ -164,6 +164,60 @@ indexing) which doesn't depend on local paths.
 
 ---
 
+## Windows: server drops mid-session, then `{"error":"Not connected"}` on every call
+
+**Symptom:** On Windows, jCodeMunch connects and works for a burst of calls
+(resolve/index/search), then every subsequent tool call in the same session
+returns `{"error":"Not connected"}`. It can also fail right at the start during
+a reindex. The client log shows a line like:
+
+```
+OPENSSL_Uplink(0000....,08): no OPENSSL_Applink
+connection:transport_closed
+```
+
+(and often, separately, `invalid peer certificate: UnknownIssuer` when uvx
+re-resolves dependencies).
+
+**Cause:** `OPENSSL_Uplink: no OPENSSL_Applink` is a fatal Windows OpenSSL fault
+that hard-aborts the process. It is a native abort, not a Python exception, so
+jCodeMunch cannot catch it — once it fires the server is gone and every later
+call hits a dead transport. It is an environment issue, not a jCodeMunch bug: a
+second OpenSSL is loaded into the process (almost always a corporate
+TLS-inspection / endpoint-security agent such as Zscaler, Netskope, or Cisco
+Umbrella) and it aborts when an outbound HTTPS call routes through it. The
+companion `UnknownIssuer` cert error on the same machine is the giveaway.
+jCodeMunch's own TLS uses Python's bundled `_ssl`, which never needs applink;
+the faulting library is the injected one.
+
+**Fix:** Stop jCodeMunch from making the one background HTTPS call it makes
+during a session — the opt-out savings telemetry. Set `JCODEMUNCH_SHARE_SAVINGS=0`
+in the server's environment. In a Cursor / Claude Desktop MCP config:
+
+```json
+{
+  "command": "uvx",
+  "args": ["jcodemunch-mcp"],
+  "env": { "JCODEMUNCH_SHARE_SAVINGS": "0" }
+}
+```
+
+If you have an AI-summary provider key set, also add
+`"JCODEMUNCH_USE_AI_SUMMARIES": "0"`. With no outbound call, the injected
+OpenSSL is never exercised and the aborts stop.
+
+Additional hardening on locked-down boxes:
+1. Install into a venv and point your client at the resolved
+   `jcodemunch-mcp.exe` instead of `uvx`, so each launch doesn't re-resolve
+   dependencies over the failing TLS path. If you stay on `uvx`, add
+   `--native-tls` so it uses the Windows trust store.
+2. If aborts continue with telemetry disabled, the conflicting OpenSSL is being
+   triggered by something else in your environment. Find the stray library with
+   `where libcrypto-3-x64.dll` and `where libssl-3-x64.dll`, and confirm whether
+   a security agent is doing TLS inspection.
+
+---
+
 ## HTTP Transport "Connection Refused"
 
 **Symptom:** `--transport sse` or `--transport streamable-http` fails with
