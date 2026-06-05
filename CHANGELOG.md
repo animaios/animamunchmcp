@@ -4,6 +4,31 @@ All notable changes to jcodemunch-mcp are documented here.
 
 ## [Unreleased]
 
+## [1.108.29] - 2026-06-05 - WRR signal fusion was inert (all weights resolved to 0.0)
+
+### Fixed
+
+- Weighted Reciprocal Rank fusion never applied its channel weights, so every
+  fused score was `0.0` and final ordering silently fell back to a stable sort
+  over insertion order (issue #324, reported by @sektor10 with a full root-cause
+  analysis and reproduction). The `fuse()` "use the default weight" sentinel
+  checked `ch.weight != 1.0`, but all four `build_*_channel` constructors default
+  their `weight` to `0.0` and the live callers (`get_ranked_context`,
+  `search_symbols` on the `fusion=True` paths) never pass one. Since `0.0 != 1.0`,
+  `fuse()` took the literal `0.0` for every channel and never consulted the
+  weights dict, so `contribution = 0.0 / (k + rank) = 0.0` everywhere and the
+  documented ranking (identity 2.0 > lexical 1.0 > similarity 0.8 > structural
+  0.4) was a no-op. Fixed by moving to an unambiguous `None` sentinel:
+  `ChannelResult.weight` and all four builder defaults are now `None` (meaning
+  "use the default weight for this channel name"), and `fuse()` checks
+  `ch.weight is not None`. An explicit weight (including `0.0`) is now respected
+  as a real override. Default `search_symbols`, the embedding hybrid blend, and
+  per-repo `semantic_weight` tuning never routed through `fuse()` and are
+  unaffected. New regression tests assert non-zero channel contributions, that an
+  identity-only top hit outranks a lexical-only one, and that the builder
+  defaults match the sentinel `fuse()` recognises (`tests/test_signal_fusion.py`,
+  17 -> 21 tests).
+
 ## [1.108.28] - 2026-06-05 - Thinking-model summary degradation: warning + configurable OpenAI extra body
 
 ### Added

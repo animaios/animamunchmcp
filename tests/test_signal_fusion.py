@@ -6,8 +6,10 @@ from jcodemunch_mcp.retrieval.signal_fusion import (
     ChannelResult,
     FusedResult,
     fuse,
+    build_lexical_channel,
     build_identity_channel,
     build_structural_channel,
+    build_similarity_channel,
     _bm25_score_no_identity,
     load_fusion_weights,
     DEFAULT_WEIGHTS,
@@ -106,10 +108,65 @@ class TestFuse:
         expected = w / (k + 1)
         assert abs(results[0].score - expected) < 1e-9
 
+    def test_default_weight_channels_are_not_inert(self):
+        """Regression (#324): channels built with the default weight sentinel
+        must draw their weight from the weights dict, not collapse to 0.0.
+
+        Before the fix, the fuse() sentinel (``!= 1.0``) disagreed with the
+        builders' default (``0.0``), so every channel resolved to weight 0.0,
+        every fused score was 0.0, and ordering silently fell back to a stable
+        sort over insertion order.
+        """
+        # Exactly what the live callers emit: channels with no explicit weight.
+        chans = [
+            ChannelResult(name="lexical", ranked_ids=["a", "b", "c"]),
+            ChannelResult(name="identity", ranked_ids=["c", "a"]),
+        ]
+        results = fuse(chans, weights=dict(DEFAULT_WEIGHTS))
+
+        # Every contribution is non-zero (the inert-weight bug zeroed them all).
+        for r in results:
+            assert r.score > 0.0
+            for contrib in r.channel_contributions.values():
+                assert contrib > 0.0
+
+        # The identity channel carries weight 2.0, so the identity top hit "c"
+        # must outrank the lexical-only ordering. Under the bug, "a" came back
+        # first purely from stable-sort insertion order.
+        assert results[0].symbol_id == "c"
+
+    def test_default_weight_sentinel_uses_channel_default(self):
+        """A channel with weight=None resolves to DEFAULT_WEIGHTS by name."""
+        ch = ChannelResult(name="identity", ranked_ids=["a"])  # weight defaults to None
+        assert ch.weight is None
+        results = fuse([ch], smoothing=60)
+        expected = DEFAULT_WEIGHTS["identity"] / (60 + 1)
+        assert abs(results[0].score - expected) < 1e-9
+
+    def test_explicit_zero_weight_is_respected(self):
+        """An explicit weight of 0.0 is a real override, not the 'use default' sentinel."""
+        ch = ChannelResult(name="identity", ranked_ids=["a"], weight=0.0)
+        results = fuse([ch], smoothing=60)
+        assert results[0].score == 0.0
+
 
 # ---------------------------------------------------------------------------
 # Channel builders
 # ---------------------------------------------------------------------------
+
+def test_all_builders_default_weight_to_none_sentinel():
+    """Regression (#324): the builders' default weight must be the same
+    sentinel fuse() recognises (None), so the documented WRR weights apply
+    on the live fusion=True paths instead of zeroing out."""
+    builders = (
+        build_lexical_channel,
+        build_structural_channel,
+        build_identity_channel,
+        build_similarity_channel,
+    )
+    for b in builders:
+        assert b.__kwdefaults__["weight"] is None, b.__name__
+
 
 class TestBuildIdentityChannel:
 

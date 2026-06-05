@@ -48,7 +48,9 @@ class ChannelResult:
 
     name: str
     ranked_ids: list[str]
-    weight: float = 1.0
+    # None = "use the default weight for this channel name from the weights
+    # dict / DEFAULT_WEIGHTS". An explicit float (including 0.0) overrides it.
+    weight: Optional[float] = None
     # Optional per-ID raw scores (for debug output)
     raw_scores: dict[str, float] = field(default_factory=dict)
 
@@ -74,8 +76,11 @@ def fuse(
     Args:
         channels: Ranked results from each scoring channel.
         smoothing: RRF smoothing constant ``k`` (higher → less top-heavy).
-        weights: Per-channel weight overrides.  Missing channels fall back
-            to ``DEFAULT_WEIGHTS``, then to ``1.0``.
+        weights: Per-channel weight overrides.  A channel whose own
+            ``weight`` is ``None`` (the builders' default) draws its weight
+            from this dict by channel name, falling back to
+            ``DEFAULT_WEIGHTS`` then ``1.0``.  A channel that sets an
+            explicit ``weight`` (including ``0.0``) uses that literal value.
 
     Returns:
         List of ``FusedResult`` sorted by descending fused score.
@@ -88,7 +93,7 @@ def fuse(
     accum: dict[str, FusedResult] = {}
 
     for ch in channels:
-        w = ch.weight if ch.weight != 1.0 else effective_weights.get(ch.name, 1.0)
+        w = ch.weight if ch.weight is not None else effective_weights.get(ch.name, 1.0)
 
         for rank_0, sid in enumerate(ch.ranked_ids):
             rank_1 = rank_0 + 1  # 1-based rank
@@ -116,7 +121,7 @@ def build_lexical_channel(
     avgdl: float,
     centrality: Optional[dict] = None,
     *,
-    weight: float = 0.0,  # 0 means "use default from weights dict"
+    weight: Optional[float] = None,  # None means "use default from weights dict"
 ) -> ChannelResult:
     """Score all symbols via BM25 and return as a ranked channel.
 
@@ -146,7 +151,7 @@ def build_structural_channel(
     pagerank_scores: dict[str, float],
     candidate_ids: Optional[set[str]] = None,
     *,
-    weight: float = 0.0,
+    weight: Optional[float] = None,
 ) -> ChannelResult:
     """Rank symbols by PageRank of their containing file.
 
@@ -175,7 +180,7 @@ def build_identity_channel(
     symbols: list[dict],
     query: str,
     *,
-    weight: float = 0.0,
+    weight: Optional[float] = None,
 ) -> ChannelResult:
     """Rank symbols by identity match (exact/prefix/segment).
 
@@ -204,7 +209,7 @@ def build_similarity_channel(
     query_embedding: list[float],
     symbol_embeddings: dict[str, list[float]],
     *,
-    weight: float = 0.0,
+    weight: Optional[float] = None,
     min_similarity: float = 0.1,
 ) -> ChannelResult:
     """Rank symbols by embedding cosine similarity.
