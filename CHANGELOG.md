@@ -4,6 +4,26 @@ All notable changes to jcodemunch-mcp are documented here.
 
 ## [Unreleased]
 
+## [1.108.32] - 2026-06-06 - Share file reads across call-graph BFS traversals
+
+### Changed
+
+- `bfs_callers` / `bfs_callees` (`tools/_call_graph.py`) re-read the same files
+  from storage once per visited node — a callers BFS re-reads an importer file
+  for every target whose file it imports, so a symbol called from two siblings
+  in one file caused that file (and its importers) to be read and re-split
+  repeatedly. Added a per-traversal `_ContentCache` that memoizes
+  `store.get_file_content` and `splitlines()`, threaded into `find_direct_callers`
+  / `find_direct_callees` as an optional argument. Reads drop from O(nodes ×
+  files) to O(distinct files) per traversal. This is the output-preserving form
+  of the optimization: the BFS still iterates per node, so result order and the
+  caller/callee sets are byte-identical — only redundant I/O is removed. The
+  riskier name-union level-batching was rejected because it would reorder
+  within-level results. Direct callers of the finders (`get_impact_preview`,
+  `get_signal_chains`) are unaffected: the cache argument defaults to off.
+  2 regression tests in `tests/test_call_hierarchy.py` (finder output identical
+  with/without cache; BFS discovers the full tree reading no file twice).
+
 ## [1.108.31] - 2026-06-06 - Cache the per-call git HEAD probe
 
 ### Changed

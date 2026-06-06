@@ -104,6 +104,94 @@ class TestCallGraphHelpers:
 
 
 # ---------------------------------------------------------------------------
+# Feature A: per-traversal content cache (clean-mcp-inspired)
+# ---------------------------------------------------------------------------
+
+def _build_fanin_repo(tmp_path):
+    """Two callers of helper() share one importer (app.py), so a BFS over
+    callers re-reads app.py once per sibling without caching.
+
+        utils.py    — def helper()
+        services.py — imports utils; proc_a() and proc_b() both call helper()
+        app.py      — imports services; run() calls proc_a() and proc_b()
+    """
+    src = tmp_path / "src"
+    store = tmp_path / "store"
+    src.mkdir(); store.mkdir()
+    (src / "utils.py").write_text("def helper():\n    return 42\n")
+    (src / "services.py").write_text(
+        "from utils import helper\n\n"
+        "def proc_a():\n    return helper()\n\n"
+        "def proc_b():\n    return helper()\n"
+    )
+    (src / "app.py").write_text(
+        "from services import proc_a, proc_b\n\n"
+        "def run():\n    return proc_a() + proc_b()\n"
+    )
+    result = index_folder(str(src), use_ai_summaries=False, storage_path=str(store))
+    assert result["success"] is True
+    return result["repo"], str(store)
+
+
+class _CountingStore:
+    """Proxy that records every get_file_content read, delegating the rest."""
+
+    def __init__(self, real):
+        self._real = real
+        self.fetches: list[str] = []
+
+    def get_file_content(self, owner, repo, path):
+        self.fetches.append(path)
+        return self._real.get_file_content(owner, repo, path)
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+class TestContentCache:
+    def _load(self, repo, store_path):
+        from jcodemunch_mcp.storage import IndexStore
+        from jcodemunch_mcp.tools._call_graph import build_symbols_by_file
+        from jcodemunch_mcp.tools.get_blast_radius import _build_reverse_adjacency, _find_symbol
+
+        owner, name = repo.split("/", 1)
+        store = IndexStore(base_path=store_path)
+        index = store.load_index(owner, name)
+        sym = _find_symbol(index, "helper")[0]
+        symbols_by_file = build_symbols_by_file(index)
+        reverse_adj = _build_reverse_adjacency(
+            index.imports,
+            frozenset(index.source_files),
+            getattr(index, "alias_map", None),
+            getattr(index, "psr4_map", None),
+        )
+        return index, store, owner, name, sym, reverse_adj, symbols_by_file
+
+    def test_cache_does_not_change_finder_output(self, tmp_path):
+        from jcodemunch_mcp.tools._call_graph import find_direct_callers, _ContentCache
+
+        index, store, owner, name, sym, reverse_adj, sbf = self._load(*_build_fanin_repo(tmp_path))
+        no_cache = find_direct_callers(index, store, owner, name, sym, reverse_adj, sbf)
+        cached = find_direct_callers(
+            index, store, owner, name, sym, reverse_adj, sbf, _ContentCache(store, owner, name)
+        )
+        assert cached == no_cache
+
+    def test_bfs_finds_full_tree_without_reading_a_file_twice(self, tmp_path):
+        from jcodemunch_mcp.tools._call_graph import bfs_callers
+
+        index, store, owner, name, sym, reverse_adj, sbf = self._load(*_build_fanin_repo(tmp_path))
+        counting = _CountingStore(store)
+        results, depth = bfs_callers(index, counting, owner, name, sym, reverse_adj, sbf, max_depth=3)
+
+        names = {r["name"] for r in results}
+        assert {"proc_a", "proc_b", "run"} <= names  # full caller tree discovered
+        # app.py imports services.py, so it's an importer for both proc_a and
+        # proc_b — the cache must collapse that to a single read per file.
+        assert len(counting.fetches) == len(set(counting.fetches)), counting.fetches
+
+
+# ---------------------------------------------------------------------------
 # get_call_hierarchy integration tests
 # ---------------------------------------------------------------------------
 

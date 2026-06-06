@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import re
 from collections import deque
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from ..storage import IndexStore
@@ -63,6 +63,43 @@ def build_symbols_by_file(index: "CodeIndex") -> dict[str, list[dict]]:
         if f:
             result.setdefault(f, []).append(sym)
     return result
+
+
+class _ContentCache:
+    """Per-traversal memo of file content + split lines.
+
+    A file's content is invariant during a single BFS call, but the traversal
+    re-reads the same importer/source files once per visited node (callers BFS
+    re-reads an importer for every target whose file it imports). Memoizing the
+    storage read and the ``splitlines()`` turns that from O(nodes x files) into
+    O(distinct files) without touching the matching logic, so results are
+    byte-identical — only redundant I/O is removed. Threaded in as an optional
+    argument so direct callers of the finders keep their original behavior.
+    """
+
+    __slots__ = ("_store", "_owner", "_repo", "_content", "_lines")
+
+    def __init__(self, store: "IndexStore", owner: str, repo_name: str):
+        self._store = store
+        self._owner = owner
+        self._repo = repo_name
+        self._content: dict[str, Optional[str]] = {}
+        self._lines: dict[str, list[str]] = {}
+
+    def content(self, file_path: str) -> Optional[str]:
+        if file_path not in self._content:
+            self._content[file_path] = self._store.get_file_content(
+                self._owner, self._repo, file_path
+            )
+        return self._content[file_path]
+
+    def lines(self, file_path: str) -> list[str]:
+        cached = self._lines.get(file_path)
+        if cached is None:
+            content = self.content(file_path)
+            cached = content.splitlines() if content else []
+            self._lines[file_path] = cached
+        return cached
 
 
 # ---------------------------------------------------------------------------
@@ -397,10 +434,14 @@ def find_direct_callers(
     sym: dict,
     reverse_adj: dict[str, list[str]],
     symbols_by_file: dict[str, list[dict]],
+    content_cache: Optional["_ContentCache"] = None,
 ) -> list[dict]:
     """Return symbols in importing files whose bodies mention *sym*'s name.
 
     Each result is ``{id, name, kind, file, line, resolution}``.
+
+    Pass *content_cache* (a ``_ContentCache``) to share file reads across a BFS
+    traversal; when omitted, files are read directly per call as before.
     """
     # Dispatch callers (interface → impl) take highest priority
     dispatch_crs = _dispatch_callers(index, sym, symbols_by_file)
@@ -437,14 +478,21 @@ def find_direct_callers(
     seen_ids: set[str] = set(ast_caller_ids) | lsp_ids
 
     for imp_file in reverse_adj.get(sym_file, []):
-        file_content = store.get_file_content(owner, repo_name, imp_file)
+        if content_cache is not None:
+            file_content = content_cache.content(imp_file)
+        else:
+            file_content = store.get_file_content(owner, repo_name, imp_file)
         if not file_content:
             continue
         # Fast gate: skip file if sym_name not present anywhere
         if not _word_match(file_content, sym_name):
             continue
 
-        file_lines = file_content.splitlines()
+        file_lines = (
+            content_cache.lines(imp_file)
+            if content_cache is not None
+            else file_content.splitlines()
+        )
         for candidate in symbols_by_file.get(imp_file, []):
             cid = candidate.get("id", "")
             if not cid or cid in seen_ids or not candidate.get("line"):
@@ -471,10 +519,14 @@ def find_direct_callees(
     repo_name: str,
     sym: dict,
     symbols_by_file: dict[str, list[dict]],
+    content_cache: Optional["_ContentCache"] = None,
 ) -> list[dict]:
     """Return symbols from imported files whose names appear in *sym*'s body.
 
     Each result is ``{id, name, kind, file, line, resolution}``.
+
+    Pass *content_cache* (a ``_ContentCache``) to share file reads across a BFS
+    traversal; when omitted, files are read directly per call as before.
     """
     # Dispatch callees (interface → concrete impls) take highest priority
     dispatch_cls = _dispatch_callees(index, sym, symbols_by_file)
@@ -503,11 +555,18 @@ def find_direct_callees(
     if not sym_file:
         return list(dispatch_cls) + list(lsp_callees)
 
-    file_content = store.get_file_content(owner, repo_name, sym_file)
+    if content_cache is not None:
+        file_content = content_cache.content(sym_file)
+    else:
+        file_content = store.get_file_content(owner, repo_name, sym_file)
     if not file_content:
         return list(dispatch_cls) + list(lsp_callees)
 
-    file_lines = file_content.splitlines()
+    file_lines = (
+        content_cache.lines(sym_file)
+        if content_cache is not None
+        else file_content.splitlines()
+    )
     sym_body = _symbol_body(file_lines, sym)
     if not sym_body:
         return list(dispatch_cls) + list(lsp_callees)
@@ -571,9 +630,10 @@ def bfs_callers(
     results: list[dict] = []
     depth_reached = 0
     symbol_index: dict[str, dict] = getattr(index, "_symbol_index", {})
+    content_cache = _ContentCache(store, owner, repo_name)
 
     # Depth-1 callers
-    for c in find_direct_callers(index, store, owner, repo_name, sym, reverse_adj, symbols_by_file):
+    for c in find_direct_callers(index, store, owner, repo_name, sym, reverse_adj, symbols_by_file, content_cache):
         if c["id"] not in visited:
             visited.add(c["id"])
             results.append({**c, "depth": 1})
@@ -588,7 +648,7 @@ def bfs_callers(
         curr_full = symbol_index.get(curr_dict["id"])
         if not curr_full:
             continue
-        for c in find_direct_callers(index, store, owner, repo_name, curr_full, reverse_adj, symbols_by_file):
+        for c in find_direct_callers(index, store, owner, repo_name, curr_full, reverse_adj, symbols_by_file, content_cache):
             if c["id"] not in visited:
                 visited.add(c["id"])
                 new_depth = curr_depth + 1
@@ -619,8 +679,9 @@ def bfs_callees(
     results: list[dict] = []
     depth_reached = 0
     symbol_index: dict[str, dict] = getattr(index, "_symbol_index", {})
+    content_cache = _ContentCache(store, owner, repo_name)
 
-    for c in find_direct_callees(index, store, owner, repo_name, sym, symbols_by_file):
+    for c in find_direct_callees(index, store, owner, repo_name, sym, symbols_by_file, content_cache):
         if c["id"] not in visited:
             visited.add(c["id"])
             results.append({**c, "depth": 1})
@@ -635,7 +696,7 @@ def bfs_callees(
         curr_full = symbol_index.get(curr_dict["id"])
         if not curr_full:
             continue
-        for c in find_direct_callees(index, store, owner, repo_name, curr_full, symbols_by_file):
+        for c in find_direct_callees(index, store, owner, repo_name, curr_full, symbols_by_file, content_cache):
             if c["id"] not in visited:
                 visited.add(c["id"])
                 new_depth = curr_depth + 1
