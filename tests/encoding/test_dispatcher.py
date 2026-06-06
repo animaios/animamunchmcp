@@ -75,6 +75,27 @@ def test_user_facing_format_aliases_are_supported():
     assert isinstance(payload, dict)
 
 
+def test_error_response_passes_through_as_json_even_when_encoding_forced():
+    # An {"error": ...} dict matches no tool schema. If schema-encoded it
+    # collapses into an empty-table envelope and the message is silently
+    # dropped, so the dispatcher must always return it as raw JSON — even when
+    # the caller forces "compact"/"encoded" (which otherwise bypasses the gate).
+    err = {"error": "Ambiguous repository name: foo. Use one of: a/foo, b/foo"}
+    for fmt in ("compact", "encoded", "auto"):
+        payload, meta = encode_response("search_symbols", err, fmt)
+        assert meta["encoding"] == "json", (fmt, meta)
+        assert payload == err
+
+
+def test_error_message_survives_schema_encoded_tool():
+    # search_symbols has a real schema encoder; regression guard for the bug
+    # where the error text vanished into a blank "0 results" envelope.
+    err = {"error": "Repository not found: ghost"}
+    payload, meta = encode_response("search_symbols", err, "compact")
+    assert isinstance(payload, dict)
+    assert payload["error"] == "Repository not found: ghost"
+
+
 def test_default_format_uses_server_output_config():
     import jcodemunch_mcp.config as cfg
 

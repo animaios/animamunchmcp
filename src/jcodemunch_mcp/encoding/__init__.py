@@ -74,6 +74,14 @@ def encode_response(
     if fmt == "json" or not isinstance(response, dict):
         return response, {"encoding": "json"}
 
+    # Error/degenerate dicts match no tool schema: their keys aren't in any
+    # table/scalar/meta list, so schema-encoding silently drops the "error"
+    # message into an empty-table envelope and the agent sees a blank "0
+    # results" it can't distinguish from genuine emptiness. Always pass these
+    # through as JSON so the error survives the wire.
+    if "error" in response:
+        return response, {"encoding": "json", "json_bytes": gate.json_size(response)}
+
     json_bytes = gate.json_size(response)
 
     try:

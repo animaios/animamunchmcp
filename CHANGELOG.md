@@ -4,7 +4,26 @@ All notable changes to jcodemunch-mcp are documented here.
 
 ## [Unreleased]
 
+## [1.108.30] - 2026-06-06 - Schema-encoded tools silently swallowed every error response
+
 ### Fixed
+
+- Schema-encoded tools (`search_symbols`, `search_text`, `get_file_outline`,
+  `get_call_hierarchy`, and every other tool with a custom encoder) silently
+  dropped all error responses, leaving the agent with a blank "0 results" it
+  could not distinguish from genuine emptiness. When a tool returned an
+  `{"error": ...}` dict (ambiguous repo, repo-not-found, invalid
+  `detail_level`/`sort_by`, query-too-long, no embedding provider), the
+  dispatcher handed it to the schema encoder, whose declared tables/scalars/meta
+  keys matched none of the error dict's keys — so it emitted only the static
+  `__tables` schema line with an empty table and the `error` message vanished.
+  Under the default `adaptive` output the size gate made it worse: a longer,
+  more informative error inflated the JSON baseline, cleared the savings
+  threshold more easily, and was the *more* likely to be encoded away. Fixed
+  with an error-passthrough guard in `encode_response` that returns any dict
+  containing an `error` key as raw JSON, placed before the format gate so it
+  also holds under forced `compact`/`encoded` output. Two regression tests in
+  `tests/encoding/test_dispatcher.py`.
 
 - The OpenAI-compatible summarizer now honors the circuit breaker. Its
   `summarize_batch` override submitted `_summarize_one_batch` directly,
