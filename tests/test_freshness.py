@@ -165,6 +165,75 @@ class TestSearchSymbolsCarriesFreshness:
         assert out["_meta"]["freshness"]["edited_uncommitted"] >= 1
 
 
+class TestHeadProbeCaching:
+    """B1: `git rev-parse HEAD` is cached and only re-run when HEAD moves."""
+
+    def _make_git_dir(self, root: Path, sha: str = "a" * 40) -> Path:
+        git_dir = root / ".git"
+        (git_dir / "logs").mkdir(parents=True)
+        (git_dir / "refs" / "heads").mkdir(parents=True)
+        (git_dir / "HEAD").write_text("ref: refs/heads/main\n")
+        (git_dir / "refs" / "heads" / "main").write_text(sha + "\n")
+        (git_dir / "logs" / "HEAD").write_text("0 " + sha + " commit\n")
+        return git_dir
+
+    @pytest.fixture(autouse=True)
+    def _clear_cache(self):
+        from jcodemunch_mcp.retrieval import freshness
+
+        freshness._clear_head_cache()
+        yield
+        freshness._clear_head_cache()
+
+    def test_signature_unchanged_skips_subprocess(self, tmp_path, monkeypatch):
+        from jcodemunch_mcp.retrieval import freshness
+
+        self._make_git_dir(tmp_path)
+        calls = {"n": 0}
+
+        def _counted(_root):
+            calls["n"] += 1
+            return "a" * 40
+
+        monkeypatch.setattr(freshness, "_git_head_uncached", _counted)
+
+        assert freshness._git_head(tmp_path) == "a" * 40
+        assert freshness._git_head(tmp_path) == "a" * 40
+        assert calls["n"] == 1  # second call served from cache
+
+    def test_ref_change_invalidates_cache(self, tmp_path, monkeypatch):
+        from jcodemunch_mcp.retrieval import freshness
+
+        git_dir = self._make_git_dir(tmp_path)
+        calls = {"n": 0}
+        monkeypatch.setattr(
+            freshness, "_git_head_uncached", lambda _r: (calls.__setitem__("n", calls["n"] + 1) or "sha")
+        )
+
+        freshness._git_head(tmp_path)
+        # Simulate a commit: loose ref mtime moves forward.
+        ref = git_dir / "refs" / "heads" / "main"
+        future = time.time() + 10
+        ref.write_text("b" * 40 + "\n")
+        os.utime(ref, (future, future))
+
+        freshness._git_head(tmp_path)
+        assert calls["n"] == 2  # signature changed → recomputed
+
+    def test_no_git_dir_falls_back_to_ttl(self, tmp_path, monkeypatch):
+        from jcodemunch_mcp.retrieval import freshness
+
+        # No .git → no signature; TTL must still coalesce a burst.
+        calls = {"n": 0}
+        monkeypatch.setattr(
+            freshness, "_git_head_uncached", lambda _r: (calls.__setitem__("n", calls["n"] + 1) or None)
+        )
+
+        freshness._git_head(tmp_path)
+        freshness._git_head(tmp_path)
+        assert calls["n"] == 1  # within TTL → one subprocess for the burst
+
+
 class TestGetSymbolSourceCarriesFreshness:
     def test_get_symbol_source_returns_freshness(self, tmp_path):
         from jcodemunch_mcp.tools.index_folder import index_folder

@@ -4,6 +4,24 @@ All notable changes to jcodemunch-mcp are documented here.
 
 ## [Unreleased]
 
+## [1.108.31] - 2026-06-06 - Cache the per-call git HEAD probe
+
+### Changed
+
+- `FreshnessProbe` ran `git rev-parse HEAD` as a subprocess on every tool call
+  that annotated results with a known source root (`search_symbols`,
+  `get_symbol_source`, `get_context_bundle`, `get_ranked_context`, ...). The
+  HEAD lookup is now cached process-wide and the subprocess re-runs only when a
+  cheap stat-based signature of the refs that move with HEAD changes — `HEAD`,
+  `packed-refs`, the reflog (`logs/HEAD`), and the current branch's loose ref
+  (plus the worktree common-dir variants). When no signature can be computed
+  (exotic git layouts), a 2s TTL bounds reuse so a burst of calls shares one
+  subprocess instead of spawning one each. The signature deliberately tracks the
+  loose ref / reflog, not just `HEAD`+`packed-refs`, because an ordinary commit
+  moves those — keying on `HEAD` mtime alone would have served a stale SHA as
+  fresh. A cache miss always recomputes, so correctness is unchanged. 3
+  regression tests in `tests/test_freshness.py`.
+
 ## [1.108.30] - 2026-06-06 - Schema-encoded tools silently swallowed every error response
 
 ### Fixed

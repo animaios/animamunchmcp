@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -43,7 +44,77 @@ def _parse_iso(ts: str) -> Optional[float]:
         return None
 
 
-def _git_head(source_root: Path) -> Optional[str]:
+# Process-wide cache of resolved git HEAD per source root (B1). The subprocess
+# is re-run only when a cheap stat-based signature of the refs that move with
+# HEAD changes; when no signature can be computed (exotic layouts) a short TTL
+# bounds reuse so a burst of tool calls shares one `git rev-parse` rather than
+# spawning one each. key -> (signature, sha, monotonic_ts).
+_HEAD_CACHE_TTL_S = 2.0
+_head_cache: dict[str, tuple[Optional[tuple], Optional[str], float]] = {}
+
+
+def _clear_head_cache() -> None:
+    """Test hook: drop all cached HEAD lookups."""
+    _head_cache.clear()
+
+
+def _resolve_git_dir(source_root: Path) -> Optional[Path]:
+    """Return the .git directory for *source_root*, resolving worktree/submodule
+    `.git` files (``gitdir: <path>``). None when it isn't a git repo."""
+    dotgit = source_root / ".git"
+    try:
+        if dotgit.is_dir():
+            return dotgit
+        if dotgit.is_file():
+            text = dotgit.read_text(encoding="utf-8", errors="ignore").strip()
+            if text.startswith("gitdir:"):
+                p = Path(text[len("gitdir:"):].strip())
+                return p if p.is_absolute() else (source_root / p).resolve()
+    except OSError:
+        return None
+    return None
+
+
+def _head_signature(git_dir: Path) -> Optional[tuple]:
+    """Stat-based signature that changes whenever HEAD's commit moves.
+
+    Covers ordinary commits (loose ref + reflog), ref packing (packed-refs),
+    and branch switch / detach (HEAD content). Returns None when nothing could
+    be stat'd, signalling the caller to fall back to TTL-bounded caching.
+    """
+    paths = [
+        git_dir / "HEAD",
+        git_dir / "packed-refs",
+        git_dir / "logs" / "HEAD",
+    ]
+    try:
+        head_txt = (git_dir / "HEAD").read_text(encoding="utf-8", errors="ignore").strip()
+    except OSError:
+        head_txt = ""
+    if head_txt.startswith("ref:"):
+        ref = head_txt[4:].strip()
+        paths.append(git_dir / ref)
+        # Worktrees keep shared refs (loose + packed) in the common dir.
+        try:
+            commondir = (git_dir / "commondir").read_text(encoding="utf-8", errors="ignore").strip()
+        except OSError:
+            commondir = ""
+        if commondir:
+            base = (git_dir / commondir).resolve()
+            paths.append(base / ref)
+            paths.append(base / "packed-refs")
+    sig: list[tuple[str, Optional[int]]] = []
+    found = False
+    for p in paths:
+        try:
+            sig.append((str(p), p.stat().st_mtime_ns))
+            found = True
+        except OSError:
+            sig.append((str(p), None))
+    return tuple(sig) if found else None
+
+
+def _git_head_uncached(source_root: Path) -> Optional[str]:
     try:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -58,6 +129,28 @@ def _git_head(source_root: Path) -> Optional[str]:
     except Exception:
         logger.debug("git rev-parse HEAD failed at %s", source_root, exc_info=True)
     return None
+
+
+def _git_head(source_root: Path) -> Optional[str]:
+    """Cached ``git rev-parse HEAD``. Re-runs the subprocess only when the HEAD
+    signature changes, or — when no signature is available — at most once per
+    TTL window per repo. Always safe: a cache miss just recomputes."""
+    key = str(source_root)
+    git_dir = _resolve_git_dir(source_root)
+    sig = _head_signature(git_dir) if git_dir else None
+    now = time.monotonic()
+
+    cached = _head_cache.get(key)
+    if cached is not None:
+        c_sig, c_sha, c_ts = cached
+        if sig is not None and c_sig is not None and sig == c_sig:
+            return c_sha
+        if sig is None and c_sig is None and (now - c_ts) < _HEAD_CACHE_TTL_S:
+            return c_sha
+
+    sha = _git_head_uncached(source_root)
+    _head_cache[key] = (sig, sha, now)
+    return sha
 
 
 class FreshnessProbe:
