@@ -4,6 +4,19 @@ All notable changes to jcodemunch-mcp are documented here.
 
 ## [Unreleased]
 
+## [1.108.35] - 2026-06-07 - Fix CI-only test break from the v1.108.33 claude resolver
+
+### Fixed
+
+- Two `test_init.py` tests (`test_configure_client_cli_success`,
+  `test_configure_client_cli_already_exists`) mocked `subprocess.run` but not the
+  `_claude_cli_exe()` resolver added in v1.108.33, so on machines without
+  `claude` on PATH (every CI agent) `_configure_claude_code` short-circuited to
+  "claude CLI not found" before the mocked subprocess and the assertions failed.
+  The break was invisible locally because `claude` is installed there. Tests now
+  also patch `_claude_cli_exe`, making them deterministic regardless of
+  environment. No production code change.
+
 ## [1.108.34] - 2026-06-07 - `config --json` structured, source-attributed config export
 
 ### Added

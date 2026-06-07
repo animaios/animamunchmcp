@@ -126,7 +126,10 @@ def test_configure_client_cli_dry_run():
 
 
 @patch("jcodemunch_mcp.cli.init.subprocess.run")
-def test_configure_client_cli_success(mock_run):
+@patch("jcodemunch_mcp.cli.init._claude_cli_exe", return_value="claude")
+def test_configure_client_cli_success(mock_exe, mock_run):
+    # Resolver is mocked so the test is deterministic whether or not `claude`
+    # is actually on PATH (CI agents have no claude installed).
     mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
     client = MCPClient("Claude Code", None, "cli")
     msg = configure_client(client, dry_run=False)
@@ -135,7 +138,8 @@ def test_configure_client_cli_success(mock_run):
 
 
 @patch("jcodemunch_mcp.cli.init.subprocess.run")
-def test_configure_client_cli_already_exists(mock_run):
+@patch("jcodemunch_mcp.cli.init._claude_cli_exe", return_value="claude")
+def test_configure_client_cli_already_exists(mock_exe, mock_run):
     mock_run.return_value = MagicMock(returncode=1, stderr="Server already exists", stdout="")
     client = MCPClient("Claude Code", None, "cli")
     msg = configure_client(client, dry_run=False)
