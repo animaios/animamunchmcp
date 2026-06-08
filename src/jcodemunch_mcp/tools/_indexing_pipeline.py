@@ -4,7 +4,7 @@ import logging
 from collections import defaultdict
 from typing import Optional
 
-from ..parser import parse_file, get_language_for_path
+from ..parser import cached_parse_file as parse_file, get_language_for_path
 from ..parser.context import ContextProvider, enrich_symbols, collect_extra_imports
 from ..parser.imports import extract_imports
 from ..parser.symbols import Symbol

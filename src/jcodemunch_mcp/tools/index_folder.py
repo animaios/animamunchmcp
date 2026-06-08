@@ -18,7 +18,7 @@ import pathspec
 logger = logging.getLogger(__name__)
 
 from .. import config as _config
-from ..parser import parse_file, LANGUAGE_EXTENSIONS, get_language_for_path
+from ..parser import cached_parse_file as parse_file, LANGUAGE_EXTENSIONS, get_language_for_path
 from ..parser.context import discover_providers, enrich_symbols, collect_metadata, collect_extra_imports
 from ..parser.context.framework_profiles import detect_framework, profile_to_meta
 from ..parser.imports import extract_imports, _alias_map_cache as _imap_cache, _LANGUAGE_EXTRACTORS as _IMPORT_EXTRACTORS

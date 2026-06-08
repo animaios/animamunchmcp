@@ -4,6 +4,26 @@ All notable changes to jcodemunch-mcp are documented here.
 
 ## [Unreleased]
 
+## [1.108.40] - 2026-06-07 - Content-addressed parse cache for shared-host indexing
+
+### Added
+
+- Opt-in shared parse cache (`parser/parse_cache.py`) for multi-seat machines.
+  When N home dirs on one box index overlapping repos, each re-parses identical
+  files; this caches tree-sitter parse output keyed by
+  `(INDEX_VERSION, content_hash, language, filename)` in a shared SQLite store,
+  so an identical file parses once across all seats — Nx parsing → 1x +
+  (N-1) lookups. Enabled by pointing `JCODEMUNCH_PARSE_CACHE` at a directory all
+  seats share; **unset = disabled = zero behavior change** (`cached_parse_file`
+  is a pass-through to `parse_file`). Safety: the key includes `INDEX_VERSION`
+  (a parser/schema bump invalidates the cache) and `filename` (symbol ids embed
+  the path), so a hit is byte-identical to a fresh parse; any read/deserialize
+  error falls back to a live parse — the cache can only ever cause a slower
+  miss, never wrong symbols. Wired into the bulk indexing paths
+  (`_indexing_pipeline.py`, `index_folder.py`). 5 tests in
+  `tests/test_parse_cache.py`. First slice of the shared-host indexing fix; the
+  daemon-mode option and cache eviction are follow-ups.
+
 ## [1.108.39] - 2026-06-07 - Org rollup HTTP transport (cross-machine seat reporting)
 
 ### Added
