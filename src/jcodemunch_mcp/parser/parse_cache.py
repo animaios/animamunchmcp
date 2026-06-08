@@ -17,6 +17,15 @@ Correctness:
   cache (the index-version cache-key rule).
 * Any read/deserialize failure falls back to a live parse — the cache can never
   produce wrong symbols, only a slower miss.
+
+Bounded: content-addressed keys accumulate without limit otherwise — every edit
+mints a new ``content_hash`` whose old entry can never hit again, and an
+``INDEX_VERSION`` bump strands the whole previous generation. After each write
+the store is FIFO-trimmed to ``JCODEMUNCH_PARSE_CACHE_MAX_ROWS`` rows (default
+50,000; ``<= 0`` disables the cap). Eviction is oldest-first by ``rowid``
+(insertion order), so stale-content and stale-version rows — written before the
+live ones — are evicted first. The cache is recomputable, so over-eviction under
+concurrent seats only costs a re-parse, never correctness.
 """
 
 from __future__ import annotations
@@ -35,11 +44,44 @@ from .symbols import Symbol
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_MAX_ROWS = 50_000
+
 
 def cache_dir() -> Optional[str]:
     """Shared parse-cache directory, or None when the cache is disabled."""
     d = (os.environ.get("JCODEMUNCH_PARSE_CACHE") or "").strip()
     return d or None
+
+
+def _max_rows() -> int:
+    """Row cap for the shared store; <= 0 disables eviction (unbounded)."""
+    raw = (os.environ.get("JCODEMUNCH_PARSE_CACHE_MAX_ROWS") or "").strip()
+    if not raw:
+        return DEFAULT_MAX_ROWS
+    try:
+        return int(raw)
+    except ValueError:
+        return DEFAULT_MAX_ROWS
+
+
+def _evict_oldest(conn: sqlite3.Connection, max_rows: int) -> int:
+    """FIFO-trim the store to at most ``max_rows`` rows; return rows deleted.
+
+    Oldest-first by ``rowid`` (insertion order), so stale-content and
+    stale-INDEX_VERSION rows — written before the current generation — go first.
+    A no-op when under the cap or when ``max_rows <= 0``."""
+    if max_rows <= 0:
+        return 0
+    (count,) = conn.execute("SELECT COUNT(*) FROM parse_cache").fetchone()
+    excess = count - max_rows
+    if excess <= 0:
+        return 0
+    conn.execute(
+        "DELETE FROM parse_cache WHERE rowid IN "
+        "(SELECT rowid FROM parse_cache ORDER BY rowid ASC LIMIT ?)",
+        (excess,),
+    )
+    return excess
 
 
 def _index_version() -> int:
@@ -112,7 +154,10 @@ def cached_parse_file(
                 "INSERT OR REPLACE INTO parse_cache (key, symbols, created_at) VALUES (?, ?, ?)",
                 (key, payload, now),
             )
+            evicted = _evict_oldest(conn, _max_rows())
             conn.commit()
+            if evicted:
+                logger.debug("parse cache evicted %d oldest row(s) to honor cap", evicted)
         finally:
             conn.close()
     except (sqlite3.Error, TypeError, ValueError) as exc:

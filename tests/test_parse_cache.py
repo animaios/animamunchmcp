@@ -7,7 +7,15 @@ import dataclasses
 import pytest
 
 from jcodemunch_mcp.parser import parse_file
-from jcodemunch_mcp.parser.parse_cache import cached_parse_file, cache_dir, _key
+from jcodemunch_mcp.parser.parse_cache import (
+    cached_parse_file,
+    cache_dir,
+    _connect,
+    _evict_oldest,
+    _key,
+    _max_rows,
+    DEFAULT_MAX_ROWS,
+)
 
 PY = "def alpha(x):\n    return x + 1\n\nclass Beta:\n    def gamma(self):\n        return 2\n"
 
@@ -56,7 +64,6 @@ def test_key_varies_by_content_path_language_version(tmp_path, monkeypatch):
 
 def test_corrupt_row_falls_back_to_parse(tmp_path, monkeypatch):
     monkeypatch.setenv("JCODEMUNCH_PARSE_CACHE", str(tmp_path))
-    from jcodemunch_mcp.parser.parse_cache import _connect
     conn = _connect(str(tmp_path))
     conn.execute(
         "INSERT OR REPLACE INTO parse_cache (key, symbols, created_at) VALUES (?, ?, ?)",
@@ -67,3 +74,68 @@ def test_corrupt_row_falls_back_to_parse(tmp_path, monkeypatch):
     # Must not raise — falls back to a live parse.
     out = cached_parse_file(PY, "m.py", "python")
     assert any(s.name == "alpha" for s in out)
+
+
+def _rowcount(d: str) -> int:
+    conn = _connect(d)
+    try:
+        return conn.execute("SELECT COUNT(*) FROM parse_cache").fetchone()[0]
+    finally:
+        conn.close()
+
+
+def _seed(d: str, n: int) -> None:
+    conn = _connect(d)
+    try:
+        conn.executemany(
+            "INSERT OR REPLACE INTO parse_cache (key, symbols, created_at) VALUES (?, '[]', 'now')",
+            [(f"k{i}",) for i in range(n)],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_max_rows_default_and_override(monkeypatch):
+    monkeypatch.delenv("JCODEMUNCH_PARSE_CACHE_MAX_ROWS", raising=False)
+    assert _max_rows() == DEFAULT_MAX_ROWS
+    monkeypatch.setenv("JCODEMUNCH_PARSE_CACHE_MAX_ROWS", "10")
+    assert _max_rows() == 10
+    monkeypatch.setenv("JCODEMUNCH_PARSE_CACHE_MAX_ROWS", "not-a-number")
+    assert _max_rows() == DEFAULT_MAX_ROWS  # bad value → default, never crashes
+
+
+def test_evict_trims_to_cap_oldest_first(tmp_path):
+    d = str(tmp_path)
+    _seed(d, 10)  # k0..k9, rowid ascending
+    conn = _connect(d)
+    try:
+        deleted = _evict_oldest(conn, 4)
+        conn.commit()
+        remaining = {r[0] for r in conn.execute("SELECT key FROM parse_cache").fetchall()}
+    finally:
+        conn.close()
+    assert deleted == 6
+    assert remaining == {"k6", "k7", "k8", "k9"}  # oldest six gone, newest four kept
+
+
+def test_evict_noop_under_cap_and_when_disabled(tmp_path):
+    d = str(tmp_path)
+    _seed(d, 3)
+    conn = _connect(d)
+    try:
+        assert _evict_oldest(conn, 5) == 0   # under cap
+        assert _evict_oldest(conn, 0) == 0   # 0 disables the cap
+        assert _evict_oldest(conn, -1) == 0  # negative disables the cap
+    finally:
+        conn.close()
+    assert _rowcount(d) == 3
+
+
+def test_write_path_enforces_cap(tmp_path, monkeypatch):
+    monkeypatch.setenv("JCODEMUNCH_PARSE_CACHE", str(tmp_path))
+    monkeypatch.setenv("JCODEMUNCH_PARSE_CACHE_MAX_ROWS", "5")
+    # Each distinct file content is a fresh key; writing >5 must self-trim.
+    for i in range(12):
+        cached_parse_file(PY + f"\n# {i}\n", f"m{i}.py", "python")
+    assert _rowcount(str(tmp_path)) <= 5

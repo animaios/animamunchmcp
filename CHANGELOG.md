@@ -4,6 +4,27 @@ All notable changes to jcodemunch-mcp are documented here.
 
 ## [Unreleased]
 
+## [1.108.41] - 2026-06-08 - Parse cache: bounded size (FIFO eviction)
+
+### Added
+
+- `JCODEMUNCH_PARSE_CACHE_MAX_ROWS` (default `50000`; `<= 0` disables the cap)
+  bounds the shared parse cache introduced in 1.108.40. The store is
+  content-addressed, so it would otherwise grow without limit: every file edit
+  mints a new `content_hash` whose prior entry can never hit again, and an
+  `INDEX_VERSION` bump strands the entire previous generation of keys.
+
+### Changed
+
+- After each cache write, the store is FIFO-trimmed to the cap
+  (`_evict_oldest`), deleting oldest-first by `rowid` (insertion order). Because
+  stale-content and stale-version rows were written before the current
+  generation, they are evicted first. The cache is recomputable, so
+  over-eviction under concurrent seats only costs a re-parse, never correctness.
+  Eviction is a no-op when under the cap, when disabled, or when the cache env
+  var is unset (still a pure pass-through). 4 new tests in
+  `tests/test_parse_cache.py` (9 total).
+
 ## [1.108.40] - 2026-06-07 - Content-addressed parse cache for shared-host indexing
 
 ### Added
