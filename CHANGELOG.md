@@ -4,6 +4,24 @@ All notable changes to jcodemunch-mcp are documented here.
 
 ## [Unreleased]
 
+## [1.108.45] - 2026-06-09 - config --json description off-by-one fix
+
+### Fixed
+
+- `_config_meta()` (which supplies the per-key `description` in `config --json`)
+  mis-attributed comment blocks for keys the template documents with an indented
+  block BELOW the key — `embed_model`, `allow_remote_summarizer`, `path_map`,
+  `render_diagram_viewer_enabled`, and others. The template mixes two comment
+  conventions (a block ABOVE the key vs. a block BELOW it) and the v1.108.44
+  parser only handled "above," so each below-key block landed on the **next** key
+  (an off-by-one): `embed_model` showed no description, `allow_remote_summarizer`
+  showed `embed_model`'s text, `path_map` showed `allow_remote_summarizer`'s. The
+  parser now uses the blank line as the discriminator — comments contiguous with
+  the key they follow attach to that key; comments after a blank/value/header
+  line begin the lead block for the next key. Surfaced by the jMunch Console
+  rendering jcm's `config --json` on its config screen. No config value behavior
+  change. 2 new tests in `tests/test_config.py` (`TestConfigReportGrouping`).
+
 ### Docs
 
 - `TWEAKCC.md`: stop pinning the routing snippets to fixed tweakcc fragment

@@ -893,35 +893,56 @@ def _raw_jsonc_keys(path: Path) -> set[str]:
 def _config_meta(template: str) -> dict[str, tuple[str | None, str]]:
     """One pass over the config template: map each top-level key to its
     ``(section, description)`` — the nearest preceding ``=== Section ===`` header
-    and the comment block immediately above the key. Powers grouped config UIs
-    (the Console) and self-documenting dashboards."""
+    and the key's comment block.
+
+    The template mixes two comment conventions: most keys are documented by a
+    block immediately ABOVE the ``// "key":`` line, but some (``embed_model``,
+    ``allow_remote_summarizer``, ``path_map``, ``render_diagram_viewer_enabled``,
+    …) put an indented block immediately BELOW it. The discriminator is the blank
+    line: comments contiguous with the key they follow (no blank gap) attach to
+    THAT key; comments after a blank/value/header line are the lead block for the
+    NEXT key. (Before this, below-style blocks landed on the following key — an
+    off-by-one that mis-described several keys.) Powers grouped config UIs (the
+    Console) and self-documenting dashboards."""
     import re
     header_re = re.compile(r"^\s*//\s*=+\s*(.+?)\s*=+\s*$")
     key_re = re.compile(r'^  (?:// *)?"(\w+)" *:')
     section: str | None = None
-    pending: list[str] = []
-    meta: dict[str, tuple[str | None, str]] = {}
+    pending: list[str] = []            # lead comments awaiting the next key (above-style)
+    parts: dict[str, list[str]] = {}   # key -> description fragments (mutable; below-style appends)
+    sections: dict[str, str | None] = {}  # key -> section, first occurrence wins
+    last_key: str | None = None        # most recent key, for below-style comments
+    after_key = False                  # True between a key line and the next blank/value/header
     for line in template.splitlines():
         hm = header_re.match(line)
-        if hm:  # === Section === header
+        if hm:  # === Section === header ends any open block
             section = hm.group(1).strip()
             pending = []
+            last_key = None
+            after_key = False
             continue
         km = key_re.match(line)
-        if km:  # a key entry (active or commented-out) closes the comment block
+        if km:  # a key entry (active or commented-out)
             k = km.group(1)
-            if k not in meta:
-                meta[k] = (section, " ".join(pending))
+            if k not in sections:  # first occurrence wins (commented example vs active key)
+                sections[k] = section
+                parts[k] = list(pending)  # above-style lead block (may be empty)
             pending = []
+            last_key = k
+            after_key = True  # comments that follow with no blank gap describe THIS key
             continue
         s = line.strip()
         if s.startswith("//"):
             c = s[2:].strip()
             if c and "===" not in c:
-                pending.append(c)
-        else:  # blank line / value continuation ends the comment block
+                if after_key and last_key is not None:
+                    parts[last_key].append(c)  # below-style comment for the key just seen
+                else:
+                    pending.append(c)  # lead comment for the next key
+        else:  # blank line / value continuation closes the current comment block
             pending = []
-    return meta
+            after_key = False
+    return {k: (sections[k], " ".join(parts[k])) for k in sections}
 
 
 def config_report(repo: str | None = None) -> list[dict[str, Any]]:

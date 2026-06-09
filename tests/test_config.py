@@ -1328,6 +1328,43 @@ class TestConfigReportGrouping:
         assert meta["max_index_files"] == ("Indexing", "how many files to index")
         assert meta["host"] == ("Transport", "")  # no preceding comment
 
+    def test_below_style_comments_attach_to_their_own_key(self):
+        """Off-by-one regression: some template keys are documented by an
+        indented block BELOW the key (contiguous, no blank gap). Those must
+        attach to the key they follow, not bleed onto the next one. A blank
+        line ends a block, so a subsequent comment is a lead block for the
+        next key."""
+        from src.jcodemunch_mcp.config import _config_meta
+        template = (
+            "{\n"
+            "  // === Section ===\n"
+            "  // lead comment for alpha\n"
+            '  "alpha": "",\n'
+            '  "beta": "",\n'
+            "  //   below comment for beta\n"
+            '  "gamma": "",\n'
+            "  //   below comment for gamma\n"
+            "\n"
+            "  // lead comment for delta\n"
+            '  "delta": "",\n'
+            "}\n"
+        )
+        meta = _config_meta(template)
+        assert meta["alpha"] == ("Section", "lead comment for alpha")
+        assert meta["beta"] == ("Section", "below comment for beta")
+        assert meta["gamma"] == ("Section", "below comment for gamma")
+        assert meta["delta"] == ("Section", "lead comment for delta")
+
+    def test_below_style_keys_get_their_own_description(self):
+        """The reported bug: embed_model / allow_remote_summarizer / path_map
+        are documented with below-key blocks in the real template and were
+        each mis-described with the *next* key's comment."""
+        from src.jcodemunch_mcp.config import _config_meta, generate_template
+        meta = _config_meta(generate_template())
+        assert "sentence-transformers" in meta["embed_model"][1].lower()
+        assert "remote llm" in meta["allow_remote_summarizer"][1].lower()
+        assert "path remapping" in meta["path_map"][1].lower()
+
 
 class TestSummarizerModelDisplay:
     """Regression: surfaced by @slazarov on #300 (comment 4472458576).
