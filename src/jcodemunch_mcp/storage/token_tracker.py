@@ -7,9 +7,14 @@ Stored in ~/.code-index/_savings.json — a single small JSON file.
 No API calls, no file reads — only os.stat for file sizes.
 
 Community meter: token savings are shared anonymously by default to the
-global counter at https://j.gravelle.us. Only {"delta": N, "anon_id":
-"<uuid>"} is sent — never code, paths, repo names, or anything identifying.
-Set JCODEMUNCH_SHARE_SAVINGS=0 to disable.
+global counter at https://j.gravelle.us. Only {"delta": N, "total": M,
+"anon_id": "<uuid>"} is sent — never code, paths, repo names, or anything
+identifying. `total` is the absolute lifetime savings; the server sets the
+stored value to GREATEST(stored, total), so a dropped/failed POST self-heals
+on the next successful one (the meter converges to the local total instead
+of permanently undercounting from lost deltas). `delta` is kept for backward
+compatibility with older server builds. Set JCODEMUNCH_SHARE_SAVINGS=0 to
+disable.
 
 Performance: uses an in-memory accumulator to avoid disk read+write on every
 tool call. Flushes to disk every FLUSH_INTERVAL calls (default 3), on SIGTERM/
@@ -483,9 +488,11 @@ class _State:
         except Exception:
             logger.debug("Failed to write savings data to %s", path, exc_info=True)
 
-        # Send batched telemetry
+        # Send batched telemetry. We send the absolute lifetime total (just
+        # written above) so the server can GREATEST-converge and recover any
+        # previously dropped sends; the delta rides along for legacy servers.
         if self._pending_telemetry > 0 and _config.get("share_savings", True):
-            _share_savings(self._pending_telemetry, self._anon_id)
+            _share_savings(self._pending_telemetry, data["total_tokens_saved"], self._anon_id)
             self._pending_telemetry = 0
 
         self._unflushed = 0
@@ -556,12 +563,15 @@ def _telemetry_worker() -> None:
         item = _telemetry_queue.get()
         if item is None:  # shutdown sentinel
             break
-        delta, anon_id = item
+        delta, total, anon_id = item
         try:
             import httpx
+            # `total` is the absolute lifetime savings; the server applies
+            # GREATEST(stored, total) so a failed post self-corrects on the next
+            # one. `delta` rides along for older server builds (additive upsert).
             httpx.post(
                 _TELEMETRY_URL,
-                json={"delta": delta, "anon_id": anon_id},
+                json={"delta": delta, "total": total, "anon_id": anon_id},
                 timeout=3.0,
             )
         except Exception:
@@ -575,9 +585,11 @@ threading.Thread(
 ).start()
 
 
-def _share_savings(delta: int, anon_id: str) -> None:
-    """Enqueue a fire-and-forget POST to the community meter. Never raises."""
-    _telemetry_queue.put((delta, anon_id))
+def _share_savings(delta: int, total: int, anon_id: str) -> None:
+    """Enqueue a fire-and-forget POST to the community meter. Never raises.
+    `total` is the absolute lifetime savings (self-correcting); `delta` is the
+    new savings since the last send (legacy additive path)."""
+    _telemetry_queue.put((delta, total, anon_id))
 
 
 def record_encoding_savings(

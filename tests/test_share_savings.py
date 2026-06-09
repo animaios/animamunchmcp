@@ -115,3 +115,47 @@ class TestUpgradePreservesShareSavings:
             # coexist with the active one winning; in either case the user-set
             # value must be present and there must not be an active false.
             assert '"share_savings": false' not in content
+
+
+class TestTelemetrySelfCorrecting:
+    """The community-meter wire now sends the absolute lifetime `total` (not
+    only a `delta`) so the server can GREATEST-converge: a dropped/failed POST
+    is recovered by the next one instead of permanently undercounting."""
+
+    def _capture(self, monkeypatch):
+        from src.jcodemunch_mcp.storage import token_tracker as tt
+        sent: list = []
+        monkeypatch.setattr(
+            tt, "_share_savings",
+            lambda delta, total, anon_id: sent.append((delta, total, anon_id)),
+        )
+        # Force the opt-in on regardless of any global config state.
+        monkeypatch.setattr(
+            tt._config, "get",
+            lambda key, default=None, repo=None: True if key == "share_savings" else default,
+        )
+        return tt, sent
+
+    def test_flush_sends_absolute_total_not_just_delta(self, monkeypatch, tmp_path):
+        tt, sent = self._capture(monkeypatch)
+        st = tt._State()
+        st.add(1000, str(tmp_path))
+        st.flush()
+        assert sent, "telemetry should enqueue on flush when share_savings is on"
+        delta, total, anon = sent[-1]
+        assert total == 1000           # absolute lifetime total
+        assert delta == 1000           # new savings since the last send
+        assert isinstance(anon, str) and anon
+
+    def test_total_carries_full_lifetime_so_a_dropped_send_self_corrects(self, monkeypatch, tmp_path):
+        tt, sent = self._capture(monkeypatch)
+        st = tt._State()
+        st.add(1000, str(tmp_path))
+        st.flush()
+        # Even if that first POST were dropped on the wire, the NEXT flush still
+        # carries the full absolute total (1700), so the server's GREATEST
+        # recovers the gap rather than missing the lost 1000.
+        st.add(700, str(tmp_path))
+        st.flush()
+        assert sent[-1][1] == 1700     # absolute total includes the prior amount
+        assert sent[-1][0] == 700      # delta is only the new savings

@@ -4,6 +4,30 @@ All notable changes to jcodemunch-mcp are documented here.
 
 ## [Unreleased]
 
+## [1.108.46] - 2026-06-09 - self-correcting savings telemetry
+
+### Changed
+
+- The anonymous community-meter telemetry (`token_tracker`) now sends the
+  **absolute lifetime total** alongside the delta (`{anon_id, delta, total}`),
+  and the server applies `GREATEST(stored, total)` instead of a pure additive
+  `+= delta`. Previously a dropped or failed POST (best-effort, in-memory queue,
+  no retry) permanently undercounted the meter, so the server-side total drifted
+  below the client's true local `total_tokens_saved`. With absolute-total
+  reporting, any single successful send self-heals the entire accumulated gap.
+  Two invariants are preserved by design:
+  - **Backward compatible** — older clients that send only `{anon_id, delta}`
+    keep the additive path unchanged.
+  - **Monotonic / no take-backs** — `GREATEST` never lowers a stored total, so a
+    client that reset its local counter to 0 (or reports a smaller number)
+    cannot shrink or zero out the DB row; clients can't reclaim reported savings.
+    (A reset also yields a fresh `anon_id`, starting a new row rather than
+    touching the old total.)
+
+  The server change lives in `APIs/savings/post.php` (deployed separately to
+  j.gravelle.us). 2 new tests in `tests/test_share_savings.py`
+  (`TestTelemetrySelfCorrecting`).
+
 ## [1.108.45] - 2026-06-09 - config --json description off-by-one fix
 
 ### Fixed
