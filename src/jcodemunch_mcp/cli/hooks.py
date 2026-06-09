@@ -1,6 +1,9 @@
 """Claude Code hook handlers for jCodemunch enforcement.
 
-PreToolUse  — intercept Read on large code files, suggest jCodemunch tools.
+PreToolUse  — two nudges toward jCodemunch before a native file tool runs:
+              Read on a large code file → get_file_outline / get_symbol_source;
+              Grep inside an indexed repo → search_text / search_symbols /
+              find_references (exhaust the credited jcm routes before a raw scan).
 PostToolUse — auto-reindex after Edit/Write to keep the index fresh.
 
 Both read JSON from stdin and write JSON to stdout per the Claude Code
@@ -60,13 +63,19 @@ _MIN_SIZE_BYTES = int(os.environ.get("JCODEMUNCH_HOOK_MIN_SIZE", "4096"))
 
 
 def run_pretooluse() -> int:
-    """PreToolUse hook: intercept Read calls on large code files.
+    """PreToolUse hook: nudge Claude toward jCodemunch before native file tools.
 
-    Reads hook JSON from stdin.  If the target is a code file above the
-    size threshold, returns a ``deny`` decision with a message directing
-    Claude to use jCodemunch tools instead.
+    Dispatches on the tool being called:
+      * ``Grep`` whose search root falls inside an indexed repo → push the agent
+        to exhaust the credited jcm retrieval routes (``search_text`` /
+        ``search_symbols`` / ``find_references``) before the raw text scan.
+      * ``Read`` on a code file above the size threshold → suggest
+        ``get_file_outline`` + ``get_symbol_source`` instead.
 
-    Small files, non-code files, and unreadable paths are silently allowed.
+    Both warn on stderr but **allow** (exit 0): a hard deny would break the
+    Read-before-Edit workflow, and Grep must remain available as the fallback
+    once the jcm routes come up empty.  Small files, non-code files, unreadable
+    paths, and Greps outside every indexed repo are silently allowed.
 
     Returns exit code (always 0 — errors are swallowed to avoid blocking).
     """
@@ -75,7 +84,19 @@ def run_pretooluse() -> int:
     except (json.JSONDecodeError, ValueError):
         return 0  # Unparseable → allow
 
-    file_path: str = data.get("tool_input", {}).get("file_path", "")
+    tool_input = data.get("tool_input", {}) or {}
+
+    # Grep is the tool that most often does a job a jcm route already covers,
+    # entirely off the savings meter — intercept it first. Defensive: a nudge
+    # must never crash the agent's Grep, so swallow anything unexpected.
+    if data.get("tool_name", "") == "Grep":
+        try:
+            return _nudge_grep(tool_input, data.get("cwd", ""))
+        except Exception:
+            return 0
+
+    # --- Read interception ---
+    file_path: str = tool_input.get("file_path", "")
     if not file_path:
         return 0
 
@@ -94,7 +115,6 @@ def run_pretooluse() -> int:
         return 0  # Small file → allow
 
     # Targeted reads (offset/limit set) are likely pre-edit — allow silently.
-    tool_input = data.get("tool_input", {})
     if tool_input.get("offset") is not None or tool_input.get("limit") is not None:
         return 0
 
@@ -105,6 +125,88 @@ def run_pretooluse() -> int:
         f"jCodemunch hint: this is a {size:,}-byte code file. "
         "Prefer get_file_outline + get_symbol_source for exploration. "
         "Use Read only when you need exact line numbers for Edit.",
+        file=sys.stderr,
+    )
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Grep → jCodemunch nudge (PreToolUse, matcher "Grep")
+# ---------------------------------------------------------------------------
+
+def _grep_nudge_enabled() -> bool:
+    """Whether the Grep→jcm nudge is active. Set JCODEMUNCH_HOOK_GREP_NUDGE=0
+    (or false/no/off) to silence it."""
+    return os.environ.get("JCODEMUNCH_HOOK_GREP_NUDGE", "1").strip().lower() not in {
+        "0", "false", "no", "off",
+    }
+
+
+def _indexed_source_roots() -> list[str]:
+    """Normalised absolute source roots of every locally-indexed repo.
+
+    Loaded fresh per call (the hook is a short-lived process). Best-effort:
+    any failure yields ``[]`` so the hook silently allows the Grep rather than
+    ever blocking it on a store hiccup.
+    """
+    try:
+        from ..storage import IndexStore
+        roots: list[str] = []
+        for entry in IndexStore().list_repos():
+            sr = (entry.get("source_root") or "").strip()
+            if sr:
+                roots.append(os.path.normcase(os.path.abspath(sr)))
+        return roots
+    except Exception:
+        return []
+
+
+def _grep_search_root(tool_input: dict, cwd: str) -> str:
+    """Resolve the directory a Grep call will actually scan (normalised)."""
+    path = (tool_input.get("path") or "").strip()
+    base = cwd or os.getcwd()
+    if not path:
+        root = base
+    elif os.path.isabs(path):
+        root = path
+    else:
+        root = os.path.join(base, path)
+    return os.path.normcase(os.path.abspath(root))
+
+
+def _path_overlaps(root: str, source_roots: list[str]) -> bool:
+    """True when *root* is equal to, inside, or an ancestor of any indexed root.
+
+    The ancestor case matters too: grepping a parent directory that *contains*
+    an indexed repo is still a search jcm can serve.
+    """
+    for sr in source_roots:
+        if root == sr or root.startswith(sr + os.sep) or sr.startswith(root + os.sep):
+            return True
+    return False
+
+
+def _nudge_grep(tool_input: dict, cwd: str) -> int:
+    """Grep PreToolUse branch: when the search targets an indexed repo, steer
+    the agent to the credited jcm retrieval routes first. Allows the Grep
+    regardless (exit 0) — this is a nudge, not a block."""
+    if not _grep_nudge_enabled():
+        return 0
+    roots = _indexed_source_roots()
+    if not roots:
+        return 0  # Nothing indexed → jcm can't help here, stay silent.
+    if not _path_overlaps(_grep_search_root(tool_input, cwd), roots):
+        return 0  # Grep is outside every indexed repo → allow silently.
+
+    pattern = (tool_input.get("pattern") or "").strip()
+    for_pat = f" for `{pattern}`" if pattern else ""
+    print(
+        f"jCodemunch: this Grep{for_pat} targets an indexed repo. Exhaust the jcm "
+        "routes first, since they're tighter and credited (raw Grep is neither):\n"
+        "  - search_text     : same regex/substring scan, ranked + winnowed\n"
+        "  - search_symbols  : when hunting a definition (function/class/const/type)\n"
+        "  - find_references / find_importers : 'where is X used / who imports this'\n"
+        "Fall back to Grep only once those come up empty.",
         file=sys.stderr,
     )
     return 0

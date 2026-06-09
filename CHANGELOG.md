@@ -4,6 +4,33 @@ All notable changes to jcodemunch-mcp are documented here.
 
 ## [Unreleased]
 
+## [1.108.47] - 2026-06-09 - Grep-aware PreToolUse nudge
+
+### Added
+
+- The PreToolUse hook (`hook-pretooluse`) now also intercepts **Grep**, not just
+  Read. When a Grep's search root falls inside an indexed repo, it nudges the
+  agent to exhaust the credited jCodemunch retrieval routes first
+  (`search_text` / `search_symbols` / `find_references` / `find_importers`)
+  before the raw text scan. Grep is the tool that most often does a job a jcm
+  route already covers, entirely off the savings meter; the nudge closes that
+  leak. The hook still **allows** the Grep (exit 0) so it remains the fallback
+  once the jcm routes come up empty.
+- The nudge fires only when the search root is equal to, inside, or an ancestor
+  of an indexed `source_root`; a Grep outside every indexed repo (or when
+  nothing is indexed) is allowed silently. Set `JCODEMUNCH_HOOK_GREP_NUDGE=0`
+  (or `false`/`no`/`off`) to disable it.
+- `init` / `install` now register the PreToolUse hook with matcher `Read|Grep`
+  (was `Read`). Existing installs keep firing on Read; re-run `init` (or change
+  the matcher to `Read|Grep` by hand) to pick up Grep coverage.
+
+### Notes
+
+- Best-effort and non-blocking by construction: any index-store error yields no
+  nudge rather than a blocked Grep, and the Grep branch swallows unexpected
+  exceptions so a nudge can never crash the agent's tool call. 8 new tests
+  (`TestGrepNudge` in `tests/test_hooks.py`). GitHub-release wheel (PyPI #308).
+
 ## [1.108.46] - 2026-06-09 - self-correcting savings telemetry
 
 ### Changed

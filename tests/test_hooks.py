@@ -181,6 +181,113 @@ class TestPreToolUse:
 
 
 # ---------------------------------------------------------------------------
+# PreToolUse: Grep → jCodemunch nudge
+# ---------------------------------------------------------------------------
+
+def _make_grep_input(pattern: str, *, path: str = "", cwd: str = "") -> str:
+    """Build hook JSON mimicking a Claude Code Grep PreToolUse call."""
+    tool_input: dict = {"pattern": pattern}
+    if path:
+        tool_input["path"] = path
+    data = {
+        "session_id": "test-session",
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Grep",
+        "tool_input": tool_input,
+        "cwd": cwd,
+    }
+    return json.dumps(data)
+
+
+class TestGrepNudge:
+    """Tests for the Grep branch of run_pretooluse()."""
+
+    def test_nudges_grep_inside_indexed_repo(self, tmp_path, monkeypatch):
+        """A Grep whose cwd is an indexed source root gets the jcm nudge."""
+        monkeypatch.setattr(
+            "jcodemunch_mcp.cli.hooks._indexed_source_roots",
+            lambda: [os.path.normcase(os.path.abspath(str(tmp_path)))],
+        )
+        rc, out, err = _run_with_stdin(
+            run_pretooluse, _make_grep_input("ViewBag.Username", cwd=str(tmp_path))
+        )
+        assert rc == 0
+        assert out == ""  # never blocks
+        assert "search_text" in err
+        assert "search_symbols" in err
+        assert "find_references" in err
+        assert "ViewBag.Username" in err  # echoes the pattern
+
+    def test_nudges_grep_with_subpath_inside_repo(self, tmp_path, monkeypatch):
+        """A relative `path` resolved under the indexed cwd still nudges."""
+        monkeypatch.setattr(
+            "jcodemunch_mcp.cli.hooks._indexed_source_roots",
+            lambda: [os.path.normcase(os.path.abspath(str(tmp_path)))],
+        )
+        rc, out, err = _run_with_stdin(
+            run_pretooluse, _make_grep_input("foo", path="src", cwd=str(tmp_path))
+        )
+        assert rc == 0
+        assert "search_text" in err
+
+    def test_silent_outside_indexed_repo(self, tmp_path, monkeypatch):
+        """A Grep outside every indexed repo is allowed silently."""
+        other = tmp_path / "indexed"
+        elsewhere = tmp_path / "elsewhere"
+        monkeypatch.setattr(
+            "jcodemunch_mcp.cli.hooks._indexed_source_roots",
+            lambda: [os.path.normcase(os.path.abspath(str(other)))],
+        )
+        rc, out, err = _run_with_stdin(
+            run_pretooluse, _make_grep_input("foo", cwd=str(elsewhere))
+        )
+        assert rc == 0
+        assert out == ""
+        assert err == ""
+
+    def test_silent_when_nothing_indexed(self, monkeypatch):
+        """No indexed repos → jcm can't help → no nudge."""
+        monkeypatch.setattr("jcodemunch_mcp.cli.hooks._indexed_source_roots", lambda: [])
+        rc, out, err = _run_with_stdin(run_pretooluse, _make_grep_input("foo", cwd="/tmp"))
+        assert rc == 0
+        assert err == ""
+
+    def test_env_disable(self, tmp_path, monkeypatch):
+        """JCODEMUNCH_HOOK_GREP_NUDGE=0 silences the nudge even inside a repo."""
+        monkeypatch.setenv("JCODEMUNCH_HOOK_GREP_NUDGE", "0")
+        monkeypatch.setattr(
+            "jcodemunch_mcp.cli.hooks._indexed_source_roots",
+            lambda: [os.path.normcase(os.path.abspath(str(tmp_path)))],
+        )
+        rc, out, err = _run_with_stdin(
+            run_pretooluse, _make_grep_input("foo", cwd=str(tmp_path))
+        )
+        assert rc == 0
+        assert err == ""
+
+    def test_store_failure_is_silent(self, monkeypatch):
+        """If the index store blows up, the Grep is allowed without a nudge."""
+        def boom():
+            raise RuntimeError("store unavailable")
+        # _indexed_source_roots swallows internally, but guard the contract too.
+        monkeypatch.setattr("jcodemunch_mcp.cli.hooks._indexed_source_roots", boom)
+        rc, out, err = _run_with_stdin(run_pretooluse, _make_grep_input("foo", cwd="/x"))
+        assert rc == 0  # never crashes the agent's Grep
+
+    def test_grep_never_blocks(self, tmp_path, monkeypatch):
+        """The nudge must never emit a deny/stdout payload."""
+        monkeypatch.setattr(
+            "jcodemunch_mcp.cli.hooks._indexed_source_roots",
+            lambda: [os.path.normcase(os.path.abspath(str(tmp_path)))],
+        )
+        rc, out, err = _run_with_stdin(
+            run_pretooluse, _make_grep_input("foo", cwd=str(tmp_path))
+        )
+        assert rc == 0
+        assert out == ""
+
+
+# ---------------------------------------------------------------------------
 # PostToolUse tests
 # ---------------------------------------------------------------------------
 
@@ -371,7 +478,7 @@ class TestEnforcementHooksInstall:
         pre_matcher = hooks["PreToolUse"][0]["matcher"]
         post_matcher = hooks["PostToolUse"][0]["matcher"]
         precompact_matcher = hooks["PreCompact"][0]["matcher"]
-        assert pre_matcher == "Read"
+        assert pre_matcher == "Read|Grep"
         assert post_matcher == "Edit|Write"
         assert precompact_matcher == ""  # PreCompact hook has empty matcher
 
