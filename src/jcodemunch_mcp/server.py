@@ -6399,6 +6399,21 @@ def main(argv: Optional[list[str]] = None):
         help="Emit structured JSON (repo_id/counts/languages/indexed_at/freshness/watcher_state/lock_holder)",
     )
 
+    # --- delete-index (CLI alias for the invalidate_cache tool) ---
+    delete_index_parser = subparsers.add_parser(
+        "delete-index",
+        help="Delete a repository's index and cached data (CLI alias for the invalidate_cache tool)",
+    )
+    delete_index_parser.add_argument(
+        "repo",
+        help="Repository identifier (owner/repo or repo name, as shown by list-repos)",
+    )
+    delete_index_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the structured {success, repo, message|error} JSON result",
+    )
+
     # --- org-report / org-rollup (team SKU) ---
     org_report_parser = subparsers.add_parser(
         "org-report",
@@ -7078,7 +7093,7 @@ def main(argv: Optional[list[str]] = None):
     if any(arg in top_level_flags for arg in raw_argv):
         args = parser.parse_args(raw_argv)
     else:
-        known_commands = {"serve", "watch", "hook-event", "hook-pretooluse", "hook-posttooluse", "hook-copilot-posttooluse", "hook-precompact", "hook-taskcomplete", "hook-subagent-start", "watch-claude", "watch-all", "watch-install", "watch-uninstall", "watch-status", "config", "list-repos", "org-report", "org-rollup", "license", "index", "index-file", "import-trace", "claude-md", "init", "install", "install-status", "uninstall", "install-pack", "download-model", "upgrade", "whatsnew", "receipt", "digest", "health", "file-risk", "observatory", "keyring"}
+        known_commands = {"serve", "watch", "hook-event", "hook-pretooluse", "hook-posttooluse", "hook-copilot-posttooluse", "hook-precompact", "hook-taskcomplete", "hook-subagent-start", "watch-claude", "watch-all", "watch-install", "watch-uninstall", "watch-status", "config", "list-repos", "delete-index", "org-report", "org-rollup", "license", "index", "index-file", "import-trace", "claude-md", "init", "install", "install-status", "uninstall", "install-pack", "download-model", "upgrade", "whatsnew", "receipt", "digest", "health", "file-risk", "observatory", "keyring"}
         # MCP-tool-name typos: route to the right CLI verb with a friendly hint.
         # `index_repo` and `index_folder` are MCP tools, not CLI subcommands.
         _CLI_ALIASES = {
@@ -7233,6 +7248,21 @@ def main(argv: Optional[list[str]] = None):
                     + (f"  [{langs}]" if langs else "")
                 )
         return
+
+    if args.command == "delete-index":
+        # CLI alias for the invalidate_cache MCP tool: resolves the repo,
+        # deletes its index + cached data, and clears in-process caches.
+        # Exit non-zero on failure so callers (e.g. the jMunch Console) can
+        # detect it via the return code, not just the JSON body.
+        from .tools.invalidate_cache import invalidate_cache
+        result = invalidate_cache(args.repo)
+        if getattr(args, "json", False):
+            print(json.dumps(result, indent=2))
+        elif result.get("success"):
+            print(result.get("message", f"Deleted index for {args.repo}"))
+        else:
+            print(result.get("error", f"No index found for {args.repo}"), file=sys.stderr)
+        sys.exit(0 if result.get("success") else 1)
 
     if args.command == "claude-md":
         _run_claude_md(

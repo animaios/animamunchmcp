@@ -4,6 +4,30 @@ All notable changes to jcodemunch-mcp are documented here.
 
 ## [Unreleased]
 
+## [1.108.50] - 2026-06-10 - `delete-index` CLI subcommand
+
+### Added
+
+- **`jcodemunch-mcp delete-index <repo> [--json]`** — CLI alias for the
+  `invalidate_cache` MCP tool. Resolves the repo (owner/repo or bare name as
+  shown by `list-repos`), deletes its index + cached data, and clears the
+  in-process caches. Exits `0` on success and non-zero when no index is found,
+  so scripted callers can branch on the return code, not just the JSON body.
+  `--json` emits the structured `{success, repo, message|error}` result.
+- Registered in `known_commands` (so the prepend-`serve` guard doesn't swallow
+  it, per the v1.108.36 lesson).
+
+### Notes
+
+- Motivation: the jMunch Console's Index panel needs a delete action, and the
+  Console drives jcm through the CLI (it does not speak MCP). Indexes are
+  SQLite-backed, so a filesystem delete is unsafe; this routes through the
+  canonical `invalidate_cache` path instead. Pure additive surface; no existing
+  behavior changes. 1 new hermetic CLI test (`tests/test_delete_index_cli.py`)
+  exercises index -> delete -> gone -> delete-again-fails against an isolated
+  `CODE_INDEX_PATH`. Full suite 4515 passed / 10 skipped. GitHub-release wheel
+  (PyPI #308).
+
 ## [1.108.49] - 2026-06-10 - Windows stdio git-stdin deadlock straggler
 
 ### Fixed
