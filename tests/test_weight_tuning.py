@@ -126,6 +126,60 @@ class TestTunerLearn:
         assert "local/r" in parsed["repos"]
 
 
+def _backdate(base_path: str, repo: str, days: float):
+    """Shift every ranking event for ``repo`` into the past."""
+    db = tt.perf_db_path(base_path)
+    conn = sqlite3.connect(str(db))
+    try:
+        conn.execute(
+            "UPDATE ranking_events SET ts = ts - ? WHERE repo = ?",
+            (days * 86_400, repo),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+class TestRecencyWindow:
+    def test_old_events_excluded_by_default_window(self, monkeypatch, tmp_path):
+        _enable(monkeypatch)
+        _seed("local/r", 30, 30, 0.9, 0.5)  # strong signal...
+        _backdate(str(tmp_path), "local/r", 200)  # ...but 200 days old
+        tuner = _tuning.WeightTuner(base_path=str(tmp_path))
+        result = tuner.learn("local/r", min_events=50)
+        assert result["applied"] is False
+        assert "insufficient_events" in result["reason"]
+        assert result["max_age_days"] == 90
+
+    def test_zero_window_reads_lifetime_ledger(self, monkeypatch, tmp_path):
+        _enable(monkeypatch)
+        _seed("local/r", 30, 30, 0.9, 0.5)
+        _backdate(str(tmp_path), "local/r", 200)
+        tuner = _tuning.WeightTuner(base_path=str(tmp_path))
+        result = tuner.learn("local/r", min_events=50, max_age_days=0)
+        assert result["applied"] is True
+        assert result["after"]["semantic_weight"] == pytest.approx(0.55)
+
+    def test_recent_events_pass_default_window(self, monkeypatch, tmp_path):
+        _enable(monkeypatch)
+        _seed("local/r", 30, 30, 0.9, 0.5)
+        tuner = _tuning.WeightTuner(base_path=str(tmp_path))
+        result = tuner.learn("local/r", min_events=50)
+        assert result["applied"] is True
+
+    def test_tool_threads_max_age_days(self, monkeypatch, tmp_path):
+        _enable(monkeypatch)
+        _seed("local/r", 30, 30, 0.9, 0.5)
+        _backdate(str(tmp_path), "local/r", 200)
+        out = tune_weights(repo="local/r", storage_path=str(tmp_path), min_events=50)
+        assert out["results"][0]["applied"] is False
+        assert out["summary"]["max_age_days"] == 90
+        out = tune_weights(
+            repo="local/r", storage_path=str(tmp_path), min_events=50, max_age_days=0
+        )
+        assert out["results"][0]["applied"] is True
+
+
 class TestTuneWeightsTool:
     def test_no_repos_in_ledger(self, monkeypatch, tmp_path):
         out = tune_weights(storage_path=str(tmp_path))

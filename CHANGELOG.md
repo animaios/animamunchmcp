@@ -4,6 +4,22 @@ All notable changes to jcodemunch-mcp are documented here.
 
 ## [Unreleased]
 
+## [1.108.53] - 2026-06-11 - recency window on weight tuning
+
+### Changed
+
+- **`tune_weights` learns from a recency window, not the lifetime ledger.**
+  New `max_age_days` parameter (default 90; `0` restores the lifetime read)
+  on the MCP tool and `WeightTuner.learn()`. Previously the tuner read all
+  ranking events ever recorded for a repo, so as a repo's query distribution
+  drifted — new code, new agent habits, corpus growth — old events kept
+  anchoring `semantic_weight` / `identity_boost` proposals toward behavior
+  that no longer exists. Recent research on memory systems shows exactly this
+  failure mode: accumulated context that can't distinguish relevant from
+  stale signal degrades retrieval quality over time. The window keeps
+  learning grounded in how the repo is actually being queried now. Per-repo
+  results and the tool summary report the window used.
+
 ## [1.108.52] - 2026-06-10 - back on PyPI; background-behavior disclosure
 
 ### Added

@@ -21,6 +21,7 @@ def tune_weights(
     dry_run: bool = False,
     min_events: int = 50,
     explain: bool = False,
+    max_age_days: int = 90,
     storage_path: Optional[str] = None,
 ) -> dict:
     """Run a tuning pass over the ranking ledger.
@@ -32,6 +33,9 @@ def tune_weights(
         min_events:   Skip repos with fewer ledger events than this.
         explain:      Include the per-signal correlations used for the
                       proposal in the output.
+        max_age_days: Only learn from ledger events newer than this.
+                      Guards against stale events anchoring weights to
+                      an old query distribution. 0 = lifetime ledger.
         storage_path: Optional override for ~/.code-index.
     """
     t0 = time.perf_counter()
@@ -45,7 +49,9 @@ def tune_weights(
 
     results: list[dict] = []
     for target in targets:
-        outcome = tuner.learn(target, dry_run=dry_run, min_events=min_events)
+        outcome = tuner.learn(
+            target, dry_run=dry_run, min_events=min_events, max_age_days=max_age_days
+        )
         if not explain:
             outcome.pop("signals", None)
         results.append(outcome)
@@ -60,6 +66,7 @@ def tune_weights(
             "skipped": len(results) - applied,
             "dry_run": dry_run,
             "min_events": min_events,
+            "max_age_days": max_age_days,
         },
         "_meta": {"timing_ms": elapsed_ms},
     }

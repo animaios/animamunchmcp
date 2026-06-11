@@ -14,7 +14,10 @@ Two signals are learned:
                            higher mean confidence than events without.
 
 Both are bounded; the tuner won't overshoot and won't apply learning
-without enough events (default 50).
+without enough events (default 50). Learning reads a recency window of
+the ledger (default 90 days) rather than the lifetime history, so old
+events can't anchor weights to a query distribution that no longer
+exists (``max_age_days=0`` restores the lifetime read).
 """
 
 from __future__ import annotations
@@ -46,6 +49,12 @@ _LEARN_STEP = 0.05
 
 # Minimum sample to trust a learned delta
 _DEFAULT_MIN_EVENTS = 50
+
+# Recency window for ledger reads, in days. A repo's query distribution
+# drifts as the codebase and the agent's habits change; lifetime events
+# act as stale anchors that drag learned weights toward old behavior.
+# 0 disables the window (lifetime ledger, pre-v1.108.53 behavior).
+_DEFAULT_MAX_AGE_DAYS = 90
 
 # Minimum confidence delta (between groups) before we treat a signal
 # as actually helpful. Below this we leave the default alone.
@@ -146,12 +155,14 @@ class WeightTuner:
     def __init__(self, base_path: Optional[str] = None):
         self._base_path = base_path
 
-    def _load_events(self, repo: str) -> list[tuple]:
-        # Pull the most recent N rows for this repo. Using `all` ensures
-        # we read the lifetime ledger without a time cutoff.
+    def _load_events(self, repo: str, max_age_days: int = _DEFAULT_MAX_AGE_DAYS) -> list[tuple]:
+        # Pull the most recent N rows for this repo, bounded by the
+        # recency window so stale events can't anchor the proposal.
+        window = float(max_age_days) * 86_400 if max_age_days > 0 else None
         return _tt.ranking_db_query(
             base_path=self._base_path,
             repo=repo,
+            window_seconds=window,
             limit=10_000,
         )
 
@@ -228,9 +239,10 @@ class WeightTuner:
         *,
         dry_run: bool = False,
         min_events: int = _DEFAULT_MIN_EVENTS,
+        max_age_days: int = _DEFAULT_MAX_AGE_DAYS,
     ) -> dict:
         """Learn (and optionally apply) updated weights for ``repo``."""
-        events = self._load_events(repo)
+        events = self._load_events(repo, max_age_days=max_age_days)
         before = get_overrides(repo, self._base_path)
         if len(events) < min_events:
             return {
@@ -238,6 +250,7 @@ class WeightTuner:
                 "applied": False,
                 "reason": f"insufficient_events ({len(events)} < {min_events})",
                 "events": len(events),
+                "max_age_days": max_age_days,
                 "before": before,
                 "after": before,
             }
@@ -256,6 +269,7 @@ class WeightTuner:
                 "applied": False,
                 "reason": "no_significant_signal",
                 "events": len(events),
+                "max_age_days": max_age_days,
                 "before": before,
                 "after": before,
                 "signals": signals,
@@ -268,6 +282,7 @@ class WeightTuner:
             "repo": repo,
             "applied": (not dry_run),
             "events": len(events),
+            "max_age_days": max_age_days,
             "before": before,
             "after": after,
             "signals": signals,
