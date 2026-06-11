@@ -4,6 +4,32 @@ All notable changes to jcodemunch-mcp are documented here.
 
 ## [Unreleased]
 
+## [1.108.52] - 2026-06-10 - back on PyPI; background-behavior disclosure
+
+### Added
+
+- **"Background behavior, fully disclosed" README section.** Enumerates every
+  long-running or out-of-band behavior in the package — file watching (dies
+  with the process), the `watch-install` login service (explicit opt-in only,
+  removable via `watch-uninstall`), the anonymous savings telemetry (counters
+  only; opt out with `share_savings: false` / `JCODEMUNCH_SHARE_SAVINGS=0`),
+  agent hooks written by `init`/`install` (reversed by `uninstall`), and the
+  local index store at `~/.code-index/`. Added per PyPI's guidance when the
+  package was cleared from quarantine: long-term operations outside expected
+  package behavior must be disclosed in the README.
+
+### Changed
+
+- **PyPI install channel restored.** The package has been reviewed and cleared
+  from quarantine; `pip install jcodemunch-mcp` / `uvx jcodemunch-mcp` work
+  again. README, QUICKSTART, and USER_GUIDE drop the quarantine-era
+  GitHub-release wheel pins and review notes: one-click badges (VS Code,
+  VS Code Insiders, Cursor) point back at the bare package name, the hero
+  commands lead with PyPI again, the Codex venv install reverts to
+  `-U jcodemunch-mcp`, and the Antigravity config example uses
+  `args: ["jcodemunch-mcp"]`. The `git+https` source install stays documented
+  as the version-stable, PyPI-independent channel for pinned/B2B deployments.
+
 ## [1.108.51] - 2026-06-10 - `config set` / `config unset` CLI (typed JSONC write-back)
 
 ### Added

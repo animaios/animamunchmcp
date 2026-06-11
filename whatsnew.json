@@ -1,23 +1,23 @@
 {
-  "current": "1.108.27",
+  "current": "1.108.52",
   "entries": [
     {
-      "version": "1.108.27",
-      "date": "2026-05-30",
-      "title": "Windows UNC share-child indexing",
-      "summary": "- Windows UNC share child paths are no longer rejected by the broad-root guard in `index_folder()` (issue #321, fix #322 by @JayceeB1). `pathlib` stores a UNC share root like `\\\\server\\share\\` as a single anchor component, so `\\\\server\\share\\repo` had only two `Path.parts` and tripped the \"fewer than 3"
+      "version": "1.108.52",
+      "date": "2026-06-10",
+      "title": "back on PyPI; background-behavior disclosure",
+      "summary": "- **\"Background behavior, fully disclosed\" README section.** Enumerates every long-running or out-of-band behavior in the package \u2014 file watching (dies with the process), the `watch-install` login service (explicit opt-in only, removable via `watch-uninstall`), the anonymous savings telemetry (counters"
     },
     {
-      "version": "1.108.26",
-      "date": "2026-05-29",
-      "title": "get_file_outline batch mode dropped all symbols",
-      "summary": "- `get_file_outline` in **batch mode** (`file_paths=[...]`) returned empty outlines for every file \u2014 models saw \"the outline came back empty\" and either gave up or burned tokens re-querying (issue #319, reported by @MariusAdrian88, corroborated by @ImJustWeed). The bug was confined to the MUNCH `fo1` encoder:"
+      "version": "1.108.51",
+      "date": "2026-06-10",
+      "title": "`config set` / `config unset` CLI (typed JSONC write-back)",
+      "summary": "- **`jcodemunch-mcp config set <key> <value>`** and **`config unset <key>`** \u2014 write a config key back to the global `config.jsonc`, preserving comments. `<value>` is parsed as JSON (`true`, `7`, `0.5`, `[\"a\",\"b\"]`, `{\"k\":1}`, `null`) or kept as a bare string for string-typed keys. Coerced + type-checked"
     },
     {
-      "version": "1.108.25",
-      "date": "2026-05-26",
-      "title": "secret-file detection: basename + secret-store dirs",
-      "summary": "- `is_secret_file()` no longer matches `SECRET_PATTERNS` against the full file path \u2014 the broad `*secret*` glob run as a path substring caused any directory whose name merely contains `secret` (e.g. a `services/secrets-manager/` microservice) to drop its entire subtree from the index. Matching is now"
+      "version": "1.108.50",
+      "date": "2026-06-10",
+      "title": "`delete-index` CLI subcommand",
+      "summary": "- **`jcodemunch-mcp delete-index <repo> [--json]`** \u2014 CLI alias for the `invalidate_cache` MCP tool. Resolves the repo (owner/repo or bare name as shown by `list-repos`), deletes its index + cached data, and clears the in-process caches. Exits `0` on success and non-zero when no index is found,"
     }
   ]
 }

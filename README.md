@@ -1,19 +1,24 @@
 #### One-click installs:
 
-[![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_jCodeMunch-007ACC?style=for-the-badge&logo=visualstudiocode&logoColor=white)](vscode:mcp/install?%7B%22name%22%3A%20%22jcodemunch%22%2C%20%22command%22%3A%20%22uvx%22%2C%20%22args%22%3A%20%5B%22--from%22%2C%20%22https%3A//github.com/jgravelle/jcodemunch-mcp/releases/download/v1.108.27/jcodemunch_mcp-1.108.27-py3-none-any.whl%22%2C%20%22jcodemunch-mcp%22%5D%7D)
-[![Install in VS Code Insiders](https://img.shields.io/badge/VS_Code_Insiders-Install-24bfa5?style=for-the-badge&logo=visualstudiocode&logoColor=white)](vscode-insiders:mcp/install?%7B%22name%22%3A%20%22jcodemunch%22%2C%20%22command%22%3A%20%22uvx%22%2C%20%22args%22%3A%20%5B%22--from%22%2C%20%22https%3A//github.com/jgravelle/jcodemunch-mcp/releases/download/v1.108.27/jcodemunch_mcp-1.108.27-py3-none-any.whl%22%2C%20%22jcodemunch-mcp%22%5D%7D)
-[![Install in Cursor](https://img.shields.io/badge/Cursor-Install_jCodeMunch-122122?style=for-the-badge&logo=cursor&logoColor=white)](cursor://anysphere.cursor-deeplink/mcp/install?name=jcodemunch&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyItLWZyb20iLCAiaHR0cHM6Ly9naXRodWIuY29tL2pncmF2ZWxsZS9qY29kZW11bmNoLW1jcC9yZWxlYXNlcy9kb3dubG9hZC92MS4xMDguMjcvamNvZGVtdW5jaF9tY3AtMS4xMDguMjctcHkzLW5vbmUtYW55LndobCIsICJqY29kZW11bmNoLW1jcCJdfQ==)
+[![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_jCodeMunch-007ACC?style=for-the-badge&logo=visualstudiocode&logoColor=white)](vscode:mcp/install?%7B%22name%22%3A%20%22jcodemunch%22%2C%20%22command%22%3A%20%22uvx%22%2C%20%22args%22%3A%20%5B%22jcodemunch-mcp%22%5D%7D)
+[![Install in VS Code Insiders](https://img.shields.io/badge/VS_Code_Insiders-Install-24bfa5?style=for-the-badge&logo=visualstudiocode&logoColor=white)](vscode-insiders:mcp/install?%7B%22name%22%3A%20%22jcodemunch%22%2C%20%22command%22%3A%20%22uvx%22%2C%20%22args%22%3A%20%5B%22jcodemunch-mcp%22%5D%7D)
+[![Install in Cursor](https://img.shields.io/badge/Cursor-Install_jCodeMunch-122122?style=for-the-badge&logo=cursor&logoColor=white)](cursor://anysphere.cursor-deeplink/mcp/install?name=jcodemunch&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyJqY29kZW11bmNoLW1jcCJdfQ==)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-CLI_install-D97757?style=for-the-badge&logo=anthropic&logoColor=white)](#works-with)
 [![Codex CLI](https://img.shields.io/badge/Codex_CLI-Config_install-10a37f?style=for-the-badge&logo=openai&logoColor=white)](#works-with)
 
-Prefer the command line? Install straight from the repo (always the latest; requires `git`, builds from source):
+Prefer the command line?
+
+```
+pip install jcodemunch-mcp
+uvx jcodemunch-mcp
+```
+
+For pinned/B2B deployments that want a version-stable install channel independent of PyPI, install straight from the repo (requires `git`, builds from source):
 
 ```
 pip install git+https://github.com/jgravelle/jcodemunch-mcp.git
 uvx --from git+https://github.com/jgravelle/jcodemunch-mcp.git jcodemunch-mcp
 ```
-
-> **Note:** plain `pip install jcodemunch-mcp` / `uvx jcodemunch-mcp` is temporarily unavailable while the package is under PyPI admin review (appeal filed, [#308](https://github.com/jgravelle/jcodemunch-mcp/issues/308)). The buttons and commands above work normally.
 
 Quickstart - https://github.com/jgravelle/jcodemunch-mcp/blob/main/QUICKSTART.md
 
@@ -105,9 +110,9 @@ is a byte the agent doesn't pay to read.
 <!-- WHATSNEW:START -->
 #### What's new
 
-- **[v1.108.27](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.27)** (2026-05-30) — Windows UNC share-child indexing
-- **[v1.108.26](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.26)** (2026-05-29) — get_file_outline batch mode dropped all symbols
-- **[v1.108.25](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.25)** (2026-05-26) — secret-file detection: basename + secret-store dirs
+- **[v1.108.52](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.52)** (2026-06-10) — back on PyPI; background-behavior disclosure
+- **[v1.108.51](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.51)** (2026-06-10) — `config set` / `config unset` CLI (typed JSONC write-back)
+- **[v1.108.50](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.50)** (2026-06-10) — `delete-index` CLI subcommand
 <!-- WHATSNEW:END -->
 
 ![License](https://img.shields.io/badge/license-dual--use-blue)
@@ -305,14 +310,21 @@ So when the agent wants a symbol, jCodeMunch can fetch the exact source directly
 
 ---
 
-## Start fast
+## Background behavior, fully disclosed
 
-> **PyPI review in progress:** plain `pip install jcodemunch-mcp` /
-> `uvx jcodemunch-mcp` (and the `[extra]` variants) won't resolve while the
-> package is under PyPI admin review ([#308](https://github.com/jgravelle/jcodemunch-mcp/issues/308)).
-> Wherever a step below uses the bare name, substitute the GitHub-release wheel
-> or `git+https` install from the [top of this README](#one-click-installs). Every
-> other step is unchanged.
+Everything jCodeMunch does beyond answering a tool call is listed here. All of it is visible, opt-in or opt-out, and reversible.
+
+- **File watching.** The `watch` / `watch-all` / `watch-claude` commands (and `watch: true` in config) re-index files when they change. Watching runs **inside a process you started** and stops when that process exits. Nothing monitors your filesystem unless a jCodeMunch process you launched is running.
+- **Login service — explicit opt-in only.** `jcodemunch-mcp watch-install` registers `watch-all` as a login service (Windows Task Scheduler / macOS launchd / Linux systemd) so indexes stay fresh across reboots. This happens **only** when you run `watch-install` yourself; `init`, `install`, and normal server use never register a service. Inspect it with `watch-status`; remove it with `watch-uninstall`.
+- **Anonymous savings telemetry.** The server periodically sends a random anonymous ID plus aggregate token-savings counters to the project's public community meter. No code, no file paths, no repo names, no PII — counters only. Opt out with `share_savings: false` in `config.jsonc` or `JCODEMUNCH_SHARE_SAVINGS=0`.
+- **Agent hooks.** `init` / `install` can write hook entries (auto-reindex on edit, read-interception nudges) into your MCP client's settings. They're offered during the interactive flow, shown before writing, and fully removed by `uninstall`.
+- **Local index storage.** Indexes live at `~/.code-index/` (override with `CODE_INDEX_PATH`). Delete the directory and every trace of indexing is gone.
+
+The base package makes no other network calls and leaves no other persistent processes. AI-summary extras call their configured provider's API only when you enable them — see the extras matrix under [Start fast](#start-fast).
+
+---
+
+## Start fast
 
 > **Ubuntu 24.04+ / Debian 12+:** System Python is externally managed (PEP 668).
 > Use `pipx install jcodemunch-mcp` or `uv tool install jcodemunch-mcp` instead
@@ -532,13 +544,13 @@ Get a structured PR review in under 5 seconds:
 
 ```yaml
 # .github/workflows/speedreview.yml
-- uses: jgravelle/jcodemunch-mcp/speedreview@v1.108.27
+- uses: jgravelle/jcodemunch-mcp/speedreview@v1.108.52
   with:
     groq_api_key: ${{ secrets.GROQ_API_KEY }}
 ```
 
 For stricter supply-chain hygiene, pin to the tag's commit SHA instead of the
-tag itself (`git ls-remote https://github.com/jgravelle/jcodemunch-mcp refs/tags/v1.108.27`).
+tag itself (`git ls-remote https://github.com/jgravelle/jcodemunch-mcp refs/tags/v1.108.52`).
 The action installs pinned package versions by default and exposes
 `jcodemunch_version` / `openai_version` inputs for override.
 
@@ -776,12 +788,6 @@ jCodeMunch is an MCP server — it plugs into **every major agent and IDE that s
 
 **Claude Code · Claude Desktop · Cursor · Windsurf · Codex CLI · Continue · Cline · Roo Code · Zed · Goose · Hermes Agent · Paperclip** — and more.
 
-> **During the PyPI review ([#308](https://github.com/jgravelle/jcodemunch-mcp/issues/308)):**
-> any `uvx jcodemunch-mcp` or `command: uvx, args: ["jcodemunch-mcp"]` entry in the
-> table below must point at the GitHub-release wheel instead, e.g.
-> `uvx --from <wheel-url> jcodemunch-mcp`. The current wheel URL is at the
-> [top of this README](#one-click-installs).
-
 Tested configurations:
 
 | Platform | Config |
@@ -809,9 +815,7 @@ project venv and point Codex at the resolved binary directly:
 
 ```bash
 python3 -m venv .venv
-# During the PyPI review (#308) install from the repo; revert to
-# `-U jcodemunch-mcp` once the package is back on PyPI.
-.venv/bin/pip install -U "git+https://github.com/jgravelle/jcodemunch-mcp.git"
+.venv/bin/pip install -U jcodemunch-mcp
 .venv/bin/jcodemunch-mcp --help   # confirm the binary resolves
 ```
 

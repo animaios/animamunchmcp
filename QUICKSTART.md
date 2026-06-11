@@ -1,35 +1,23 @@
 #### One-click installs:
 
-[![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_jCodeMunch-007ACC?style=for-the-badge&logo=visualstudiocode&logoColor=white)](vscode:mcp/install?%7B%22name%22%3A%20%22jcodemunch%22%2C%20%22command%22%3A%20%22uvx%22%2C%20%22args%22%3A%20%5B%22--from%22%2C%20%22https%3A//github.com/jgravelle/jcodemunch-mcp/releases/download/v1.108.27/jcodemunch_mcp-1.108.27-py3-none-any.whl%22%2C%20%22jcodemunch-mcp%22%5D%7D)
-[![Install in VS Code Insiders](https://img.shields.io/badge/VS_Code_Insiders-Install-24bfa5?style=for-the-badge&logo=visualstudiocode&logoColor=white)](vscode-insiders:mcp/install?%7B%22name%22%3A%20%22jcodemunch%22%2C%20%22command%22%3A%20%22uvx%22%2C%20%22args%22%3A%20%5B%22--from%22%2C%20%22https%3A//github.com/jgravelle/jcodemunch-mcp/releases/download/v1.108.27/jcodemunch_mcp-1.108.27-py3-none-any.whl%22%2C%20%22jcodemunch-mcp%22%5D%7D)
-[![Install in Cursor](https://img.shields.io/badge/Cursor-Install_jCodeMunch-000000?style=for-the-badge&logo=cursor&logoColor=white)](cursor://anysphere.cursor-deeplink/mcp/install?name=jcodemunch&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyItLWZyb20iLCAiaHR0cHM6Ly9naXRodWIuY29tL2pncmF2ZWxsZS9qY29kZW11bmNoLW1jcC9yZWxlYXNlcy9kb3dubG9hZC92MS4xMDguMjcvamNvZGVtdW5jaF9tY3AtMS4xMDguMjctcHkzLW5vbmUtYW55LndobCIsICJqY29kZW11bmNoLW1jcCJdfQ==)
+[![Install in VS Code](https://img.shields.io/badge/VS_Code-Install_jCodeMunch-007ACC?style=for-the-badge&logo=visualstudiocode&logoColor=white)](vscode:mcp/install?%7B%22name%22%3A%20%22jcodemunch%22%2C%20%22command%22%3A%20%22uvx%22%2C%20%22args%22%3A%20%5B%22jcodemunch-mcp%22%5D%7D)
+[![Install in VS Code Insiders](https://img.shields.io/badge/VS_Code_Insiders-Install-24bfa5?style=for-the-badge&logo=visualstudiocode&logoColor=white)](vscode-insiders:mcp/install?%7B%22name%22%3A%20%22jcodemunch%22%2C%20%22command%22%3A%20%22uvx%22%2C%20%22args%22%3A%20%5B%22jcodemunch-mcp%22%5D%7D)
+[![Install in Cursor](https://img.shields.io/badge/Cursor-Install_jCodeMunch-000000?style=for-the-badge&logo=cursor&logoColor=white)](cursor://anysphere.cursor-deeplink/mcp/install?name=jcodemunch&config=eyJjb21tYW5kIjogInV2eCIsICJhcmdzIjogWyJqY29kZW11bmNoLW1jcCJdfQ==)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-CLI_install-D97757?style=for-the-badge&logo=anthropic&logoColor=white)](#works-with)
 [![Codex CLI](https://img.shields.io/badge/Codex_CLI-Config_install-10a37f?style=for-the-badge&logo=openai&logoColor=white)](#works-with)
 
-Prefer the command line? Install straight from the repo (always the latest; requires `git`, builds from source):
+Prefer the command line?
 
 ```
-pip install git+https://github.com/jgravelle/jcodemunch-mcp.git
-uvx --from git+https://github.com/jgravelle/jcodemunch-mcp.git jcodemunch-mcp
+pip install jcodemunch-mcp
+uvx jcodemunch-mcp
 ```
-
-> **Note:** plain `pip install jcodemunch-mcp` / `uvx jcodemunch-mcp` is temporarily unavailable while the package is under PyPI admin review (appeal filed, [#308](https://github.com/jgravelle/jcodemunch-mcp/issues/308)). The buttons and commands above work normally.
 
 # jCodeMunch Quick Start
 
 Get from zero to 95% token savings in one command.
 
 ---
-
-> **PyPI review in progress:** plain `pip install jcodemunch-mcp` /
-> `uvx jcodemunch-mcp` won't resolve while the package is under PyPI admin
-> review ([#308](https://github.com/jgravelle/jcodemunch-mcp/issues/308)).
-> Wherever a command below uses the bare name, substitute the GitHub-release
-> wheel or `git+https` install from the [top of this page](#one-click-installs)
-> (e.g. `pip install "git+https://github.com/jgravelle/jcodemunch-mcp.git"`, or in
-> MCP-client config `"command": "uvx", "args": ["--from",
-> "git+https://github.com/jgravelle/jcodemunch-mcp.git", "jcodemunch-mcp"]`).
-> Every other step is unchanged.
 
 ## The fast way (recommended)
 

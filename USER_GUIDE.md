@@ -54,15 +54,6 @@ If you only remember one thing from this guide, make it this:
 
 # 1. Quick Start
 
-> **PyPI review in progress ([#308](https://github.com/jgravelle/jcodemunch-mcp/issues/308)):**
-> `pip install jcodemunch-mcp` and bare `uvx jcodemunch-mcp` won't resolve during
-> the review. Install from the repo instead:
-> `pip install "git+https://github.com/jgravelle/jcodemunch-mcp.git"`, or in
-> MCP-client config use `"command": "uvx", "args": ["--from",
-> "git+https://github.com/jgravelle/jcodemunch-mcp.git", "jcodemunch-mcp"]`. A
-> pinned-wheel config example is shown later in this guide. Revert to the bare
-> name once PyPI access is restored.
-
 ## Install
 
 ```bash
@@ -315,11 +306,7 @@ Antigravity's `agy` CLI inherits Gemini-CLI's config shape. Edit
   "mcpServers": {
     "jcodemunch": {
       "command": "uvx",
-      "args": [
-        "--from",
-        "https://github.com/jgravelle/jcodemunch-mcp/releases/download/v1.108.27/jcodemunch_mcp-1.108.27-py3-none-any.whl",
-        "jcodemunch-mcp"
-      ],
+      "args": ["jcodemunch-mcp"],
       "env": {
         "GITHUB_TOKEN": "ghp_...",
         "ANTHROPIC_API_KEY": "sk-ant-..."
@@ -335,11 +322,7 @@ On first `/mcp` load inside `agy`, the CLI caches each tool schema at
 `"permissions": { "allow": [ "mcp(jcodemunch/*)" ] }`. Restart `agy` after
 editing the config.
 
-The `https://github.com/.../v1.108.27/...whl` URL is the temporary
-PyPI-outage workaround (see the banner at the top of README.md).
-Once PyPI access is restored, swap the args back to `["jcodemunch-mcp"]`.
-
-Prefer not to track a version? Point `--from` at the repo instead and it
+Prefer a PyPI-independent install channel? Point `--from` at the repo and it
 always pulls the latest (requires `git`; builds from source):
 `["--from", "git+https://github.com/jgravelle/jcodemunch-mcp.git", "jcodemunch-mcp"]`.
 
