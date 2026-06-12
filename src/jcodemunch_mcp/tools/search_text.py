@@ -16,6 +16,32 @@ _NESTED_QUANTIFIER_RE = re.compile(
 )
 
 _MAX_REGEX_LEN = 200
+_MAX_QUERY_LEN = 500
+
+
+def validate_query_args(query, is_regex: bool) -> Optional[dict]:
+    """Cheap argument validation, shared with server pre-dispatch (jcm#329).
+
+    Returns an error dict, or None when the arguments pass. call_tool runs
+    this BEFORE strict-freshness waits and auto-watch reindexing, so a call
+    doomed to be rejected fails in milliseconds instead of first paying an
+    unbounded pre-dispatch reindex (29s observed in the field).
+    """
+    if not isinstance(query, str):
+        return {"error": "query must be a string"}
+    if len(query) > _MAX_QUERY_LEN:
+        return {"error": f"Query too long ({len(query)} chars, max {_MAX_QUERY_LEN})"}
+    if is_regex:
+        if len(query) > _MAX_REGEX_LEN:
+            return {"error": f"Regex too long ({len(query)} chars, max {_MAX_REGEX_LEN})"}
+        if _NESTED_QUANTIFIER_RE.search(query):
+            return {"error": "Regex rejected: nested quantifiers can cause catastrophic backtracking"}
+        try:
+            re.compile(query, re.IGNORECASE)
+        except re.error as e:
+            return {"error": f"Invalid regex: {e}"}
+    return None
+
 
 # Wall-clock budget for regex evaluation across all files in a single
 # search_text call. Python's `re` has no per-call timeout and the existing
@@ -43,6 +69,8 @@ def search_text(
         repo: Repository identifier (owner/repo or just repo name).
         query: Text to search for. Case-insensitive substring by default;
                set is_regex=True for full regex (e.g. 'estimateToken|tokenEstimat').
+               Limits: 500 chars plain, 200 chars regex; nested quantifiers
+               (e.g. '(a+)+') are rejected to prevent catastrophic backtracking.
         file_pattern: Optional glob pattern to filter files.
         max_results: Maximum number of matching lines to return.
         context_lines: Lines of context before/after each match (like grep -C).
@@ -52,9 +80,9 @@ def search_text(
     Returns:
         Dict with matching lines grouped by file, plus _meta envelope.
     """
-    _MAX_QUERY_LEN = 500
-    if len(query) > _MAX_QUERY_LEN:
-        return {"error": f"Query too long ({len(query)} chars, max {_MAX_QUERY_LEN})"}
+    arg_err = validate_query_args(query, is_regex)
+    if arg_err is not None:
+        return arg_err
 
     start = time.perf_counter()
     max_results = max(1, min(max_results, 100))
@@ -62,19 +90,10 @@ def search_text(
 
     # For regex mode, compile the user pattern. For substring mode, use
     # Python's optimized `in` operator (faster than re.search per line).
-    pattern = None
-    query_lower = None
-    if is_regex:
-        if len(query) > _MAX_REGEX_LEN:
-            return {"error": f"Regex too long ({len(query)} chars, max {_MAX_REGEX_LEN})"}
-        if _NESTED_QUANTIFIER_RE.search(query):
-            return {"error": "Regex rejected: nested quantifiers can cause catastrophic backtracking"}
-        try:
-            pattern = re.compile(query, re.IGNORECASE)
-        except re.error as e:
-            return {"error": f"Invalid regex: {e}"}
-    else:
-        query_lower = query.lower()
+    # Compile can't fail here — validate_query_args already vetted it
+    # (re's internal cache makes the second compile free).
+    pattern = re.compile(query, re.IGNORECASE) if is_regex else None
+    query_lower = None if is_regex else query.lower()
 
     try:
         owner, name = resolve_repo(repo, storage_path)

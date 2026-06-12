@@ -10,7 +10,17 @@ class TurnBudget:
 
     A "turn" is defined as a series of tool calls with gaps less than
     turn_gap_seconds. When the gap exceeds this threshold, a new turn
-    starts and counters reset.
+    starts and counters reset. The reset fires in EVERY reader (jcm#327):
+    readers that run during tool execution (plan_turn's budget advisor,
+    should_compact) would otherwise report the previous turn's exhausted
+    counter after an idle gap, because record_output — the only reset
+    site before the fix — runs post-dispatch.
+
+    Scope note: this is a process-global singleton, so the budget spans
+    every repo served by one server process. The wall-clock gap is a
+    heuristic for conversational turn boundaries; during continuous agent
+    use (calls spaced under turn_gap_seconds) it behaves as a rolling
+    exploration budget rather than a strict per-turn one.
     """
 
     def __init__(
@@ -29,6 +39,17 @@ class TurnBudget:
         """Check if enough time has passed for a new turn."""
         return time.time() - self._last_call_ts > self._turn_gap
 
+    def _maybe_reset_locked(self, now: float) -> None:
+        """Zero the counters when the idle gap marks a new turn.
+
+        Caller must hold self._lock. Does NOT advance _last_call_ts —
+        only record_output marks activity, so back-to-back readers after
+        an idle gap each still see the fresh turn (jcm#327).
+        """
+        if now - self._last_call_ts > self._turn_gap:
+            self._turn_tokens = 0
+            self._turn_call_count = 0
+
     def record_output(self, token_count: int) -> dict:
         """Record output tokens and return budget info.
 
@@ -42,12 +63,7 @@ class TurnBudget:
 
         with self._lock:
             now = time.time()
-
-            # Check for new turn
-            if now - self._last_call_ts > self._turn_gap:
-                self._turn_tokens = 0
-                self._turn_call_count = 0
-
+            self._maybe_reset_locked(now)
             self._last_call_ts = now
             self._turn_tokens += token_count
             self._turn_call_count += 1
@@ -78,6 +94,7 @@ class TurnBudget:
         if self._turn_budget == 0:
             return 0.0
         with self._lock:
+            self._maybe_reset_locked(time.time())
             return self._turn_tokens / self._turn_budget
 
     def is_enabled(self) -> bool:
@@ -95,6 +112,7 @@ class TurnBudget:
         if self._turn_budget == 0:
             return False
         with self._lock:
+            self._maybe_reset_locked(time.time())
             return self._turn_tokens >= self._turn_budget * 0.8
 
     def reset(self) -> None:

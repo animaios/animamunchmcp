@@ -1216,7 +1216,7 @@ def _build_tools_list() -> list[Tool]:
                     },
                     "token_budget": {
                         "type": "integer",
-                        "description": "Token budget cap. When set, results are sorted by score and greedily packed until the budget is exhausted. Overrides max_results. Reports token_budget, tokens_used, and tokens_remaining in _meta."
+                        "description": "Token budget cap. When set, results are sorted by score and greedily packed until the budget is exhausted, charging each row's actual payload size (compact rows ~15 tokens, so a budget can admit many rows). Overrides max_results — pass max_results without token_budget when row count matters. Reports token_budget, tokens_used, and tokens_remaining in _meta."
                     },
                     "detail_level": {
                         "type": "string",
@@ -1304,11 +1304,11 @@ def _build_tools_list() -> list[Tool]:
                     },
                     "query": {
                         "type": "string",
-                        "description": "Text to search for. Case-insensitive substring by default. Set is_regex=true for full regex (e.g. 'estimateToken|tokenEstimat|\\.length.*0\\.25')."
+                        "description": "Text to search for. Case-insensitive substring by default. Set is_regex=true for full regex (e.g. 'estimateToken|tokenEstimat|\\.length.*0\\.25'). Limits: 500 chars plain, 200 chars when is_regex=true. Split longer alternations into multiple calls."
                     },
                     "is_regex": {
                         "type": "boolean",
-                        "description": "When true, treat query as a Python regex (re.search, case-insensitive). Supports alternation (|), character classes, lookaheads, etc.",
+                        "description": "When true, treat query as a Python regex (re.search, case-insensitive). Supports alternation (|), character classes, lookaheads, etc. Max 200 chars; nested quantifiers (e.g. '(a+)+') are rejected to prevent catastrophic backtracking.",
                         "default": False
                     },
                     "file_pattern": {
@@ -3703,6 +3703,18 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 return [TextContent(type="text", text=json.dumps(
                     {"error": f"Input validation error: {e.message}"}, indent=2
                 ))]
+
+        # jcm#329: cheap per-tool argument validation BEFORE strict-freshness
+        # waits and auto-watch reindexing. A call doomed to instant rejection
+        # must not pay unbounded pre-dispatch work first (field report: 29s
+        # to reject an over-long regex behind an auto-watch reindex).
+        if name == "search_text":
+            from .tools.search_text import validate_query_args
+            _arg_err = validate_query_args(
+                arguments.get("query", ""), bool(arguments.get("is_regex", False))
+            )
+            if _arg_err is not None:
+                return [TextContent(type="text", text=json.dumps(_arg_err, indent=2))]
 
         # Strict freshness mode: wait for any in-progress reindex to complete
         # before serving query results (except for write/index tools).

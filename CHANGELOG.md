@@ -4,6 +4,59 @@ All notable changes to jcodemunch-mcp are documented here.
 
 ## [Unreleased]
 
+## [1.108.55] - 2026-06-12 - turn-budget reset, honest budget packing, fast search_text rejection (#327, #328, #329)
+
+### Fixed
+
+- **#327 — Turn budget now resets in every reader, not only post-dispatch.**
+  The idle-gap reset lived solely inside `record_output`, which the server
+  calls after a tool's result is computed. Readers that run during tool
+  execution — `plan_turn`'s budget advisor via `percent_used()`,
+  `should_compact()` — therefore reported the previous turn's exhausted
+  counter after any idle gap (143.4% observed after a 2-minute pause). The
+  gap check is factored into `_maybe_reset_locked()` and fires in
+  `percent_used()` and `should_compact()` as well; reader-triggered resets
+  do not advance the activity timestamp, so consecutive readers all see the
+  fresh turn. Documented (in the class docstring) that the singleton is
+  process-global across repos and that the wall-clock gap behaves as a
+  rolling exploration budget during continuous agent use.
+
+- **#328 — `search_symbols` token_budget packs against payload, and fallback
+  summaries no longer duplicate signatures.** All three search paths (BM25,
+  semantic/hybrid, fusion) packed entries — and reported
+  `_meta.tokens_used` — using each symbol's source-body `byte_length`, even
+  in compact/standard mode where the row itself is ~50-80 bytes. A compact
+  call with `token_budget=8000` admitted "as many symbols as fit 32000
+  bytes of source code" (84 rows observed for `max_results=18`) while
+  `tokens_used` described code nobody received. New `_packing_cost_bytes()`
+  charges the encoded row in compact/standard and keeps the §1.2
+  materialized `byte_length` in full mode; `tokens_used`/`tokens_remaining`
+  now describe the payload. Separately, indexes built without an AI
+  summarizer persist `signature_fallback` output (the signature truncated
+  to 120 chars) as the summary; `_row_summary()` emits such echo-summaries
+  as empty so standard rows no longer carry the signature twice
+  (class/constant/type fallbacks like "Class Foo" are preserved). The
+  documented "token_budget overrides max_results" contract is unchanged;
+  schema + docstring now spell out that compact rows are cheap and budget
+  mode can therefore return many rows.
+
+- **#329 — `search_text` limits documented, and rejection is now instant.**
+  The 200-char regex cap, 500-char plain-query cap, and nested-quantifier
+  rejection existed only as in-tool checks discovered by hitting them, and
+  a doomed call still paid the full pre-dispatch cost first — strict
+  freshness waits plus auto-watch `ensure_indexed`, which can run an
+  unbounded folder reindex (29.3s to reject a 204-char regex in the field).
+  The checks are factored into `validate_query_args()` and `call_tool` runs
+  it before strict-freshness and auto-watch, so argument rejections return
+  in milliseconds. The limits are documented in the tool schema (`query` +
+  `is_regex` field descriptions) and the docstring, including the guidance
+  to split long alternations into multiple calls.
+
+All three reported by @mmashwani with verified-in-source root causes.
+Additive per the 1.x contract: no tool/response shape removals; budget
+packing and tokens_used change only toward their documented meaning.
+Regression tests in `tests/test_v1_108_55.py` (15).
+
 ## [1.108.54] - 2026-06-11 - list-repos / delete-index honor CODE_INDEX_PATH
 
 ### Fixed

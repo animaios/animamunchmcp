@@ -1,6 +1,7 @@
 """Search symbols across repository."""
 
 import heapq
+import json
 import math
 import re
 import time
@@ -441,6 +442,36 @@ def _materialize_full_entry(entry: dict, index, store, owner: str, name: str) ->
     entry["byte_length"] = (sym.get("byte_length", 0) or 0) + len(docstring.encode("utf-8")) + len(source.encode("utf-8"))
 
 
+def _packing_cost_bytes(entry: dict, detail_level: str) -> int:
+    """Bytes an entry charges against token_budget (jcm#328).
+
+    full: the materialized byte_length set by _materialize_full_entry before
+    packing (§1.2) — source + docstring dominate the payload there.
+    compact/standard: the encoded row itself. In these shapes the symbol's
+    source-body byte_length is metadata, not payload; charging it admitted
+    "as many rows as fit budget_bytes of source code" (84 rows observed for
+    max_results=18) and made tokens_used describe code nobody received.
+    """
+    if detail_level == "full":
+        return entry.get("byte_length", 0)
+    return len(json.dumps(entry, default=str))
+
+
+def _row_summary(sym: dict) -> str:
+    """Summary for a result row; empty when it merely echoes the signature.
+
+    Indexes built without an AI summarizer persist signature_fallback output
+    (the signature truncated to 120 chars) as the summary, so emitting both
+    columns duplicated the full signature in every such row (jcm#328).
+    Class/constant/type fallbacks ("Class Foo") carry real signal and pass.
+    """
+    summary = sym.get("summary", "") or ""
+    sig = sym.get("signature", "") or ""
+    if summary and sig and (summary == sig or summary == sig[:120]):
+        return ""
+    return summary
+
+
 def search_symbols(
     repo: str,
     query: str,
@@ -474,7 +505,12 @@ def search_symbols(
         decorator: Optional filter by decorator (substring match, e.g. 'route', 'property').
         max_results: Maximum results to return (ignored when token_budget is set).
         token_budget: Maximum tokens to consume. Results are greedily packed by
-            score until the budget is exhausted. Overrides max_results.
+            score until the budget is exhausted. Overrides max_results. The
+            budget charges each result's actual payload contribution (jcm#328):
+            encoded row size in compact/standard, materialized source bytes in
+            full. Compact rows are cheap (~15 tokens), so a budget can admit
+            many rows; pass max_results without token_budget when row count is
+            the constraint that matters.
         detail_level: Controls result verbosity.
             "auto" (default) picks "compact" for broad discovery (no token_budget,
             no debug, max_results >= 5) and "standard" otherwise. Explicitly-passed
@@ -770,7 +806,7 @@ def search_symbols(
                 "file": sym["file"],
                 "line": sym["line"],
                 "signature": sym["signature"],
-                "summary": sym.get("summary", ""),
+                "summary": _row_summary(sym),
                 "byte_length": sym.get("byte_length", 0),
             }
         decs = sym.get("decorators") or []
@@ -799,9 +835,10 @@ def search_symbols(
 
     budget_truncated = False
     if token_budget is not None:
+        # jcm#328: charge what the row actually adds to the response.
         packed, used_bytes = [], 0
         for entry in scored_results:
-            b = entry["byte_length"]
+            b = _packing_cost_bytes(entry, detail_level)
             if used_bytes + b <= budget_bytes:
                 packed.append(entry)
                 used_bytes += b
@@ -935,7 +972,8 @@ def search_symbols(
         **cost_avoided(tokens_saved, total_saved),
     }
     if token_budget is not None:
-        used = sum(e["byte_length"] for e in scored_results)
+        # jcm#328: report payload cost, not source-body bytes.
+        used = sum(_packing_cost_bytes(e, detail_level) for e in scored_results)
         meta["token_budget"] = token_budget
         meta["tokens_used"] = used // BYTES_PER_TOKEN
         meta["tokens_remaining"] = max(0, token_budget - used // BYTES_PER_TOKEN)
@@ -1158,7 +1196,7 @@ def _search_symbols_semantic(
                 "file": sym["file"],
                 "line": sym["line"],
                 "signature": sym["signature"],
-                "summary": sym.get("summary", ""),
+                "summary": _row_summary(sym),
                 "byte_length": sym.get("byte_length", 0),
             }
         decs = sym.get("decorators") or []
@@ -1176,10 +1214,11 @@ def _search_symbols_semantic(
 
     # ── Token budget packing ───────────────────────────────────────────────
     if token_budget is not None:
+        # jcm#328: charge what the row actually adds to the response.
         packed: list[dict] = []
         used = 0
         for entry in scored_results:
-            b = entry["byte_length"]
+            b = _packing_cost_bytes(entry, detail_level)
             if used + b <= budget_bytes:
                 packed.append(entry)
                 used += b
@@ -1209,7 +1248,8 @@ def _search_symbols_semantic(
         **cost_avoided(tokens_saved, total_saved),
     }
     if token_budget is not None:
-        used_bytes = sum(e["byte_length"] for e in scored_results)
+        # jcm#328: report payload cost, not source-body bytes.
+        used_bytes = sum(_packing_cost_bytes(e, detail_level) for e in scored_results)
         meta["token_budget"] = token_budget
         meta["tokens_used"] = used_bytes // BYTES_PER_TOKEN
         meta["tokens_remaining"] = max(0, token_budget - used_bytes // BYTES_PER_TOKEN)
@@ -1428,7 +1468,7 @@ def _search_symbols_fusion(
                 "file": sym["file"],
                 "line": sym["line"],
                 "signature": sym["signature"],
-                "summary": sym.get("summary", ""),
+                "summary": _row_summary(sym),
                 "byte_length": sym.get("byte_length", 0),
             }
         decs = sym.get("decorators") or []
@@ -1450,9 +1490,10 @@ def _search_symbols_fusion(
     # Budget packing
     budget_truncated = False
     if token_budget is not None:
+        # jcm#328: charge what the row actually adds to the response.
         packed, used_bytes = [], 0
         for entry in scored_results:
-            b = entry["byte_length"]
+            b = _packing_cost_bytes(entry, detail_level)
             if used_bytes + b <= budget_bytes:
                 packed.append(entry)
                 used_bytes += b
@@ -1485,7 +1526,8 @@ def _search_symbols_fusion(
         "channels": [ch.name for ch in channels],
     }
     if token_budget is not None:
-        used = sum(e["byte_length"] for e in scored_results)
+        # jcm#328: report payload cost, not source-body bytes.
+        used = sum(_packing_cost_bytes(e, detail_level) for e in scored_results)
         meta["token_budget"] = token_budget
         meta["tokens_used"] = used // BYTES_PER_TOKEN
         meta["tokens_remaining"] = max(0, token_budget - used // BYTES_PER_TOKEN)

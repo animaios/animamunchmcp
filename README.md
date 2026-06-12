@@ -110,9 +110,9 @@ is a byte the agent doesn't pay to read.
 <!-- WHATSNEW:START -->
 #### What's new
 
-- **[v1.108.52](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.52)** (2026-06-10) — back on PyPI; background-behavior disclosure
-- **[v1.108.51](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.51)** (2026-06-10) — `config set` / `config unset` CLI (typed JSONC write-back)
-- **[v1.108.50](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.50)** (2026-06-10) — `delete-index` CLI subcommand
+- **[v1.108.55](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.55)** (2026-06-12) — turn-budget reset, honest budget packing, fast search_text rejection (#327, #328, #329)
+- **[v1.108.54](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.54)** (2026-06-11) — list-repos / delete-index honor CODE_INDEX_PATH
+- **[v1.108.53](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.53)** (2026-06-11) — recency window on weight tuning
 <!-- WHATSNEW:END -->
 
 ![License](https://img.shields.io/badge/license-dual--use-blue)
