@@ -578,6 +578,43 @@ def _save_session_state() -> None:
 atexit.register(_save_session_state)
 
 
+# ---------------------------------------------------------------------------
+# Live journal persistence (#334) — feeds the out-of-process PreCompact hook.
+#
+# The hook (`jcodemunch-mcp hook-precompact`) runs in a separate process from
+# this server, so it sees a fresh, empty SessionJournal. We persist a compact
+# snapshot of the live journal to a small file the hook reads back. Writes are
+# throttled (not every tool call) and best-effort. Disable with
+# JCODEMUNCH_LIVE_JOURNAL=0.
+# ---------------------------------------------------------------------------
+
+_live_journal_lock = threading.Lock()
+_live_journal_last_flush = 0.0
+_LIVE_JOURNAL_MIN_INTERVAL_S = 2.0
+
+
+def _live_journal_enabled() -> bool:
+    val = os.environ.get("JCODEMUNCH_LIVE_JOURNAL", "").strip().lower()
+    return val not in {"0", "false", "no", "off"}
+
+
+def _maybe_flush_live_journal(journal) -> None:
+    """Throttled, best-effort flush of the live journal to disk (#334)."""
+    if not _live_journal_enabled():
+        return
+    global _live_journal_last_flush
+    now = time.monotonic()
+    with _live_journal_lock:
+        if now - _live_journal_last_flush < _LIVE_JOURNAL_MIN_INTERVAL_S:
+            return
+        _live_journal_last_flush = now
+    try:
+        from .tools.session_state import save_live_journal
+        save_live_journal(journal, base_path=os.environ.get("CODE_INDEX_PATH") or None)
+    except Exception:
+        logger.debug("live journal flush failed", exc_info=True)
+
+
 def _cleanup_mermaid_temp_startup() -> None:
     """Clean stale mermaid viewer temp files from previous sessions."""
     if not config_module.get("render_diagram_viewer_enabled", False):
@@ -4814,6 +4851,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                                 "scanned_symbols": ne.get("scanned_symbols", 0),
                                 "timestamp": _t.time(),
                             })
+                # Persist a compact live snapshot so the out-of-process
+                # PreCompact hook can read real session state (#334). Throttled.
+                _maybe_flush_live_journal(journal)
             except Exception:
                 logger.debug("Journal recording failed", exc_info=True)
 

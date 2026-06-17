@@ -424,24 +424,48 @@ def run_precompact() -> int:
     except (json.JSONDecodeError, ValueError):
         return 0
 
-    # Build snapshot in-process (no MCP round-trip needed)
+    # The hook runs as a SEPARATE process from the MCP server, so the in-process
+    # SessionJournal is empty (#334). Read the live journal the server persists
+    # incrementally first; fall back to the in-process journal (covers embedded
+    # invocations); finally emit an explicit "no live session" message rather
+    # than a misleading zero-state snapshot.
+    snapshot_text = ""
+    live_context = None
     try:
-        from jcodemunch_mcp.tools.get_session_snapshot import get_session_snapshot
-        snapshot_result = get_session_snapshot()
-        snapshot_text = snapshot_result.get("snapshot", "")
+        from jcodemunch_mcp.tools.get_session_snapshot import snapshot_from_live
+        live = snapshot_from_live()
+        if live:
+            snapshot_text = live.get("snapshot", "")
+            live_context = live.get("_context")
     except Exception:
-        return 0  # Snapshot failure must not block compaction
+        snapshot_text = ""
 
     if not snapshot_text:
-        return 0
+        try:
+            from jcodemunch_mcp.tools.get_session_snapshot import get_session_snapshot
+            snap = get_session_snapshot()
+            structured = snap.get("structured", {})
+            if structured.get("total_files_explored") or structured.get("total_searches"):
+                snapshot_text = snap.get("snapshot", "")
+        except Exception:
+            snapshot_text = ""
 
-    # Enrich with structural landmarks (PageRank top-N) and recently-changed symbols
-    try:
-        landmarks = _build_landmark_section()
-        if landmarks:
-            snapshot_text += landmarks
-    except Exception:
-        pass  # Landmark enrichment must not block compaction
+    used_fallback = False
+    if not snapshot_text:
+        # Honest fallback — never emit a healthy-looking zero-state snapshot.
+        snapshot_text = _precompact_no_journal_message()
+        used_fallback = True
+
+    # Enrich with structural landmarks (PageRank top-N) and recently-changed
+    # symbols. Seed from the live journal context when we have one so landmarks
+    # work out-of-process too; skip entirely on the no-journal fallback.
+    if not used_fallback:
+        try:
+            landmarks = _build_landmark_section(context=live_context)
+            if landmarks:
+                snapshot_text += landmarks
+        except Exception:
+            pass  # Landmark enrichment must not block compaction
 
     # Return snapshot as hook output for context injection.
     # PreCompact has no hookSpecificOutput variant in Claude Code's schema,
@@ -453,18 +477,39 @@ def run_precompact() -> int:
     return 0
 
 
+def _precompact_no_journal_message() -> str:
+    """Explicit fallback when no live jCodeMunch session journal is readable.
+
+    The PreCompact hook runs in a separate process from the MCP server (#334);
+    when the server has not persisted a live journal this session, say so plainly
+    instead of emitting a `Files explored: 0` snapshot that looks successful.
+    """
+    return (
+        "## Session Snapshot (jCodemunch)\n"
+        "No live jCodeMunch session journal was available to this PreCompact hook "
+        "process. The hook runs separately from the MCP server, so it could not "
+        "read in-flight session state. If jCodeMunch tools were used this session, "
+        "their snapshot is unavailable here; otherwise no code exploration was "
+        "recorded. (Set JCODEMUNCH_LIVE_JOURNAL=0 only if you intend to disable "
+        "the live journal.)"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Landmark enrichment helpers (Gap 4A — Structural Landmarks)
 # ---------------------------------------------------------------------------
 
-def _build_landmark_section(top_n: int = 20) -> str:
+def _build_landmark_section(top_n: int = 20, context: "dict | None" = None) -> str:
     """Build a compact landmarks + recently-changed section for PreCompact.
 
     Queries all indexed repos visible in the session journal's edited files,
     computes PageRank to find the most structurally central symbols, and
     cross-references the journal's edit log to surface recently-changed symbols.
 
-    Returns a markdown string to append to the snapshot, or "" if no data.
+    When ``context`` is supplied (e.g. the live journal read by the
+    out-of-process hook, #334) it is used instead of the empty in-process
+    journal. Returns a markdown string to append to the snapshot, or "" if no
+    data.
     """
     import logging
     logger = logging.getLogger(__name__)
@@ -477,8 +522,9 @@ def _build_landmark_section(top_n: int = 20) -> str:
         logger.debug("landmark imports failed", exc_info=True)
         return ""
 
-    journal = get_journal()
-    context = journal.get_context(max_files=50, max_queries=0, max_edits=50)
+    if context is None:
+        journal = get_journal()
+        context = journal.get_context(max_files=50, max_queries=0, max_edits=50)
     edited_files = [e["file"] for e in context.get("files_edited", [])]
     accessed_files = [f["file"] for f in context.get("files_accessed", [])]
 

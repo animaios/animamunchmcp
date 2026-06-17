@@ -110,9 +110,9 @@ is a byte the agent doesn't pay to read.
 <!-- WHATSNEW:START -->
 #### What's new
 
+- **[v1.108.57](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.57)** (2026-06-17) — PreCompact hook reads a persisted live session journal (#334)
 - **[v1.108.56](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.56)** (2026-06-17) — no-change freshness refresh, cache-hit hardening, subset-scoped pruning (#330, #331, #333)
 - **[v1.108.55](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.55)** (2026-06-12) — turn-budget reset, honest budget packing, fast search_text rejection (#327, #328, #329)
-- **[v1.108.54](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.54)** (2026-06-11) — list-repos / delete-index honor CODE_INDEX_PATH
 <!-- WHATSNEW:END -->
 
 ![License](https://img.shields.io/badge/license-dual--use-blue)
@@ -319,6 +319,7 @@ Everything jCodeMunch does beyond answering a tool call is listed here. All of i
 - **Anonymous savings telemetry.** The server periodically sends a random anonymous ID plus aggregate token-savings counters to the project's public community meter. No code, no file paths, no repo names, no PII — counters only. Opt out with `share_savings: false` in `config.jsonc` or `JCODEMUNCH_SHARE_SAVINGS=0`.
 - **Agent hooks.** `init` / `install` can write hook entries (auto-reindex on edit, read-interception nudges) into your MCP client's settings. They're offered during the interactive flow, shown before writing, and fully removed by `uninstall`.
 - **Local index storage.** Indexes live at `~/.code-index/` (override with `CODE_INDEX_PATH`). Delete the directory and every trace of indexing is gone.
+- **Live session journal.** While the server runs, it periodically writes a small `_session_live.json` in `~/.code-index/` recording the files and searches the agent touched this session (paths and query strings only, no file contents). It exists so the out-of-process PreCompact hook can restore session orientation after context compaction. Throttled, atomically written, overwritten in place; disable with `JCODEMUNCH_LIVE_JOURNAL=0`.
 
 The base package makes no other network calls and leaves no other persistent processes. AI-summary extras call their configured provider's API only when you enable them — see the extras matrix under [Start fast](#start-fast).
 

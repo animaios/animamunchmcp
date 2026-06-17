@@ -237,3 +237,92 @@ def get_session_state() -> SessionState:
         if _session_state is None:
             _session_state = SessionState()
         return _session_state
+
+
+# ---------------------------------------------------------------------------
+# Live journal bridge (#334)
+#
+# The PreCompact hook runs as a separate process (`jcodemunch-mcp
+# hook-precompact`) from the MCP server, so it reads a fresh, empty in-process
+# SessionJournal and emits a zero-state snapshot. To give the hook the real
+# session state, the live server process persists a compact journal snapshot to
+# a small, atomically written file the hook can read back. This is independent
+# of `session_resume` (which only fires at clean shutdown) and is keyed by the
+# shared CODE_INDEX_PATH — the same store both processes resolve — matching the
+# process-global scope of the journal singleton.
+# ---------------------------------------------------------------------------
+
+_LIVE_JOURNAL_FILENAME = "_session_live.json"
+
+
+def _live_journal_path(base_path: Optional[str] = None) -> Path:
+    if base_path is None:
+        base_path = os.environ.get("CODE_INDEX_PATH", str(Path.home() / ".code-index"))
+    return Path(base_path) / _LIVE_JOURNAL_FILENAME
+
+
+def save_live_journal(journal: Any, base_path: Optional[str] = None) -> bool:
+    """Atomically persist a compact live journal snapshot for the PreCompact hook.
+
+    Best-effort: any failure is swallowed and returns False, so a hot-path
+    caller never breaks on a freshness-bookkeeping write. Returns True on a
+    successful write.
+    """
+    try:
+        ctx = journal.get_context(
+            max_files=200, max_queries=200, max_edits=200, sort_by="frequency"
+        )
+        try:
+            neg = journal.get_negative_evidence_log()[-50:]
+        except Exception:
+            neg = []
+        payload = {
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "pid": os.getpid(),
+            "session_duration_s": ctx.get("session_duration_s", 0),
+            "total_unique_files": ctx.get("total_unique_files", 0),
+            "total_unique_queries": ctx.get("total_unique_queries", 0),
+            "files_accessed": ctx.get("files_accessed", []),
+            "recent_searches": ctx.get("recent_searches", []),
+            "files_edited": ctx.get("files_edited", []),
+            "negative_evidence_log": neg,
+        }
+        path = _live_journal_path(base_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Per-PID temp name so concurrent writers never clobber one tmp file
+        # before the atomic replace (same lesson as the index store writes).
+        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(payload), encoding="utf-8")
+        tmp.replace(path)
+        return True
+    except Exception:
+        return False
+
+
+def load_live_journal(
+    base_path: Optional[str] = None,
+    max_age_minutes: Optional[int] = None,
+) -> Optional[dict]:
+    """Read the live journal snapshot the server persisted, or None.
+
+    Returns None when the file is missing, unreadable, or older than
+    ``max_age_minutes`` (when given). Never raises.
+    """
+    try:
+        path = _live_journal_path(base_path)
+        if not path.exists():
+            return None
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if max_age_minutes is not None:
+        updated = data.get("updated_at", "")
+        if not updated:
+            return None
+        try:
+            ts = datetime.fromisoformat(updated.replace("Z", "+00:00"))
+            if datetime.now(timezone.utc) - ts > timedelta(minutes=max_age_minutes):
+                return None
+        except Exception:
+            return None
+    return data

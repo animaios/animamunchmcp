@@ -4,6 +4,32 @@ All notable changes to jcodemunch-mcp are documented here.
 
 ## [Unreleased]
 
+## [1.108.57] - 2026-06-17 - PreCompact hook reads a persisted live session journal (#334)
+
+### Fixed
+
+- **#334 — the PreCompact CLI hook can now see real session state.** The
+  `hook-precompact` command runs as a separate process from the MCP server, so
+  it imported `get_session_snapshot()`, read a fresh process-local
+  `SessionJournal`, and emitted a healthy-looking but empty
+  `Files explored: 0 | Searches: 0` snapshot — failing the one thing it exists to
+  do. The live server process now persists a compact journal snapshot to a
+  small, atomically written `_session_live.json` in `CODE_INDEX_PATH`
+  (`save_live_journal`, throttled to at most once every ~2s on the tool-call
+  path, best-effort, independent of `session_resume`). The hook reads it back
+  (`snapshot_from_live`) and renders it through the same formatter the live tool
+  uses — so the out-of-process snapshot now matches what the running server
+  sees, including structural-landmark enrichment seeded from the persisted
+  journal. When no live journal is readable, the hook emits an explicit
+  "no live session journal" message instead of an apparently-successful
+  zero-state snapshot. The snapshot renderer is factored into a shared
+  `_render_snapshot()` so the live tool and the hook stay byte-identical.
+  Disable the live journal with `JCODEMUNCH_LIVE_JOURNAL=0` (disclosed in the
+  README's background-behavior section). Reported by @mmashwani with a
+  source-cited probe of the process boundary. 10 tests in
+  `tests/test_v1_108_57.py`, including a real cross-process check (seed a
+  journal in one process, read it from a fresh `hook-precompact` subprocess).
+
 ## [1.108.56] - 2026-06-17 - no-change freshness refresh, cache-hit hardening, subset-scoped pruning (#330, #331, #333)
 
 ### Fixed
