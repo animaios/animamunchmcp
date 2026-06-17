@@ -14,16 +14,20 @@ Two modes:
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 from collections import defaultdict
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from ..storage import IndexStore
 from ..parser.imports import resolve_specifier
 from ..parser.context._route_utils import ENTRY_POINT_DECORATOR_RE
 from ._utils import resolve_repo
 from ._call_graph import build_symbols_by_file, find_direct_callees
+from .flow_edges import resolve_flow_edges
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +257,7 @@ def get_signal_chains(
     max_depth: int = 5,
     include_tests: bool = False,
     storage_path: Optional[str] = None,
+    include_flow_edges: bool = True,
 ) -> dict:
     """Discover entry-point-to-leaf pathways through the call graph.
 
@@ -264,6 +269,12 @@ def get_signal_chains(
         max_depth:      BFS depth limit per chain (1–8, default 5).
         include_tests:  Include test_* functions as gateways (default false).
         storage_path:   Custom storage path.
+        include_flow_edges: Resolve framework flow edges the call graph is blind
+                        to — string-dispatched handlers (Django ``path()``,
+                        Express ``router.get(p, h)``, Flask ``add_url_rule``,
+                        Rails ``to:``) surface as http gateways, and templates a
+                        chain renders attach as a per-chain ``views`` list.
+                        Default true; set false for pure call-graph behavior.
 
     Returns:
         Discovery mode: {chains, gateway_count, orphan_symbols, orphan_symbol_pct, ...}
@@ -306,6 +317,50 @@ def get_signal_chains(
         label = _extract_label(sym, gw_kind)
         gateways.append((sym, gw_kind, label))
 
+    # ------------------------------------------------------------------
+    # Phase 1b: framework flow edges the call graph can't see.
+    #   route->handler: string-dispatched handlers become http gateways.
+    #   render->view:   rendered templates indexed for per-chain annotation.
+    # ------------------------------------------------------------------
+    flow_edges: list[dict] = []
+    renders_by_symbol: dict[str, list[str]] = {}
+    flow_summary = {"route_gateways": 0, "unresolved_routes": 0, "render_views": 0}
+    if include_flow_edges:
+        try:
+            flow_edges = resolve_flow_edges(
+                index, store, owner, name, symbols_by_file=symbols_by_file,
+            )
+        except Exception:
+            logger.debug("flow-edge resolution failed", exc_info=True)
+            flow_edges = []
+
+        symbol_index_fe: dict[str, dict] = getattr(index, "_symbol_index", {})
+        existing_gateway_ids = {gw_sym.get("id", "") for gw_sym, _, _ in gateways}
+        seen_route_ids: set[str] = set()
+        for e in flow_edges:
+            etype = e.get("type")
+            if etype == "route->handler":
+                dst_id = e.get("dst_id")
+                if not dst_id:
+                    flow_summary["unresolved_routes"] += 1
+                    continue
+                # Already a decorator gateway, or already added via another route.
+                if dst_id in existing_gateway_ids or dst_id in seen_route_ids:
+                    continue
+                handler_sym = symbol_index_fe.get(dst_id)
+                if not handler_sym:
+                    continue
+                if kind and kind != "http":
+                    continue
+                seen_route_ids.add(dst_id)
+                gateways.append((handler_sym, "http", e.get("label", "")))
+                flow_summary["route_gateways"] += 1
+            elif etype == "render->view":
+                src_id = e.get("src_id")
+                if src_id:
+                    renders_by_symbol.setdefault(src_id, []).append(e.get("dst_name", ""))
+                    flow_summary["render_views"] += 1
+
     if not gateways:
         elapsed = (time.perf_counter() - t0) * 1000
         warning = (
@@ -316,13 +371,16 @@ def get_signal_chains(
             "If your framework uses a different pattern, the call graph can "
             "still be explored with get_call_hierarchy."
         )
+        no_gw_meta: dict = {"timing_ms": round(elapsed, 1)}
+        if include_flow_edges:
+            no_gw_meta["flow_edges"] = flow_summary
         return {
             "repo": f"{owner}/{name}",
             "gateway_count": 0,
             "chain_count": 0,
             "chains": [],
             "gateway_warning": warning,
-            "_meta": {"timing_ms": round(elapsed, 1)},
+            "_meta": no_gw_meta,
         }
 
     # ------------------------------------------------------------------
@@ -371,6 +429,21 @@ def get_signal_chains(
             "files_touched": files_touched,
             "file_count": len(files_touched),
         }
+
+        # Templates rendered anywhere on this chain (render->view flow edges).
+        # Additive: the key is omitted entirely when there are none, so output
+        # is byte-identical to pre-flow-edge behavior absent any renders.
+        if renders_by_symbol:
+            views: list[str] = []
+            seen_views: set[str] = set()
+            for sid in [gw_id] + [cs["id"] for cs in chain_syms]:
+                for tmpl in renders_by_symbol.get(sid, []):
+                    if tmpl and tmpl not in seen_views:
+                        seen_views.add(tmpl)
+                        views.append(tmpl)
+            if views:
+                chain_entry["views"] = views
+
         chains.append(chain_entry)
 
     # Sort chains: http first, then by reach descending
@@ -430,7 +503,7 @@ def get_signal_chains(
                 })
 
         elapsed = (time.perf_counter() - t0) * 1000
-        return {
+        lookup_result = {
             "repo": f"{owner}/{name}",
             "symbol": target_name,
             "symbol_id": target_id,
@@ -442,6 +515,9 @@ def get_signal_chains(
                 "total_gateways": len(gateways),
             },
         }
+        if include_flow_edges:
+            lookup_result["_meta"]["flow_edges"] = flow_summary
+        return lookup_result
 
     # ------------------------------------------------------------------
     # Phase 4: discovery mode — compute orphan stats
@@ -459,7 +535,7 @@ def get_signal_chains(
         kind_counts[c["kind"]] += 1
 
     elapsed = (time.perf_counter() - t0) * 1000
-    return {
+    result = {
         "repo": f"{owner}/{name}",
         "gateway_count": len(gateways),
         "chain_count": len(chains),
@@ -475,3 +551,6 @@ def get_signal_chains(
             "total_functions_methods": total_fn_method,
         },
     }
+    if include_flow_edges:
+        result["_meta"]["flow_edges"] = flow_summary
+    return result

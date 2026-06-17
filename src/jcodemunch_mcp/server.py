@@ -3153,6 +3153,18 @@ def _build_tools_list() -> list[Tool]:
                         "description": "Include test_* functions as gateways (default false).",
                         "default": False,
                     },
+                    "include_flow_edges": {
+                        "type": "boolean",
+                        "description": (
+                            "Resolve framework flow edges the call graph is blind to (default true). "
+                            "String-dispatched handlers (Django path()/re_path(), Express "
+                            "router.get(path, handler), Flask add_url_rule, Rails to:) surface as http "
+                            "gateways even with no route decorator, and templates a chain renders "
+                            "(render/render_template/res.render/view) attach as a per-chain 'views' list. "
+                            "Set false for pure call-graph behavior."
+                        ),
+                        "default": True,
+                    },
                 },
                 "required": ["repo"],
             },
@@ -4717,6 +4729,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     kind=arguments.get("kind"),
                     max_depth=arguments.get("max_depth", 5),
                     include_tests=arguments.get("include_tests", False),
+                    include_flow_edges=arguments.get("include_flow_edges", True),
                     storage_path=storage_path,
                 )
             )

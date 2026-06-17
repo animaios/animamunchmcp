@@ -4,6 +4,43 @@ All notable changes to jcodemunch-mcp are documented here.
 
 ## [Unreleased]
 
+## [1.108.58] - 2026-06-17 - Framework flow-edge resolver for get_signal_chains
+
+### Added
+
+- **Language-agnostic framework flow-edge resolver** (`tools/flow_edges.py`,
+  `resolve_flow_edges`). The AST call graph is structurally blind to the two
+  most common ways a web framework wires a request to the code that handles it,
+  and `get_signal_chains` now recovers both:
+  - **route → handler.** A route registration that binds a URL string to a
+    handler *referenced* rather than called/decorated leaves no call edge, so
+    the handler never surfaced as an entry point. The resolver detects the
+    registration *shape* — Django `path()`/`re_path()`/`url()`, Express/Fastify/
+    Koa `router.get(path, handler)`, Flask `add_url_rule(view_func=...)`, Rails
+    `get "x", to: "ctrl#action"` — resolves the handler reference to a symbol
+    through the index's own import graph, and `get_signal_chains` promotes it to
+    an `http` gateway. Repos that dispatch by string (e.g. a Django `urls.py`)
+    now produce signal chains where they previously returned none. Decorator-
+    bound handlers (`@app.route`, `@GetMapping`, `@Get()`) already surface as
+    gateways and are deliberately not re-emitted.
+  - **render → view.** A handler that renders a template named by a string
+    literal (`render(request, "x.html")`, `render_template("x.html")`,
+    `res.render("index")`, `view("home")`) has no call edge to the template.
+    Each chain now carries an additive `views` list of the templates it renders;
+    when the template file is itself indexed, the edge resolves to that file.
+  This is **one shape-keyed resolver, not a plugin per framework**: detection
+  keys on the structural shape of the call, and resolution reuses the same
+  symbol-table + import-graph machinery `find_direct_callees` uses. It is a pure
+  read path — no reindex, no `INDEX_VERSION` bump, nothing persisted.
+- **`get_signal_chains` gains `include_flow_edges` (default `true`).** Set
+  `false` for pure call-graph behavior. `_meta.flow_edges` reports
+  `{route_gateways, unresolved_routes, render_views}`. With the flag off, or on a
+  repo with no route/render shapes, output is byte-identical to the previous
+  behavior (no new gateways, no `views` keys, no `flow_edges` meta).
+
+10 tests in `tests/test_v1_108_58.py` (Django/Express/Flask resolution,
+render→view capture, unresolved-route reporting, off-path parity).
+
 ## [1.108.57] - 2026-06-17 - PreCompact hook reads a persisted live session journal (#334)
 
 ### Fixed
