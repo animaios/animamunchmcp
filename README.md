@@ -695,6 +695,22 @@ The server resolves the model to a tier via `model_tier_map` in config (fuzzy ma
 
 When `adaptive_tiering` is false, `plan_turn(model=...)` and `announce_model(...)` accept their arguments but do not switch the tier — the static `tool_profile` continues to drive the exposed tools. `set_tool_tier(tier=...)` remains honored either way because it's an explicit user call, not automatic behavior.
 
+#### The Counter — collapse to a 3-tool front door (`tool_surface`)
+
+For the most token-sensitive setups, `tool_surface` goes further than tiering: it collapses the resident tool list to a **three-tool front door** that fronts the entire catalog without losing any capability. Every turn the host serializes each resident tool's schema into context; the front door shrinks that fixed per-turn cost and removes the "pick one of N" dispatch dilution.
+
+Set it in `config.jsonc` (or the `JCODEMUNCH_TOOL_SURFACE` env var, which wins):
+
+```jsonc
+"tool_surface": "counter"
+```
+
+- **`order(action, args)`** — dispatch any catalog action by name. Read-only by default at the boundary: actions that change index/session state require `allow_state_change=true`, and execution/file-write verbs are refused outright (the front door is a charter checkpoint, never a mutation path).
+- **`menu(query?)`** — search/browse the action catalog (compact rows: action, summary, required args, `state_changing`), so the full set of schemas needn't stay resident in context.
+- **`route(task, repo?, execute?)`** — map a natural-language task to the best action(s); with `execute=true`, dispatch the top recommendation in the same call. Recommends `assemble_task_context` / `plan_turn` for context-gathering intents.
+
+`counter` keeps the always-present controls (`set_tool_tier`, `announce_model`, `jcodemunch_guide`) alongside the front door. Any other value (default `full`) leaves the existing behavior unchanged — the front-door tools stay hidden (still callable), so upgrading changes nothing until you opt in. The two mechanisms compose: under `counter`, `order` / `route` still reach every action regardless of the active `core` / `standard` / `full` tier.
+
 #### `disabled_tools` precedence
 
 `disabled_tools` applies **after** tier filtering. A tool listed in both a tier bundle and `disabled_tools` will not be exposed. The server logs a `WARNING` on startup and `jcodemunch-mcp config --check` prints a `WARN:` row if this happens.
@@ -815,6 +831,7 @@ Tested configurations:
 | **Any other MCP client** | stdio: `jcodemunch-mcp`, HTTP: `jcodemunch-mcp serve --transport sse` |
 | **VS Code (any MCP client)** | Install the [jCodeMunch VS Code extension](https://marketplace.visualstudio.com/items?itemName=jgravelle.jcodemunch-mcp-vscode) for on-save auto-reindex under Copilot Chat / Continue / Cline — closes the staleness gap when the host doesn't fire PostToolUse hooks |
 | **GitHub Copilot CLI / cloud agent** | `jcodemunch-mcp init --copilot-hooks` writes `.github/hooks/hooks.json` with a postToolUse rule for auto-reindex |
+| **[Odysseus](https://github.com/pewdiepie-archdaemon/odysseus)** (self-hosted AI workspace) | SSE transport: run `jcodemunch-mcp serve --transport sse` on the host (token **unset**), register the URL in the MCP Registry (see below) — *community-tested* |
 
 <details>
 <summary>Codex CLI config</summary>
@@ -872,6 +889,50 @@ mcp_servers:
     command: "uvx"
     args: ["jcodemunch-mcp"]
 ```
+</details>
+
+<details>
+<summary>Odysseus config (self-hosted AI workspace)</summary>
+
+[Odysseus](https://github.com/pewdiepie-archdaemon/odysseus) runs in Docker and
+indexes nothing itself; jCodeMunch indexes your code on the **host**. Run
+jCodeMunch as an **SSE** server on the host and register its URL in Odysseus.
+Its SSE client connects by URL only (no auth header), so leave the token unset
+and secure the endpoint by network binding instead.
+
+**1. Start jCodeMunch on the host (no token):**
+
+```bash
+jcodemunch-mcp index .
+jcodemunch-mcp serve --transport sse --host 0.0.0.0 --port 8848
+```
+
+Leave `JCODEMUNCH_HTTP_TOKEN` **unset** — Odysseus's SSE client sends no
+`Authorization` header, so a token returns 401 on connect.
+
+**2. In Odysseus → Settings → MCP Registry → Add server:**
+
+- **Transport:** SSE
+- **URL:** `http://host.docker.internal:8848/sse`
+  (Linux: add `extra_hosts: ["host.docker.internal:host-gateway"]` to the
+  Odysseus service in `docker-compose.yml`)
+
+**3. Secure by network, not token.** Because the SSE path is unauthenticated,
+bind jCodeMunch so only the Odysseus container can reach it (host-gateway
+interface / firewall), not a public interface. `JCODEMUNCH_RATE_LIMIT` adds a
+throttle.
+
+**4. Restart Odysseus.** All jCodeMunch tools appear in chat + agents. Keep the
+index fresh with `jcodemunch-mcp watch .`; use Odysseus's per-server
+`disabled_tools` to trim the surface.
+
+jCodeMunch is read-only by charter, and its `get_*` / `search_*` / `find_*` /
+`check_*` tool naming satisfies Odysseus's plan-mode read-only gate, so the
+suite stays usable in plan mode.
+
+> *Community-tested:* the MCP protocol round-trip (SSE connect + tool discovery)
+> is verified; the container-to-host network dial depends on your Docker setup.
+
 </details>
 
 ## Star History

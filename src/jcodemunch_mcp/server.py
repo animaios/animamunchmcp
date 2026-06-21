@@ -172,6 +172,116 @@ _ALWAYS_PRESENT_TOOLS: frozenset[str] = frozenset({"set_tool_tier", "announce_mo
 # explicitly list it in disabled_tools should be honored.
 _UNDISABLEABLE_TOOLS: frozenset[str] = frozenset({"set_tool_tier", "announce_model"})
 
+# --- The Counter: adaptive tool surface (front door) ----------------------- #
+# order/menu/route collapse the ~83-tool surface to a 3-tool front door without
+# removing any capability. See docs/prd-adaptive-tool-surface.md + counter.py.
+from . import counter as _counter
+
+_COUNTER_FRONT_DOOR: frozenset[str] = _counter.FRONT_DOOR
+
+# Unfiltered tool catalog, captured by _build_tools_list before tier/surface
+# filtering. Single source of truth for menu() and order()'s action allowlist,
+# so the front door can surface/dispatch any action regardless of resident tier.
+_RAW_CATALOG: "Optional[list]" = None
+
+
+def _effective_surface() -> str:
+    """Active tool surface. 'counter' collapses list_tools to the front door;
+    anything else (default 'full') preserves existing tiered behavior unchanged.
+    Env JCODEMUNCH_TOOL_SURFACE wins over config 'tool_surface'.
+    """
+    env = os.environ.get("JCODEMUNCH_TOOL_SURFACE")
+    if env:
+        return env.strip().lower()
+    return (config_module.get("tool_surface", "full") or "full").strip().lower()
+
+
+def _counter_front_door_tools() -> list:
+    """Tool definitions for order / menu / route."""
+    return [
+        Tool(
+            name="order",
+            description=(
+                "Dispatch any jcodemunch action by name: order(action, args). The "
+                "single-verb front door to the full tool catalog. Read-only by "
+                "default — actions that change index/session state require "
+                "allow_state_change=true, and execution/file-write verbs are refused. "
+                "Call 'menu' to discover actions, or 'route' to pick one from a task."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "description": "Name of the catalog action to run (e.g. 'search_symbols')."},
+                    "args": {"type": "object", "description": "Arguments for that action, exactly as you'd pass them directly.", "default": {}},
+                    "allow_state_change": {"type": "boolean", "description": "Opt in to dispatching an index/session state-changing action (e.g. index_repo).", "default": False},
+                },
+                "required": ["action"],
+            },
+        ),
+        Tool(
+            name="menu",
+            description=(
+                "Discover catalog actions without keeping all ~83 tool schemas "
+                "resident: menu(query?). Returns compact rows (action, summary, "
+                "required args, state_changing). With no query, lists the catalog. "
+                "Pair with 'order' to dispatch the chosen action."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Optional. Keywords describing what you want to do; ranks matching actions."},
+                    "limit": {"type": "integer", "description": "Max actions to return.", "default": 25},
+                },
+            },
+        ),
+        Tool(
+            name="route",
+            description=(
+                "Map a natural-language task to the best catalog action(s): "
+                "route(task, repo?, execute?). Returns ranked recommendations with "
+                "ready-to-run argument templates. With execute=true, dispatches the "
+                "top recommendation and returns its result in the same call, "
+                "collapsing discover-then-call into one round-trip. Recommends "
+                "assemble_task_context / plan_turn for context-gathering intents."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "task": {"type": "string", "description": "What you're trying to do, in plain language."},
+                    "repo": {"type": "string", "description": "Repository identifier (required to execute repo-scoped actions)."},
+                    "execute": {"type": "boolean", "description": "If true, dispatch the top recommended action and return its result.", "default": False},
+                    "model": {"type": "string", "description": "Optional active model id; piggybacks tier-switch like plan_turn(model=...)."},
+                },
+                "required": ["task"],
+            },
+        ),
+    ]
+
+
+def _raw_catalog_tools() -> list:
+    """Return the unfiltered catalog, building it once on demand."""
+    global _RAW_CATALOG
+    if _RAW_CATALOG is None:
+        _build_tools_list()  # populates _RAW_CATALOG as a side effect
+    return _RAW_CATALOG or []
+
+
+def _catalog_rows() -> "list[dict]":
+    """Menu-shaped rows for every real action (front door excluded)."""
+    rows = []
+    for t in _raw_catalog_tools():
+        if t.name in _COUNTER_FRONT_DOOR:
+            continue
+        row = _counter.catalog_entry(t.name, t.description or "", t.inputSchema or {})
+        row["_description"] = t.description or ""
+        rows.append(row)
+    return rows
+
+
+def _catalog_names() -> set:
+    return {t.name for t in _raw_catalog_tools() if t.name not in _COUNTER_FRONT_DOOR}
+
+
 # --- Runtime session tier state -------------------------------------------- #
 import threading
 import uuid
@@ -3403,6 +3513,22 @@ def _build_tools_list() -> list[Tool]:
             },
         ),
     ]
+    # --- The Counter: register the front door + capture the raw catalog ------
+    all_tools = all_tools + _counter_front_door_tools()
+    global _RAW_CATALOG
+    _RAW_CATALOG = list(all_tools)
+    surface = _effective_surface()
+    if surface == "counter":
+        # Collapse to the front door + always-present controls. Tier filtering
+        # is intentionally bypassed: 'counter' is the surface choice itself.
+        keep = _COUNTER_FRONT_DOOR | _ALWAYS_PRESENT_TOOLS
+        tools = [t for t in all_tools if t.name in keep]
+        _apply_description_overrides(tools)
+        return tools
+    # Non-counter surfaces keep existing behavior byte-for-byte: the front-door
+    # tools stay hidden (still callable via call_tool), so 'full' and the
+    # existing tiers are unchanged on upgrade.
+    all_tools = [t for t in all_tools if t.name not in _COUNTER_FRONT_DOOR]
     # Start with a mutable copy for filtering.
     tools = list(all_tools)
     # --- Profile filtering ---------------------------------------------------
@@ -3738,6 +3864,96 @@ async def _auto_watch_if_needed(name: str, arguments: dict, storage_path: Option
         logger.debug("Auto-watch failed for %s", folder, exc_info=True)
 
 
+async def _handle_counter_tool(name: str, arguments: dict) -> list[TextContent]:
+    """Dispatch the Counter front door (order / menu / route)."""
+    if name == "order":
+        return await _handle_order(arguments)
+    if name == "menu":
+        return _handle_menu(arguments)
+    if name == "route":
+        return await _handle_route(arguments)
+    return [TextContent(type="text", text=json.dumps({"error": f"Unknown front-door tool '{name}'"}))]
+
+
+async def _handle_order(arguments: dict) -> list[TextContent]:
+    """order(action, args): validate against the catalog + charter gate, then
+    re-enter the normal pipeline for the resolved action."""
+    action = arguments.get("action")
+    args = arguments.get("args") or {}
+    if not isinstance(args, dict):
+        return [TextContent(type="text", text=json.dumps({"error": "order 'args' must be an object."}, indent=2))]
+    allow = bool(arguments.get("allow_state_change", False))
+    err = _counter.order_gate(action, _catalog_names(), allow)
+    if err is not None:
+        return [TextContent(type="text", text=json.dumps({"error": err, "tool": "order"}, indent=2))]
+    return await call_tool(action, dict(args))
+
+
+def _handle_menu(arguments: dict) -> list[TextContent]:
+    """menu(query?, limit?): search/browse the action catalog."""
+    query = arguments.get("query")
+    try:
+        limit = int(arguments.get("limit", 25))
+    except (TypeError, ValueError):
+        limit = 25
+    limit = max(1, min(limit, 200))
+    rows = _counter.search_catalog(_catalog_rows(), query, limit)
+    clean = [{k: v for k, v in r.items() if k != "_description"} for r in rows]
+    payload = {
+        "tool": "menu",
+        "query": query or None,
+        "count": len(clean),
+        "total_actions": len(_catalog_names()),
+        "actions": clean,
+        "hint": "Dispatch with order(action, args). Get a task->action pick with route(task).",
+    }
+    return [TextContent(type="text", text=json.dumps(payload, separators=(",", ":")))]
+
+
+async def _handle_route(arguments: dict) -> list[TextContent]:
+    """route(task, repo?, execute?, model?): intent -> recommended action(s),
+    optionally dispatching the top one in the same call."""
+    task = arguments.get("task")
+    if not task or not isinstance(task, str):
+        return [TextContent(type="text", text=json.dumps({"error": "route requires a 'task' string."}, indent=2))]
+    repo = arguments.get("repo")
+    execute = bool(arguments.get("execute", False))
+    names = _catalog_names()
+    recs = _counter.classify_intent(task, names)
+    if not recs:  # fall back to catalog search when no curated rule matched
+        for r in _counter.search_catalog(_catalog_rows(), task, 3):
+            recs.append({"action": r["action"], "why": r["summary"]})
+    for r in recs:
+        tmpl = _counter.shape_execute_args(r["action"], repo, task)
+        r["args_template"] = tmpl if tmpl is not None else {"repo": repo or "<repo>", "_hint": "see menu for args"}
+        r["state_changing"] = _counter.is_state_changing(r["action"])
+    payload = {"tool": "route", "task": task, "recommended": recs}
+    if not recs:
+        payload["hint"] = "No confident action match. Call menu(query=...) to browse."
+        return [TextContent(type="text", text=json.dumps(payload, separators=(",", ":")))]
+    if execute:
+        action = recs[0]["action"]
+        exec_args = _counter.shape_execute_args(action, repo, task)
+        if exec_args is None:
+            payload["executed"] = False
+            payload["execute_error"] = (
+                f"Cannot auto-build args for '{action}' from (repo, task). "
+                f"Call order('{action}', args) with explicit arguments."
+            )
+            return [TextContent(type="text", text=json.dumps(payload, separators=(",", ":")))]
+        if _counter.is_state_changing(action):
+            payload["executed"] = False
+            payload["execute_error"] = f"Top action '{action}' is state-changing; dispatch it explicitly via order(allow_state_change=true)."
+            return [TextContent(type="text", text=json.dumps(payload, separators=(",", ":")))]
+        model = arguments.get("model")
+        if model and action == "plan_turn":
+            exec_args["model"] = model
+        result = await call_tool(action, exec_args)
+        routed = {"tool": "route", "task": task, "executed_action": action, "args": exec_args}
+        return [TextContent(type="text", text=json.dumps(routed, separators=(",", ":")))] + list(result)
+    return [TextContent(type="text", text=json.dumps(payload, separators=(",", ":")))]
+
+
 @server.call_tool(validate_input=False)
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     """Handle tool calls."""
@@ -3763,6 +3979,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 return [TextContent(type="text", text=json.dumps(
                     {"error": f"Input validation error: {e.message}"}, indent=2
                 ))]
+
+        # The Counter front door: order/menu/route. Handled before repo-scoped
+        # strict-freshness/auto-watch (the front door isn't repo-scoped; order
+        # re-enters call_tool for the real action, which then runs those hooks).
+        if name in _COUNTER_FRONT_DOOR:
+            return await _handle_counter_tool(name, arguments)
 
         # jcm#329: cheap per-tool argument validation BEFORE strict-freshness
         # waits and auto-watch reindexing. A call doomed to instant rejection

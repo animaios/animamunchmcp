@@ -330,6 +330,51 @@ If you already have jcodemunch configured for Claude Code or Gemini CLI,
 `agy plugin import claude` (or `import gemini`) can pull the existing
 config across without re-editing JSON.
 
+## Odysseus (self-hosted AI workspace)
+
+[Odysseus](https://github.com/pewdiepie-archdaemon/odysseus) runs in Docker and
+has first-class MCP support, but it indexes nothing itself — jCodeMunch indexes
+your code on the **host**. So instead of a stdio `command`/`args` entry (which
+would run inside the container and only see volume-mounted code), run jCodeMunch
+as an **SSE** server on the host and point Odysseus at the URL.
+
+One catch found by reading Odysseus's source: its SSE client connects by URL
+only and sends **no `Authorization` header**, and its other HTTP transport
+expects OAuth rather than a static token. jCodeMunch uses a static
+`JCODEMUNCH_HTTP_TOKEN`, so for Odysseus you leave the token **unset** and
+secure the endpoint by network binding.
+
+**1. Start jCodeMunch on the host (token unset):**
+
+```bash
+jcodemunch-mcp index .
+jcodemunch-mcp serve --transport sse --host 0.0.0.0 --port 8848
+```
+
+**2. In Odysseus → Settings → MCP Registry → Add server:**
+
+- **Transport:** SSE
+- **URL:** `http://host.docker.internal:8848/sse`
+
+On Linux, give the container a route to the host by adding
+`extra_hosts: ["host.docker.internal:host-gateway"]` to the Odysseus service in
+its `docker-compose.yml`.
+
+**3. Secure by network, not token.** Bind jCodeMunch so only the Odysseus
+container can reach it (the host-gateway interface plus a firewall rule), not a
+public interface — the SSE endpoint is unauthenticated. `JCODEMUNCH_RATE_LIMIT`
+adds a per-client throttle.
+
+**4. Restart Odysseus.** jCodeMunch's tools show up in chat and agents. Keep the
+index current with `jcodemunch-mcp watch .`, and use Odysseus's per-server
+`disabled_tools` list to hide any tools you don't want exposed. Because every
+jCodeMunch tool is read-only and named `get_*` / `search_*` / `find_*` /
+`check_*`, the suite stays usable inside Odysseus's plan mode.
+
+The MCP round-trip (SSE connect + tool discovery) is verified; the
+container-to-host network dial depends on your Docker networking, so treat this
+as community-tested and report back if your setup needs different host routing.
+
 ---
 
 # 3. The step people skip, then blame the software for

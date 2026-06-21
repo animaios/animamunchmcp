@@ -2,6 +2,40 @@
 
 All notable changes to jcodemunch-mcp are documented here.
 
+## [1.108.66] - 2026-06-21 - The Counter: adaptive tool surface (order / menu / route)
+
+### Added
+
+- **A three-tool front door that collapses the resident tool surface without
+  removing any capability.** The host serializes every resident tool's schema
+  into context each turn (a fixed per-turn token tax) and the model must select
+  one tool out of the full set (dispatch dilution). Three new tools front the
+  whole catalog:
+  - **`order(action, args)`** — single dispatch verb. Validates the action
+    against the live catalog and re-enters the normal pipeline. Read-only by
+    default at the boundary: index/session state-changing actions require an
+    explicit `allow_state_change=true`, and any name matching an
+    execution/file-write verb is refused unconditionally (a forward-looking
+    charter tripwire — the suite ships none, and the front door must never
+    become the surface that introduces one).
+  - **`menu(query?, limit?)`** — discovery. Searches/browses the action catalog
+    (idf-weighted keyword ranking) and returns compact rows, so all schemas need
+    not stay resident.
+  - **`route(task, repo?, execute?)`** — intent to action. Maps a
+    natural-language task to ranked catalog actions via a curated intent map
+    plus catalog-search fallback; with `execute=true`, dispatches the top
+    recommendation in the same call. Recommends `assemble_task_context` /
+    `plan_turn` for context-gathering intents.
+- **`JCODEMUNCH_TOOL_SURFACE` env / `tool_surface` config** selects the surface.
+  `counter` collapses `list_tools` to the front door plus the always-present
+  controls (`set_tool_tier`, `announce_model`, `jcodemunch_guide`). Any other
+  value (default `full`) preserves the existing tiered behavior **byte-for-byte**
+  — the front-door tools stay hidden (still callable) so upgrades change nothing
+  until opted in. Composes with the existing `core`/`standard`/`full` profiles.
+- New module `counter.py` (pure logic, no server import); `tests/test_counter.py`
+  (19 tests) including a charter CI gate asserting no catalog action can trip the
+  exec/write tripwire. See `docs/prd-adaptive-tool-surface.md`.
+
 ## [1.108.65] - 2026-06-20 - Surface the composition tools in agent-facing docs
 
 ### Changed
