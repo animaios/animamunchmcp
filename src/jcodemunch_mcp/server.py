@@ -6003,7 +6003,7 @@ def _generate_claude_md_snippet(missing_only: bool = False) -> str:
         ("Session-Aware Routing", ["plan_turn", "get_session_context", "get_session_snapshot", "register_edit", "digest"]),
         ("Utilities", ["get_session_stats", "analyze_perf", "tune_weights", "check_embedding_drift",
                         "invalidate_cache", "test_summarizer",
-                        "audit_agent_config", "get_watch_status"]),
+                        "audit_agent_config", "suggest_corrections", "get_watch_status"]),
         ("Runtime Trace Ingest & Analytics", [
             "import_runtime_signal", "get_runtime_coverage",
             "find_hot_paths", "find_unused_paths", "get_redaction_log",
