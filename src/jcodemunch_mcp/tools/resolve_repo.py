@@ -171,7 +171,7 @@ def _build_indexed_response(
     return result
 
 
-def resolve_repo(path: str, storage_path: Optional[str] = None) -> dict:
+def _resolve_repo_impl(path: str, storage_path: Optional[str] = None) -> dict:
     """Resolve a filesystem path to its indexed repo identifier.
 
     Accepts a repo root, worktree, subdirectory, or file path.
@@ -306,6 +306,47 @@ def resolve_repo(path: str, storage_path: Optional[str] = None) -> dict:
         "hint": "call index_folder to index this path",
         "_meta": {"timing_ms": round(elapsed, 1), "match_path": "not_indexed"},
     }
+
+
+def resolve_repo(path: str, storage_path: Optional[str] = None) -> dict:
+    """Resolve a filesystem path to its indexed repo identifier.
+
+    Thin wrapper over `_resolve_repo_impl` that flags relative-path inputs.
+
+    Relative-path safety: a relative `path` (e.g. ".") is resolved against the
+    jcodemunch SERVER process's working directory. Over a detached SSE /
+    streamable-http transport that is NOT the caller's directory, so "." can
+    silently bind to the server's install or a system directory and return the
+    wrong repo (or `indexed: false` for what the caller believes is an indexed
+    tree). The resolution behavior is unchanged for backward compatibility, but
+    when the input is relative the response gains a top-level
+    `relative_path_warning` plus a structured `_meta.relative_path` (raw input,
+    the CWD-relative absolute resolution, and a fix hint) so the silent
+    misbinding is visible rather than a wrong-repo surprise. Absolute-path
+    callers get byte-identical output.
+    """
+    result = _resolve_repo_impl(path, storage_path)
+    try:
+        if not Path(path).is_absolute():
+            resolved_against_cwd = str(Path(path).resolve())
+            hint = (
+                "relative paths resolve against the jcodemunch server's working "
+                "directory, which over a detached SSE/streamable-http transport "
+                "is not the caller's directory; pass an absolute path to resolve "
+                "the intended repo deterministically"
+            )
+            if isinstance(result, dict):
+                result["relative_path_warning"] = hint
+                meta = result.setdefault("_meta", {})
+                if isinstance(meta, dict):
+                    meta["relative_path"] = {
+                        "input": path,
+                        "resolved_against_cwd": resolved_against_cwd,
+                        "hint": hint,
+                    }
+    except (OSError, ValueError):
+        logger.debug("relative-path annotation failed for %r", path, exc_info=True)
+    return result
 
 
 def _find_canonical_candidates(

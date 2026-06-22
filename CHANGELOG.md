@@ -2,6 +2,22 @@
 
 All notable changes to jcodemunch-mcp are documented here.
 
+## [1.108.72] - 2026-06-22 - resolve_repo flags relative paths over detached transports
+
+### Changed
+
+- **`resolve_repo` now flags relative-path inputs.** A relative `path` (e.g. `.`)
+  is resolved against the jcodemunch server process's working directory. Over a
+  detached SSE / streamable-http transport that is not the caller's directory, so
+  `.` could silently bind to the server's install or a system directory and return
+  the wrong repo (or `indexed: false` for a tree the caller believed was indexed).
+  Resolution behavior is unchanged for backward compatibility, but when the input
+  is relative the response now carries a top-level `relative_path_warning` plus a
+  structured `_meta.relative_path` (the raw input, the CWD-relative absolute
+  resolution, and a fix hint pointing at absolute paths). Absolute-path callers get
+  byte-identical output. Implemented as a thin wrapper over the renamed
+  `_resolve_repo_impl`. New `tests/test_v1_108_72.py` (4).
+
 ## [1.108.71] - 2026-06-22 - Packaging de-risk: lazy telemetry worker + complete PyPI metadata
 
 ### Changed

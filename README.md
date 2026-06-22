@@ -110,9 +110,9 @@ is a byte the agent doesn't pay to read.
 <!-- WHATSNEW:START -->
 #### What's new
 
+- **[v1.108.72](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.72)** (2026-06-22) — resolve_repo flags relative paths over detached transports
 - **[v1.108.71](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.71)** (2026-06-22) — Packaging de-risk: lazy telemetry worker + complete PyPI metadata
 - **[v1.108.70](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.70)** (2026-06-22) — Bounded-source mode for get_symbol_source (#340)
-- **[v1.108.69](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.69)** (2026-06-21) — Durable-change delivery: get_delivery_metrics / delivery CLI
 <!-- WHATSNEW:END -->
 
 ![License](https://img.shields.io/badge/license-dual--use-blue)
