@@ -110,9 +110,9 @@ is a byte the agent doesn't pay to read.
 <!-- WHATSNEW:START -->
 #### What's new
 
+- **[v1.108.71](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.71)** (2026-06-22) — Packaging de-risk: lazy telemetry worker + complete PyPI metadata
 - **[v1.108.70](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.70)** (2026-06-22) — Bounded-source mode for get_symbol_source (#340)
 - **[v1.108.69](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.69)** (2026-06-21) — Durable-change delivery: get_delivery_metrics / delivery CLI
-- **[v1.108.68](https://github.com/jgravelle/jcodemunch-mcp/releases/tag/v1.108.68)** (2026-06-21) — Retrieval-regret loop: suggest_corrections / reflect
 <!-- WHATSNEW:END -->
 
 ![License](https://img.shields.io/badge/license-dual--use-blue)
@@ -329,7 +329,7 @@ Everything jCodeMunch does beyond answering a tool call is listed here. All of i
 
 - **File watching.** The `watch` / `watch-all` / `watch-claude` commands (and `watch: true` in config) re-index files when they change. Watching runs **inside a process you started** and stops when that process exits. Nothing monitors your filesystem unless a jCodeMunch process you launched is running.
 - **Login service — explicit opt-in only.** `jcodemunch-mcp watch-install` registers `watch-all` as a login service (Windows Task Scheduler / macOS launchd / Linux systemd) so indexes stay fresh across reboots. This happens **only** when you run `watch-install` yourself; `init`, `install`, and normal server use never register a service. Inspect it with `watch-status`; remove it with `watch-uninstall`.
-- **Anonymous savings telemetry.** The server periodically sends a random anonymous ID plus aggregate token-savings counters to the project's public community meter. No code, no file paths, no repo names, no PII — counters only. Opt out with `share_savings: false` in `config.jsonc` or `JCODEMUNCH_SHARE_SAVINGS=0`.
+- **Anonymous savings telemetry.** The server periodically sends a random anonymous ID plus aggregate token-savings counters to the project's public community meter. No code, no file paths, no repo names, no PII — counters only. The sender is a single background daemon thread that starts lazily on the first share (never at import, and never if you have opted out), so a plain import has no background side effect. Opt out with `share_savings: false` in `config.jsonc` or `JCODEMUNCH_SHARE_SAVINGS=0`; redirect the endpoint with `JCODEMUNCH_TELEMETRY_URL`.
 - **Agent hooks.** `init` / `install` can write hook entries (auto-reindex on edit, read-interception nudges) into your MCP client's settings. They're offered during the interactive flow, shown before writing, and fully removed by `uninstall`.
 - **Local index storage.** Indexes live at `~/.code-index/` (override with `CODE_INDEX_PATH`). Delete the directory and every trace of indexing is gone.
 - **Live session journal.** While the server runs, it periodically writes a small `_session_live.json` in `~/.code-index/` recording the files and searches the agent touched this session (paths and query strings only, no file contents). It exists so the out-of-process PreCompact hook can restore session orientation after context compaction. Throttled, atomically written, overwritten in place; disable with `JCODEMUNCH_LIVE_JOURNAL=0`.
@@ -759,6 +759,7 @@ The following env vars still work but are deprecated. Config file values take pr
 | `JCODEMUNCH_REDACT_SOURCE_ROOT` | `redact_source_root` | `false` |
 | `JCODEMUNCH_STATS_FILE_INTERVAL` | `stats_file_interval` | `3` |
 | `JCODEMUNCH_SHARE_SAVINGS` | `share_savings` | `true` |
+| `JCODEMUNCH_TELEMETRY_URL` | (none) | community meter URL |
 | `JCODEMUNCH_SUMMARIZER_CONCURRENCY` | `summarizer_concurrency` | `4` |
 | `JCODEMUNCH_ALLOW_REMOTE_SUMMARIZER` | `allow_remote_summarizer` | `false` |
 | `JCODEMUNCH_RATE_LIMIT` | `rate_limit` | `0` |

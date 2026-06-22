@@ -2,6 +2,44 @@
 
 All notable changes to jcodemunch-mcp are documented here.
 
+## [1.108.71] - 2026-06-22 - Packaging de-risk: lazy telemetry worker + complete PyPI metadata
+
+### Changed
+
+- **The community-meter telemetry worker now starts lazily, never at import.**
+  Previously a daemon thread was spawned at module import unconditionally, even
+  when sharing was disabled. An import-time background-service side effect is the
+  exact shape automated package scanners react to, and it ran for opted-out users
+  too. The worker is now started on the first share (`_share_savings`), which is
+  only reached behind the existing `share_savings` opt-out gate, so a plain
+  `import jcodemunch_mcp` has no background-thread side effect and an opted-out
+  process never spawns the thread. Start is thread-safe (double-checked lock).
+- **The telemetry endpoint is overridable via `JCODEMUNCH_TELEMETRY_URL`**,
+  resolved at send time, so a deployment can redirect or (with the opt-out) block
+  it without a code change. Default endpoint unchanged.
+
+### Packaging
+
+- Added complete PyPI metadata to `pyproject.toml`: `license = {file = "LICENSE"}`
+  (the existing dual-use license), `keywords`, and standard `classifiers`
+  (Development Status, Intended Audience, License :: Other/Proprietary License,
+  OS Independent, Python 3.10-3.13, Topic :: Software Development). `twine check`
+  passes. Documented that the `all` extra is a hand-maintained union.
+
+### Docs
+
+- The README "Background behavior, fully disclosed" section now states the worker
+  starts lazily and only when sharing is enabled, and names the endpoint override.
+
+### Tests
+
+- `tests/test_v1_108_71.py` (6): a fresh-interpreter subprocess asserts `import`
+  starts no worker thread; lazy-start is idempotent; an opted-out flush never
+  reaches the worker starter; `JCODEMUNCH_TELEMETRY_URL` override + fallback.
+
+Implements Phase 1 (WI-1.1 through WI-1.4) of the maintenance PRD; resolves
+findings F-T01 (P1), F-T02, F-PK01, F-PK02, F-D01. No tool behavior change.
+
 ## [1.108.70] - 2026-06-22 - Bounded-source mode for get_symbol_source (#340)
 
 ### Added

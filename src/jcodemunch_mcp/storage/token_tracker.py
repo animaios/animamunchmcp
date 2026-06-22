@@ -14,7 +14,10 @@ stored value to GREATEST(stored, total), so a dropped/failed POST self-heals
 on the next successful one (the meter converges to the local total instead
 of permanently undercounting from lost deltas). `delta` is kept for backward
 compatibility with older server builds. Set JCODEMUNCH_SHARE_SAVINGS=0 to
-disable.
+disable; the endpoint is overridable via JCODEMUNCH_TELEMETRY_URL. The sender
+is a single daemon thread started lazily on the first share (never at import,
+and never when sharing is disabled), so a plain `import` has no background
+side effect.
 
 Performance: uses an in-memory accumulator to avoid disk read+write on every
 tool call. Flushes to disk every FLUSH_INTERVAL calls (default 3), on SIGTERM/
@@ -555,6 +558,21 @@ def _session_stats_path(base_path: Optional[str] = None) -> Path:
 # ---------------------------------------------------------------------------
 
 _telemetry_queue: queue.Queue = queue.Queue()
+# The worker is started lazily on the first enqueue (see _ensure_telemetry_worker)
+# rather than at import. Two reasons: (1) `import jcodemunch_mcp` must have no
+# background-thread side effect — an import-time daemon thread is exactly the
+# undisclosed-persistent-service shape that package scanners flag; (2) a process
+# that has opted out (JCODEMUNCH_SHARE_SAVINGS=0) never reaches _share_savings,
+# so it never spawns the thread at all.
+_telemetry_worker_lock = threading.Lock()
+_telemetry_worker_started = False
+
+
+def _telemetry_url() -> str:
+    """Community-meter endpoint, overridable via JCODEMUNCH_TELEMETRY_URL so a
+    deployment can redirect it without a code change. Resolved at send time so an
+    env change takes effect for an already-running process."""
+    return os.environ.get("JCODEMUNCH_TELEMETRY_URL") or _TELEMETRY_URL
 
 
 def _telemetry_worker() -> None:
@@ -570,7 +588,7 @@ def _telemetry_worker() -> None:
             # GREATEST(stored, total) so a failed post self-corrects on the next
             # one. `delta` rides along for older server builds (additive upsert).
             httpx.post(
-                _TELEMETRY_URL,
+                _telemetry_url(),
                 json={"delta": delta, "total": total, "anon_id": anon_id},
                 timeout=3.0,
             )
@@ -580,15 +598,29 @@ def _telemetry_worker() -> None:
             _telemetry_queue.task_done()
 
 
-threading.Thread(
-    target=_telemetry_worker, daemon=True, name="jcodemunch-telemetry"
-).start()
+def _ensure_telemetry_worker() -> None:
+    """Start the single telemetry worker thread once, on first use. Thread-safe
+    (double-checked under a lock). Never started at import or when the user has
+    opted out of sharing."""
+    global _telemetry_worker_started
+    if _telemetry_worker_started:
+        return
+    with _telemetry_worker_lock:
+        if _telemetry_worker_started:
+            return
+        threading.Thread(
+            target=_telemetry_worker, daemon=True, name="jcodemunch-telemetry"
+        ).start()
+        _telemetry_worker_started = True
 
 
 def _share_savings(delta: int, total: int, anon_id: str) -> None:
     """Enqueue a fire-and-forget POST to the community meter. Never raises.
     `total` is the absolute lifetime savings (self-correcting); `delta` is the
-    new savings since the last send (legacy additive path)."""
+    new savings since the last send (legacy additive path). Starts the worker
+    thread on first use — never at import, and never when sharing is disabled
+    (this function is only reached behind the share_savings opt-out gate)."""
+    _ensure_telemetry_worker()
     _telemetry_queue.put((delta, total, anon_id))
 
 

@@ -1,11 +1,38 @@
 [project]
 name = "jcodemunch-mcp"
-version = "1.108.70"
+version = "1.108.71"
 description = "Token-efficient MCP server for source code exploration via tree-sitter AST parsing"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
     { name = "J. Gravelle", email = "j@gravelle.us" },
+]
+license = { file = "LICENSE" }
+keywords = [
+    "mcp",
+    "model-context-protocol",
+    "code-search",
+    "code-intelligence",
+    "tree-sitter",
+    "ast",
+    "llm",
+    "agent",
+    "token-efficiency",
+    "claude",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: Other/Proprietary License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Quality Assurance",
 ]
 dependencies = [
     "mcp>=1.10.0,<2.0.0",
@@ -36,6 +63,8 @@ groq-voice = ["openai>=1.0.0", "sounddevice>=0.4.6", "numpy>=1.24.0"]
 groq-explain = ["openai>=1.0.0", "Pillow>=10.0.0"]
 keyring = ["keyring>=24.0"]
 bench = ["openai>=1.0.0", "anthropic>=0.40.0", "pyyaml>=6.0", "rich>=13.0", "jinja2>=3.1"]
+# `all` is a hand-maintained union of every extra above. When you add a new
+# extra or a new dependency to one, mirror it here (there is no auto-union).
 all = ["anthropic>=0.40.0", "google-generativeai>=0.8.0", "openai>=1.0.0", "pyyaml>=6.0", "uvicorn>=0.20.0", "starlette>=0.27.0", "anyio>=4.0.0", "watchfiles>=1.0.0", "sentence-transformers>=2.2.0", "onnxruntime>=1.16.0", "sounddevice>=0.4.6", "numpy>=1.24.0", "Pillow>=10.0.0", "rich>=13.0", "jinja2>=3.1", "keyring>=24.0"]
 
 
