@@ -2,6 +2,22 @@
 
 All notable changes to jcodemunch-mcp are documented here.
 
+## [1.108.77] - 2026-06-23 - Raise the `http` extra's starlette floor to a patched release
+
+### Security / Packaging
+
+- **`http` and `all` extras now require `starlette>=1.3.1`** (was `>=0.27.0`).
+  A user installing `jcodemunch-mcp[http]` could previously resolve a starlette
+  older than 1.3.1, which carries two advisories: request-form size limits
+  silently ignored, and an SSRF / NTLM-credential-theft path via UNC paths in
+  `StaticFiles`. Raising the published floor closes that resolution window for
+  downstream installers of the HTTP transport. The lockfile already resolved
+  1.3.1; this propagates the same floor to the wheel metadata.
+- Compatibility verified: `mcp` (1.26.0) declares no starlette upper bound and
+  the full lock re-resolves cleanly at the new floor, so no install conflict.
+- Note: this raises the minimum starlette to 1.x for the `http`/`all` extras
+  only. The base install and all other extras are unaffected.
+
 ## [1.108.76] - 2026-06-22 - Quality gates: CI lint (ruff) + coverage floor
 
 ### CI / Tooling (WI-3.1 / F-Q01)
