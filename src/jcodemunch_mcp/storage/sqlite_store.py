@@ -194,7 +194,10 @@ _INIT_PRAGMAS = [
 # SQLite files in ~/.code-index/ that are NOT per-repo indexes — list_repos
 # must skip these so they don't get phantom-resolved as repos (and worse,
 # get auto-initialised with the code-index schema by _connect()).
-_NON_REPO_DB_FILES = frozenset({"telemetry.db"})
+# org_savings.db is the team-SKU org-rollup store (see org/store.py); without
+# this it surfaced as a bogus `local/org_savings` card (sym 0, no source_root)
+# that could never be deleted.
+_NON_REPO_DB_FILES = frozenset({"telemetry.db", "org_savings.db"})
 
 # Keys stored in the meta table
 _META_KEYS = [

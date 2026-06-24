@@ -2,6 +2,27 @@
 
 All notable changes to jcodemunch-mcp are documented here.
 
+## [1.108.82] - 2026-06-24 - Exclude org_savings.db from list_repos
+
+The team-SKU org-rollup store (`org_savings.db`, written by `org/store.py`) lives
+in `~/.code-index/` alongside per-repo index `.db` files, but `list_repos` only
+excluded `telemetry.db`. So `org_savings.db` was enumerated as a phantom
+`local/org_savings` repo (symbol_count 0, empty source_root) — it showed an
+un-removable sym-0 card in the jMunch Console cockpit, and `delete-index` on it
+failed (no matching index), which the Console reported as a misleading
+"needs jcodemunch-mcp >= 1.108.50".
+
+### Changed
+
+- **`_NON_REPO_DB_FILES` now also excludes `org_savings.db`** (alongside
+  `telemetry.db`), so the org-rollup store is no longer phantom-resolved as a
+  repo (and never gets the code-index schema auto-initialised onto it by
+  `_connect()`).
+
+### Tests
+
+- `tests/test_telemetry_db_skip.py::test_list_repos_skips_org_savings_db`.
+
 ## [1.108.81] - 2026-06-24 - Lazy git identity probe in get_watch_status / list-repos
 
 `list-repos` (and `get_watch_status`) grew slow on hosts with many indexed repos

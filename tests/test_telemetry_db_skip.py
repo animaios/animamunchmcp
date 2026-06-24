@@ -113,3 +113,29 @@ def test_bare_name_resolution_survives_telemetry_db(tmp_path):
     owner, name = resolve_bare_name("myproj", storage_path=str(store_path))
     assert owner == "local"
     assert name.startswith("myproj-")
+
+
+def test_list_repos_skips_org_savings_db(tmp_path):
+    """The team-SKU org-rollup store (org_savings.db) must not surface as a
+    phantom `local/org_savings` repo — it isn't a code index and could never be
+    deleted, so it showed an un-removable sym-0 card in the console cockpit."""
+    store_path = tmp_path / "store"
+    store_path.mkdir()
+    # A minimal org_savings.db (any schema; list_repos must skip it by name).
+    conn = sqlite3.connect(str(store_path / "org_savings.db"))
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS org_savings (org_id TEXT, seat_id TEXT, day TEXT)")
+        conn.commit()
+    finally:
+        conn.close()
+
+    project = tmp_path / "myproj"
+    project.mkdir()
+    (project / "main.py").write_text("def hello(): return 1\n", encoding="utf-8")
+    index_folder(str(project), use_ai_summaries=False, storage_path=str(store_path))
+
+    repos = IndexStore(base_path=str(store_path)).list_repos()
+    assert not any("org_savings" in (r.get("repo") or "") for r in repos), (
+        f"org_savings.db leaked into list_repos: {repos}"
+    )
+    assert any(r.get("display_name") == "myproj" for r in repos)
