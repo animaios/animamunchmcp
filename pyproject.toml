@@ -1,5 +1,5 @@
 [project]
-name = "jcodemunch-mcp"
+name = "animamunch"
 version = "1.108.82"
 description = "Token-efficient MCP server for source code exploration via tree-sitter AST parsing"
 readme = "README.md"
@@ -43,9 +43,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/jgravelle/jcodemunch-mcp"
-Repository = "https://github.com/jgravelle/jcodemunch-mcp"
-"Bug Tracker" = "https://github.com/jgravelle/jcodemunch-mcp/issues"
+Homepage = "https://github.com/animaios/animamunchmcp"
+Repository = "https://github.com/animaios/animamunchmcp"
+"Bug Tracker" = "https://github.com/animaios/animamunchmcp/issues"
 
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.40.0"]
@@ -69,8 +69,8 @@ all = ["anthropic>=0.40.0", "google-generativeai>=0.8.0", "openai>=1.0.0", "pyya
 
 
 [project.scripts]
-jcodemunch-mcp = "jcodemunch_mcp.server:main"
-gcm = "jcodemunch_mcp.groq.cli:main"
+animamunch = "jcodemunch_mcp.server:main"
+animmunch = "jcodemunch_mcp.groq.cli:main"
 munch-bench = "munch_bench.cli:main"
 
 [build-system]
