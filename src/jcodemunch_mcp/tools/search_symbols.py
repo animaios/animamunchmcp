@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Search symbols across repository.
 
 Supports three modes:
@@ -15,7 +17,7 @@ import re
 import time
 from collections import defaultdict
 from fnmatch import fnmatch
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from ..parser.imports import resolve_specifier
 from ..storage import IndexStore, cost_avoided, estimate_savings, record_savings
@@ -58,11 +60,11 @@ import threading
 from collections import OrderedDict
 
 _RESULT_CACHE_MAX = 128
-_result_cache: OrderedDict = OrderedDict()
+_result_cache: OrderedDict[tuple[Any, ...], dict[str, Any]] = OrderedDict()
 _result_cache_lock = threading.Lock()
 
 
-def _result_cache_get(key: tuple) -> Optional[dict]:
+def _result_cache_get(key: tuple[Any, ...]) -> Optional[dict[str, Any]]:
     """Return cached result for key, or None on miss. Returns a shallow copy."""
     with _result_cache_lock:
         if key in _result_cache:
@@ -88,7 +90,7 @@ def _get_cache_max() -> int:
         return _RESULT_CACHE_MAX
 
 
-def _result_cache_put(key: tuple, value: dict) -> None:
+def _result_cache_put(key: tuple[Any, ...], value: dict[str, Any]) -> None:
     """Store result in LRU cache, evicting oldest if full."""
     with _result_cache_lock:
         if key in _result_cache:
@@ -269,7 +271,7 @@ def _tokenize(text: str) -> list[str]:
     return result
 
 
-def _sym_tokens(sym: dict) -> list[str]:
+def _sym_tokens(sym: dict[str, Any]) -> list[str]:
     """Weighted token bag for a symbol (repetition = field weight).
     Cached on the symbol dict to avoid re-tokenizing across calls.
     Also caches _tf (term frequency dict) and _dl (document length)."""
@@ -305,7 +307,7 @@ def _sym_tokens(sym: dict) -> list[str]:
 
 
 def _compute_bm25(
-    symbols: list[dict],
+    symbols: list[dict[str, Any]],
 ) -> tuple[dict[str, float], float, dict[str, list[int]]]:
     """Return (idf_map, avgdl, inverted_index) computed over all symbols.
 
@@ -336,10 +338,10 @@ def _compute_bm25(
 
 
 def _compute_centrality(
-    symbols: list[dict],
-    imports: Optional[dict],
-    alias_map: Optional[dict] = None,
-    psr4_map: Optional[dict] = None,
+    symbols: list[dict[str, Any]],
+    imports: Optional[dict[str, Any]],
+    alias_map: Optional[dict[str, list[str]]] = None,
+    psr4_map: Optional[dict[str, str]] = None,
 ) -> dict[str, float]:
     """Return {file: log-scaled centrality bonus} based on importer count."""
     if not imports:
@@ -356,7 +358,9 @@ def _compute_centrality(
     return {f: math.log(1 + c) * _CENTRALITY_WEIGHT for f, c in counts.items()}
 
 
-def _identity_score(sym: dict, query_joined: str, raw_query: str = "") -> float:
+def _identity_score(
+    sym: dict[str, Any], query_joined: str, raw_query: str = ""
+) -> float:
     """Identity channel: exact or prefix match on symbol name/ID.
 
     Returns a high score for exact matches and a decreasing score for
@@ -400,11 +404,11 @@ def _identity_score(sym: dict, query_joined: str, raw_query: str = "") -> float:
 
 
 def _bm25_score(
-    sym: dict,
+    sym: dict[str, Any],
     query_terms: list[str],
     idf: dict[str, float],
     avgdl: float,
-    centrality: Optional[dict] = None,
+    centrality: Optional[dict[str, float]] = None,
     raw_query: str = "",
 ) -> float:
     """BM25 score for a single symbol.
@@ -437,12 +441,12 @@ def _bm25_score(
 
 
 def _bm25_breakdown(
-    sym: dict,
+    sym: dict[str, Any],
     query_terms: list[str],
     idf: dict[str, float],
     avgdl: float,
     raw_query: str = "",
-) -> dict:
+) -> dict[str, Any]:
     """Per-field BM25 contribution breakdown (for debug mode).
 
     Uses cached _dl from _sym_tokens() for K computation but re-tokenizes
@@ -462,7 +466,7 @@ def _bm25_breakdown(
         "summary": _tokenize(sym.get("summary", "")) * _FIELD_REPS["summary"],
         "docstring": _tokenize(sym.get("docstring", "")) * _FIELD_REPS["docstring"],
     }
-    out: dict[str, float] = {}
+    out: dict[str, Any] = {}
     for fname, ftoks in fields.items():
         tf_raw: dict[str, int] = {}
         for t in ftoks:
@@ -487,7 +491,7 @@ def _bm25_breakdown(
     return out
 
 
-def _trigrams(text: str) -> frozenset:
+def _trigrams(text: str) -> frozenset[str]:
     """Return trigram frozenset for a lowercased string."""
     s = text.lower()
     if len(s) < 3:
@@ -528,7 +532,9 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
-def _materialize_full_entry(entry: dict, index, store, owner: str, name: str) -> None:
+def _materialize_full_entry(
+    entry: dict[str, Any], index: Any, store: Any, owner: str, name: str
+) -> None:
     """Inline source/docstring/end_line and update byte_length to reflect full content.
 
     Mutates entry in place. Called before token-budget packing so the packer sees
@@ -550,7 +556,7 @@ def _materialize_full_entry(entry: dict, index, store, owner: str, name: str) ->
     )
 
 
-def _packing_cost_bytes(entry: dict, detail_level: str) -> int:
+def _packing_cost_bytes(entry: dict[str, Any], detail_level: str) -> int:
     """Bytes an entry charges against token_budget (jcm#328).
 
     full: the materialized byte_length set by _materialize_full_entry before
@@ -565,7 +571,7 @@ def _packing_cost_bytes(entry: dict, detail_level: str) -> int:
     return len(json.dumps(entry, default=str))
 
 
-def _row_summary(sym: dict) -> str:
+def _row_summary(sym: dict[str, Any]) -> str:
     """Summary for a result row; empty when it merely echoes the signature.
 
     Indexes built without an AI summarizer persist signature_fallback output
@@ -602,13 +608,13 @@ def search_symbols(
     storage_path: Optional[str] = None,
     fqn: Optional[str] = None,
     mode: str = "search",
-    criteria: Optional[list] = None,
+    criteria: Optional[list[Any]] = None,
     order: str = "desc",
     strategy: str = "combined",
-    include_kinds: Optional[list] = None,
+    include_kinds: Optional[list[str]] = None,
     scope: Optional[str] = None,
     rank_by: str = "importance",
-) -> dict:
+) -> dict[str, Any]:
     """Search for symbols matching a query.
 
     Supports three modes controlled by the ``mode`` parameter:
@@ -848,7 +854,7 @@ def search_symbols(
     inverted = cache["inverted"]
 
     # PageRank scores — computed and cached when sort_by requires it
-    pagerank: dict = {}
+    pagerank: dict[str, float] = {}
     if sort_by in ("centrality", "combined"):
         if "pagerank" not in cache:
             from .pagerank import compute_pagerank
@@ -951,7 +957,9 @@ def search_symbols(
         candidates = [index.symbols[i] for i in sorted(candidate_indices)]
     else:
         candidates = index.symbols
-    heap: list[tuple[float, int, dict]] = []  # (score, candidates_scored, entry)
+    heap: list[
+        tuple[float, int, dict[str, Any]]
+    ] = []  # (score, candidates_scored, entry)
     candidates_scored = 0
     max_bm25_score = 0.0
 
@@ -1124,7 +1132,7 @@ def search_symbols(
 
     # Token savings: files containing matches vs symbol byte_lengths of results
     raw_bytes = 0
-    seen_files: set = set()
+    seen_files: set[str] = set()
     response_bytes = 0
     for entry in scored_results:
         f = entry["file"]
@@ -1138,7 +1146,7 @@ def search_symbols(
     elapsed = (time.perf_counter() - start) * 1000
 
     # Feature 1: Negative evidence — tell the AI when nothing was found
-    negative_evidence: Optional[dict] = None
+    negative_evidence: Optional[dict[str, Any]] = None
     _ne_threshold = _NEGATIVE_EVIDENCE_THRESHOLD
     try:
         from .. import config as _cfg
@@ -1176,7 +1184,7 @@ def search_symbols(
         if related_existing:
             negative_evidence["related_existing"] = related_existing
 
-    meta = {
+    meta: dict[str, Any] = {
         "timing_ms": round(elapsed, 1),
         "total_symbols": len(index.symbols),
         "truncated": candidates_scored > heap_count or budget_truncated,
@@ -1269,9 +1277,9 @@ def _search_symbols_semantic(
     name: str,
     query: str,
     query_terms: list[str],
-    idf: dict,
+    idf: dict[str, float],
     avgdl: float,
-    centrality: dict,
+    centrality: dict[str, float],
     has_filters: bool,
     kind: Optional[str],
     file_pattern: Optional[str],
@@ -1288,7 +1296,7 @@ def _search_symbols_semantic(
     provider: str,
     model: str,
     start: float,
-) -> dict:
+) -> dict[str, Any]:
     """Semantic / hybrid scoring path for search_symbols.
 
     Two-pass algorithm:
@@ -1365,7 +1373,7 @@ def _search_symbols_semantic(
 
     # ── Two-pass scoring ───────────────────────────────────────────────────
     # Pass 1: collect BM25 + cosine for every filtered symbol
-    raw: list[tuple[dict, float, float]] = []  # (sym, bm25, cosine)
+    raw: list[tuple[dict[str, Any], float, float]] = []  # (sym, bm25, cosine)
     max_bm25 = 0.0
     max_cos = 0.0
 
@@ -1398,7 +1406,7 @@ def _search_symbols_semantic(
         raw.append((sym, bm25, cos))
 
     # Pass 2: normalise BM25 and compute combined score
-    scored: list[tuple[float, dict]] = []
+    scored: list[tuple[float, dict[str, Any]]] = []
     for sym, bm25, cos in raw:
         bm25_norm = (bm25 / max_bm25) if max_bm25 > 0.0 else 0.0
         score = (
@@ -1414,7 +1422,7 @@ def _search_symbols_semantic(
     top = scored[:effective_limit]
 
     # ── Build result entries ───────────────────────────────────────────────
-    scored_results: list[dict] = []
+    scored_results: list[dict[str, Any]] = []
     for score, sym in top:
         if detail_level == "compact":
             entry: dict = {
@@ -1452,7 +1460,7 @@ def _search_symbols_semantic(
     # ── Token budget packing ───────────────────────────────────────────────
     if token_budget is not None:
         # jcm#328: charge what the row actually adds to the response.
-        packed: list[dict] = []
+        packed: list[dict[str, Any]] = []
         used = 0
         for entry in scored_results:
             b = _packing_cost_bytes(entry, detail_level)
@@ -1463,7 +1471,7 @@ def _search_symbols_semantic(
 
     # ── Meta ───────────────────────────────────────────────────────────────
     raw_bytes = 0
-    seen_files: set = set()
+    seen_files: set[str] = set()
     response_bytes = 0
     for entry in scored_results:
         f = entry["file"]
@@ -1475,7 +1483,7 @@ def _search_symbols_semantic(
     total_saved = record_savings(tokens_saved, tool_name="search_symbols")
     elapsed = (time.perf_counter() - start) * 1000
 
-    meta: dict = {
+    meta: dict[str, Any] = {
         "timing_ms": round(elapsed, 1),
         "total_symbols": len(index.symbols),
         "truncated": len(scored) > len(scored_results),
@@ -1587,25 +1595,25 @@ def _search_symbols_fusion(
     name: str,
     query: str,
     query_terms: list[str],
-    idf: dict,
+    idf: dict[str, float],
     avgdl: float,
-    centrality: dict,
-    pagerank: dict,
+    centrality: dict[str, float],
+    pagerank: dict[str, float],
     has_filters: bool,
-    kind,
-    file_pattern,
-    language,
-    decorator,
+    kind: Optional[str],
+    file_pattern: Optional[str],
+    language: Optional[str],
+    decorator: Optional[str],
     max_results: int,
     effective_limit: int,
-    token_budget,
+    token_budget: Optional[int],
     budget_bytes: int,
     detail_level: str,
     debug: bool,
     start: float,
-    cache_key,
+    cache_key: Optional[tuple[Any, ...]],
     cacheable: bool,
-) -> dict:
+) -> dict[str, Any]:
     """Fusion search path: multi-signal WRR ranking."""
     from ..retrieval.signal_fusion import (
         build_identity_channel,
@@ -1766,7 +1774,7 @@ def _search_symbols_fusion(
 
     # Token savings
     raw_bytes = 0
-    seen_files: set = set()
+    seen_files: set[str] = set()
     response_bytes = 0
     for entry in scored_results:
         f = entry["file"]
@@ -1803,7 +1811,7 @@ def _search_symbols_fusion(
             "Use get_context_bundle(symbol_id) to retrieve source + imports in one call"
         )
 
-    result = {
+    result: dict[str, Any] = {
         "result_count": len(scored_results),
         "results": scored_results,
         "_meta": meta,
@@ -1903,8 +1911,8 @@ def _apply_numeric(op: str, sym_val: Any, threshold: Any) -> bool:
 
 
 def _match_criterion(
-    sym: dict,
-    criterion: dict,
+    sym: dict[str, Any],
+    criterion: dict[str, Any],
     file_churn: dict[str, int],
 ) -> bool:
     axis = criterion.get("axis")
@@ -1975,7 +1983,7 @@ def _match_criterion(
     return False
 
 
-def _validate_criteria(criteria: list) -> Optional[str]:
+def _validate_criteria(criteria: list[Any]) -> Optional[str]:
     if not isinstance(criteria, list):
         return "criteria must be a list"
     for i, c in enumerate(criteria):
@@ -2003,12 +2011,12 @@ def _validate_criteria(criteria: list) -> Optional[str]:
 
 def _run_winnow_mode(
     repo: str,
-    criteria: list,
+    criteria: list[Any],
     rank_by: str = "importance",
     order: str = "desc",
     max_results: int = 20,
     storage_path: Optional[str] = None,
-) -> dict:
+) -> dict[str, Any]:
     """Run a constraint-chain query against an indexed repo (mode=\"winnow\").
 
     Args:
@@ -2084,7 +2092,7 @@ def _run_winnow_mode(
                 "pagerank failed for %s/%s: %s", owner, name, exc, exc_info=True
             )
 
-    survivors: list[dict] = []
+    survivors: list[dict[str, Any]] = []
     total = 0
     for sym in index.symbols:
         total += 1
@@ -2180,7 +2188,9 @@ _FILE_GROUP_CAP = 3  # max symbols from a single file
 _COMPACT_SUMMARY_MAX = 160
 
 
-def _compact_fields(sym: dict, score: float, token_cost: int) -> dict:
+def _compact_fields(
+    sym: dict[str, Any], score: float, token_cost: int
+) -> dict[str, Any]:
     """Display fields the rc1 compact encoder declares (#354)."""
     summary = sym.get("summary") or sym.get("signature") or ""
     if len(summary) > _COMPACT_SUMMARY_MAX:
@@ -2198,14 +2208,14 @@ def _compact_fields(sym: dict, score: float, token_cost: int) -> dict:
 
 
 def _pack_budget(
-    scored_items: list[tuple[float, dict]],
+    scored_items: list[tuple[float, dict[str, Any]]],
     token_budget: int,
-    get_tokens: callable,
+    get_tokens: Callable[..., tuple[str, int]],
     *,
     diversity: bool = True,
-) -> tuple[list[tuple[float, dict, str, int]], int]:
+) -> tuple[list[tuple[float, dict[str, Any], str, int]], int]:
     """Diversity-aware greedy budget packing."""
-    packed: list[tuple[float, dict, str, int]] = []
+    packed: list[tuple[float, dict[str, Any], str, int]] = []
     total_tokens = 0
     file_counts: dict[str, int] = {}
 
@@ -2241,11 +2251,11 @@ def _run_context_mode(
     query: str,
     token_budget: int = 4000,
     strategy: str = "combined",
-    include_kinds: Optional[list] = None,
+    include_kinds: Optional[list[str]] = None,
     scope: Optional[str] = None,
     fusion: bool = False,
     storage_path: Optional[str] = None,
-) -> dict:
+) -> dict[str, Any]:
     """Relevance-ranked context packing within a token budget (mode=\"context\").
 
     Ranks all symbols by relevance (BM25) and/or centrality (PageRank),
@@ -2312,7 +2322,7 @@ def _run_context_mode(
     inverted = cache["inverted"]
 
     # PageRank — computed when strategy requires it
-    pagerank: dict = {}
+    pagerank: dict[str, float] = {}
     if strategy in ("centrality", "combined"):
         if "pagerank" not in cache:
             from .pagerank import compute_pagerank
@@ -2361,10 +2371,10 @@ def _run_context_mode(
 
     # Score and filter candidates
     scored: list[
-        tuple[float, float, float, dict]
+        tuple[float, float, float, dict[str, Any]]
     ] = []  # (combined, bm25_norm, pr_norm, sym)
     max_bm25 = 0.0
-    raw_scores: list[tuple[float, float, dict]] = []  # (bm25, pr_raw, sym)
+    raw_scores: list[tuple[float, float, dict[str, Any]]] = []  # (bm25, pr_raw, sym)
 
     for sym in candidates:
         if include_kinds and sym.get("kind") not in include_kinds:
@@ -2517,7 +2527,7 @@ def _run_context_mode(
 
     elapsed = (time.perf_counter() - start) * 1000
 
-    result = {
+    result: dict[str, Any] = {
         "context_items": context_items,
         "total_tokens": total_tokens,
         "budget_tokens": token_budget,
@@ -2576,14 +2586,14 @@ def _run_context_mode_fusion(
     name: str,
     query: str,
     query_terms: list[str],
-    idf: dict,
+    idf: dict[str, float],
     avgdl: float,
-    pagerank: dict,
+    pagerank: dict[str, float],
     token_budget: int,
-    include_kinds,
-    scope,
+    include_kinds: Optional[list[str]],
+    scope: Optional[str],
     start: float,
-) -> dict:
+) -> dict[str, Any]:
     """Fusion-based ranked context: WRR across channels, greedy budget packing."""
     from ..retrieval.signal_fusion import (
         build_identity_channel,
@@ -2700,7 +2710,7 @@ def _run_context_mode_fusion(
     total_saved = record_savings(tokens_saved, tool_name="get_ranked_context")
     elapsed = (time.perf_counter() - start) * 1000
 
-    fusion_result = {
+    fusion_result: dict[str, Any] = {
         "context_items": context_items,
         "total_tokens": total_tokens,
         "budget_tokens": token_budget,

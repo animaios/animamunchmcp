@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 import re
 import time
-from typing import Optional
+from typing import Any, Optional
 
 from ..storage import IndexStore, cost_avoided, estimate_savings, record_savings
 from ._utils import index_status_to_tool_error, resolve_repo
@@ -255,13 +255,13 @@ _STAGE_BUDGET_WEIGHT = {
 def assemble_task_context(
     repo: str,
     task: str,
-    symbols: Optional[list] = None,
+    symbols: Optional[list[str]] = None,
     intent: Optional[str] = None,
     token_budget: int = 8000,
-    include: Optional[list] = None,
+    include: Optional[list[str]] = None,
     cross_repo: bool = False,
     storage_path: Optional[str] = None,
-) -> dict:
+) -> dict[str, Any]:
     """Assemble a task-tailored context capsule in one call.
 
     Auto-classifies the task into one of six intents and runs the appropriate
@@ -335,14 +335,14 @@ def assemble_task_context(
         anchors = _extract_anchors_from_task(task, index)
 
     # Resolve anchor names to symbol dicts
-    sym_by_name: dict[str, list[dict]] = {}
+    sym_by_name: dict[str, list[dict[str, Any]]] = {}
     for s in index.symbols:
         n = s.get("name", "")
         if n:
             sym_by_name.setdefault(n, []).append(s)
-    sym_by_id: dict[str, dict] = {s["id"]: s for s in index.symbols}
+    sym_by_id: dict[str, dict[str, Any]] = {s["id"]: s for s in index.symbols}
 
-    anchor_syms: list[dict] = []
+    anchor_syms: list[dict[str, Any]] = []
     for a in anchors:
         if a in sym_by_id:
             anchor_syms.append(sym_by_id[a])
@@ -360,7 +360,7 @@ def assemble_task_context(
                 anchor_syms.append(candidates_sorted[0])
 
     # ── Run stages ──────────────────────────────────────────────────────
-    entries: list[dict] = []
+    entries: list[dict[str, Any]] = []
     stages_run: list[str] = []
     total_tokens = 0
     repo_id = f"{owner}/{name}"
@@ -368,7 +368,7 @@ def assemble_task_context(
     def _add_entry(
         stage: str,
         tool: str,
-        payload: dict,
+        payload: dict[str, Any],
         label: str = "",
         tokens_est: Optional[int] = None,
     ) -> bool:
@@ -727,7 +727,7 @@ def assemble_task_context(
 
     def _stage_decorators() -> None:
         # Surface the anchor's decorators when present
-        decorated: list[dict] = []
+        decorated: list[dict[str, Any]] = []
         for sym in anchor_syms[:3]:
             decs = sym.get("decorators") or []
             if decs:

@@ -71,7 +71,7 @@ def _mode_outline(
     _LARGE_REPO_THRESHOLD = 500  # files
     _MAX_DIR_ENTRIES = 40
 
-    dir_file_counts: Counter = Counter()
+    dir_file_counts: Counter[str] = Counter()
     for f in index.source_files:
         parts = f.split("/")
         if len(parts) > 1:
@@ -81,7 +81,7 @@ def _mode_outline(
 
     if len(index.source_files) > _LARGE_REPO_THRESHOLD:
         # Expand large top-level dirs into 2-level groupings
-        expanded: Counter = Counter()
+        expanded: Counter[str] = Counter()
         for f in index.source_files:
             parts = f.split("/")
             if len(parts) >= 3:
@@ -97,7 +97,7 @@ def _mode_outline(
             dir_file_counts = Counter(dict(expanded.most_common(_MAX_DIR_ENTRIES)))
 
     # Symbol kind breakdown
-    kind_counts: Counter = Counter()
+    kind_counts: Counter[str] = Counter()
     for sym in index.symbols:
         kind_counts[sym.get("kind", "unknown")] += 1
 
@@ -112,7 +112,7 @@ def _mode_outline(
     # Most-imported files: count in-degree from import graph (PageRank-lite)
     most_imported: list = []
     if index.imports is not None:
-        in_degree: Counter = Counter()
+        in_degree: Counter[str] = Counter()
         source_files_set = frozenset(index.source_files)
         for src_file, file_imports in index.imports.items():
             for imp in file_imports:

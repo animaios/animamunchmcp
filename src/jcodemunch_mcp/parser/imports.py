@@ -12,7 +12,6 @@ from .astro_shared import mask_html_comments_keep_offsets, split_astro_frontmatt
 from .languages import template_underlying_language
 from .template_shared import TEMPLATE_ENGINE_LANGUAGES, mask_template_keep_offsets
 
-
 # ---------------------------------------------------------------------------
 # Per-language regex patterns
 # ---------------------------------------------------------------------------
@@ -70,8 +69,12 @@ def _parse_reexport_clause(raw: str) -> list[dict]:
             tok = part.split()[0]
             origins.append({"original": tok, "exposed": tok})
     return origins
+
+
 # JS/TS: import('specifier') — dynamic import (Vue Router lazy routes, code splitting)
-_JS_DYNAMIC_IMPORT = re.compile(r"""import\s*\(\s*['"]([^'"]+)['"]\s*\)""", re.MULTILINE)
+_JS_DYNAMIC_IMPORT = re.compile(
+    r"""import\s*\(\s*['"]([^'"]+)['"]\s*\)""", re.MULTILINE
+)
 
 # Python: from .module import A, B  /  import os
 # Allow optional leading whitespace so function-local imports inside def/class
@@ -96,7 +99,9 @@ _RUST_USE = re.compile(r"""^use\s+([\w::{},\s*]+)\s*;""", re.MULTILINE)
 _C_INCLUDE = re.compile(r"""^#include\s+[<"]([^>"]+)[>"]""", re.MULTILINE)
 
 # Assembly: .include "foo" / .incbin "foo" / %include "foo"
-_ASM_INCLUDE = re.compile(r"""^\s*[.%]include\s+["']([^"']+)["']""", re.MULTILINE | re.IGNORECASE)
+_ASM_INCLUDE = re.compile(
+    r"""^\s*[.%]include\s+["']([^"']+)["']""", re.MULTILINE | re.IGNORECASE
+)
 
 # VHDL: library ieee; / use ieee.std_logic_1164.all;
 _VHDL_LIBRARY = re.compile(r"""^\s*library\s+(\w+)\s*;""", re.MULTILINE | re.IGNORECASE)
@@ -106,14 +111,20 @@ _VHDL_USE = re.compile(r"""^\s*use\s+([\w.]+)\s*;""", re.MULTILINE | re.IGNORECA
 _VERILOG_INCLUDE = re.compile(r"""^\s*`include\s+["']([^"']+)["']""", re.MULTILINE)
 
 # Ruby: require 'foo' / require_relative 'bar'
-_RUBY_REQUIRE = re.compile(r"""(?:require|require_relative)\s+['"]([^'"]+)['"]""", re.MULTILINE)
+_RUBY_REQUIRE = re.compile(
+    r"""(?:require|require_relative)\s+['"]([^'"]+)['"]""", re.MULTILINE
+)
 
 # C#: using System.Foo;
-_CSHARP_USING = re.compile(r"""^using\s+(?:static\s+)?(?:(\w+)\s*=\s*)?([\w.]+)\s*;""", re.MULTILINE)
+_CSHARP_USING = re.compile(
+    r"""^using\s+(?:static\s+)?(?:(\w+)\s*=\s*)?([\w.]+)\s*;""", re.MULTILINE
+)
 
 # PHP: use App\Foo\Bar;  /  require/include
 _PHP_USE = re.compile(r"""^use\s+([\w\\]+)(?:\s+as\s+\w+)?\s*;""", re.MULTILINE)
-_PHP_REQUIRE = re.compile(r"""(?:require|include)(?:_once)?\s+['"]([^'"]+)['"]""", re.MULTILINE)
+_PHP_REQUIRE = re.compile(
+    r"""(?:require|include)(?:_once)?\s+['"]([^'"]+)['"]""", re.MULTILINE
+)
 
 # Swift: import Foundation
 _SWIFT_IMPORT = re.compile(r"""^import\s+(\w+)""", re.MULTILINE)
@@ -192,7 +203,12 @@ def _extract_js_imports(content: str) -> list[dict]:
             return
 
     for m in _JS_IMPORT_FROM.finditer(content):
-        named_group, default_group, extra_named, specifier = m.group(1), m.group(2), m.group(3), m.group(4)
+        named_group, default_group, extra_named, specifier = (
+            m.group(1),
+            m.group(2),
+            m.group(3),
+            m.group(4),
+        )
         names: list[str] = []
         if named_group:
             names.extend(_clean_names(named_group))
@@ -313,16 +329,22 @@ def _extract_rust_imports(content: str) -> list[dict]:
             brace_m = re.search(r"\{([^}]+)\}", raw)
             if brace_m:
                 names = _clean_names(brace_m.group(1))
-            edges.append({"specifier": raw.split("{")[0].rstrip(":").strip(), "names": names})
+            edges.append(
+                {"specifier": raw.split("{")[0].rstrip(":").strip(), "names": names}
+            )
     return edges
 
 
 def _extract_c_imports(content: str) -> list[dict]:
-    return [{"specifier": m.group(1), "names": []} for m in _C_INCLUDE.finditer(content)]
+    return [
+        {"specifier": m.group(1), "names": []} for m in _C_INCLUDE.finditer(content)
+    ]
 
 
 def _extract_asm_imports(content: str) -> list[dict]:
-    return [{"specifier": m.group(1), "names": []} for m in _ASM_INCLUDE.finditer(content)]
+    return [
+        {"specifier": m.group(1), "names": []} for m in _ASM_INCLUDE.finditer(content)
+    ]
 
 
 def _extract_vhdl_imports(content: str) -> list[dict]:
@@ -342,11 +364,16 @@ def _extract_vhdl_imports(content: str) -> list[dict]:
 
 
 def _extract_verilog_imports(content: str) -> list[dict]:
-    return [{"specifier": m.group(1), "names": []} for m in _VERILOG_INCLUDE.finditer(content)]
+    return [
+        {"specifier": m.group(1), "names": []}
+        for m in _VERILOG_INCLUDE.finditer(content)
+    ]
 
 
 def _extract_ruby_imports(content: str) -> list[dict]:
-    return [{"specifier": m.group(1), "names": []} for m in _RUBY_REQUIRE.finditer(content)]
+    return [
+        {"specifier": m.group(1), "names": []} for m in _RUBY_REQUIRE.finditer(content)
+    ]
 
 
 def _extract_csharp_imports(content: str) -> list[dict]:
@@ -372,7 +399,9 @@ def _extract_php_imports(content: str) -> list[dict]:
 
 
 def _extract_swift_imports(content: str) -> list[dict]:
-    return [{"specifier": m.group(1), "names": []} for m in _SWIFT_IMPORT.finditer(content)]
+    return [
+        {"specifier": m.group(1), "names": []} for m in _SWIFT_IMPORT.finditer(content)
+    ]
 
 
 def _extract_scala_imports(content: str) -> list[dict]:
@@ -381,22 +410,27 @@ def _extract_scala_imports(content: str) -> list[dict]:
         raw = m.group(1)
         brace_m = re.search(r"\{([^}]+)\}", raw)
         names = _clean_names(brace_m.group(1)) if brace_m else []
-        edges.append({"specifier": raw.split("{")[0].rstrip(".").strip(), "names": names})
+        edges.append(
+            {"specifier": raw.split("{")[0].rstrip(".").strip(), "names": names}
+        )
     return edges
 
 
 def _extract_haskell_imports(content: str) -> list[dict]:
-    return [{"specifier": m.group(1), "names": []} for m in _HASKELL_IMPORT.finditer(content)]
+    return [
+        {"specifier": m.group(1), "names": []}
+        for m in _HASKELL_IMPORT.finditer(content)
+    ]
 
 
 # Dart: import 'package:flutter/material.dart' / import 'dart:async' / import './foo.dart'
-_DART_IMPORT = re.compile(
-    r"""^\s*(?:import|export)\s+['"]([^'"]+)['"]""", re.MULTILINE
-)
+_DART_IMPORT = re.compile(r"""^\s*(?:import|export)\s+['"]([^'"]+)['"]""", re.MULTILINE)
 
 
 def _extract_dart_imports(content: str) -> list[dict]:
-    return [{"specifier": m.group(1), "names": []} for m in _DART_IMPORT.finditer(content)]
+    return [
+        {"specifier": m.group(1), "names": []} for m in _DART_IMPORT.finditer(content)
+    ]
 
 
 # SQL/dbt: {{ ref('model_name') }} and {{ source('source', 'table') }}
@@ -445,36 +479,147 @@ _VUE_TEMPLATE_COMPONENT = re.compile(
     re.MULTILINE,
 )
 
-_HTML_STANDARD_ELEMENTS = frozenset({
-    # HTML5 elements
-    "a", "abbr", "address", "area", "article", "aside", "audio",
-    "b", "base", "bdi", "bdo", "blockquote", "body", "br", "button",
-    "canvas", "caption", "cite", "code", "col", "colgroup",
-    "data", "datalist", "dd", "del", "details", "dfn", "dialog", "div", "dl", "dt",
-    "em", "embed",
-    "fieldset", "figcaption", "figure", "footer", "form",
-    "h1", "h2", "h3", "h4", "h5", "h6", "head", "header", "hgroup", "hr", "html",
-    "i", "iframe", "img", "input", "ins",
-    "kbd",
-    "label", "legend", "li", "link",
-    "main", "map", "mark", "menu", "meta", "meter",
-    "nav", "noscript",
-    "object", "ol", "optgroup", "option", "output",
-    "p", "param", "picture", "pre", "progress",
-    "q",
-    "rp", "rt", "ruby",
-    "s", "samp", "script", "search", "section", "select", "slot", "small", "source", "span",
-    "strong", "style", "sub", "summary", "sup",
-    "table", "tbody", "td", "template", "textarea", "tfoot", "th", "thead", "time", "title", "tr", "track",
-    "u", "ul",
-    "var", "video",
-    "wbr",
-    # SVG elements
-    "svg", "path", "circle", "rect", "line", "g", "defs", "use", "text",
-    "polygon", "polyline", "ellipse", "image", "mask", "pattern",
-    # Vue built-in elements
-    "transition", "transition-group", "keep-alive", "teleport", "suspense", "component",
-})
+_HTML_STANDARD_ELEMENTS = frozenset(
+    {
+        # HTML5 elements
+        "a",
+        "abbr",
+        "address",
+        "area",
+        "article",
+        "aside",
+        "audio",
+        "b",
+        "base",
+        "bdi",
+        "bdo",
+        "blockquote",
+        "body",
+        "br",
+        "button",
+        "canvas",
+        "caption",
+        "cite",
+        "code",
+        "col",
+        "colgroup",
+        "data",
+        "datalist",
+        "dd",
+        "del",
+        "details",
+        "dfn",
+        "dialog",
+        "div",
+        "dl",
+        "dt",
+        "em",
+        "embed",
+        "fieldset",
+        "figcaption",
+        "figure",
+        "footer",
+        "form",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "head",
+        "header",
+        "hgroup",
+        "hr",
+        "html",
+        "i",
+        "iframe",
+        "img",
+        "input",
+        "ins",
+        "kbd",
+        "label",
+        "legend",
+        "li",
+        "link",
+        "main",
+        "map",
+        "mark",
+        "menu",
+        "meta",
+        "meter",
+        "nav",
+        "noscript",
+        "object",
+        "ol",
+        "optgroup",
+        "option",
+        "output",
+        "p",
+        "param",
+        "picture",
+        "pre",
+        "progress",
+        "q",
+        "rp",
+        "rt",
+        "ruby",
+        "s",
+        "samp",
+        "script",
+        "search",
+        "section",
+        "select",
+        "slot",
+        "small",
+        "source",
+        "span",
+        "strong",
+        "style",
+        "sub",
+        "summary",
+        "sup",
+        "table",
+        "tbody",
+        "td",
+        "template",
+        "textarea",
+        "tfoot",
+        "th",
+        "thead",
+        "time",
+        "title",
+        "tr",
+        "track",
+        "u",
+        "ul",
+        "var",
+        "video",
+        "wbr",
+        # SVG elements
+        "svg",
+        "path",
+        "circle",
+        "rect",
+        "line",
+        "g",
+        "defs",
+        "use",
+        "text",
+        "polygon",
+        "polyline",
+        "ellipse",
+        "image",
+        "mask",
+        "pattern",
+        # Vue built-in elements
+        "transition",
+        "transition-group",
+        "keep-alive",
+        "teleport",
+        "suspense",
+        "component",
+    }
+)
 
 
 def _kebab_to_pascal(name: str) -> str:
@@ -617,7 +762,9 @@ def extract_imports(content: str, file_path: str, language: str) -> list[dict]:
     # receive only `content`).
     if language in TEMPLATE_ENGINE_LANGUAGES:
         underlying = template_underlying_language(file_path)
-        underlying_extractor = _LANGUAGE_EXTRACTORS.get(underlying) if underlying else None
+        underlying_extractor = (
+            _LANGUAGE_EXTRACTORS.get(underlying) if underlying else None
+        )
         if underlying_extractor is None:
             return []
         try:
@@ -634,7 +781,17 @@ def extract_imports(content: str, file_path: str, language: str) -> list[dict]:
         return []
 
 
-_JS_EXTENSIONS = (".js", ".ts", ".jsx", ".tsx", ".vue", ".astro", ".mjs", ".cjs", ".svelte")
+_JS_EXTENSIONS = (
+    ".js",
+    ".ts",
+    ".jsx",
+    ".tsx",
+    ".vue",
+    ".astro",
+    ".mjs",
+    ".cjs",
+    ".svelte",
+)
 _PY_EXTENSIONS = (".py",)
 _RUBY_EXTENSIONS = (".rb",)
 _ALL_EXTENSIONS = _JS_EXTENSIONS + _PY_EXTENSIONS + _RUBY_EXTENSIONS + (".go",)
@@ -702,7 +859,7 @@ def resolve_php_namespace(
     """
     for prefix, base_dir in sorted(psr4_map.items(), key=lambda x: -len(x[0])):
         if fqn.startswith(prefix):
-            relative = fqn[len(prefix):].replace("\\", "/") + ".php"
+            relative = fqn[len(prefix) :].replace("\\", "/") + ".php"
             candidate = base_dir + relative
             if candidate in source_files:
                 return candidate
@@ -802,7 +959,9 @@ def _python_source_roots(source_files) -> tuple[str, ...]:
     """
     # Normalize to frozenset for hashable cache key. set inputs become frozenset;
     # frozenset inputs pass through unchanged.
-    cache_key = source_files if isinstance(source_files, frozenset) else frozenset(source_files)
+    cache_key = (
+        source_files if isinstance(source_files, frozenset) else frozenset(source_files)
+    )
     cached = _python_roots_cache.get(cache_key)
     if cached is not None:
         return cached
@@ -846,7 +1005,9 @@ def _python_package_parents(source_files) -> dict[str, tuple[str, ...]]:
     package name; its parent dir must be acting as a source root regardless
     of whether our structural ``_python_source_roots`` could deduce that.
     """
-    cache_key = source_files if isinstance(source_files, frozenset) else frozenset(source_files)
+    cache_key = (
+        source_files if isinstance(source_files, frozenset) else frozenset(source_files)
+    )
     cached = _python_package_parents_cache.get(cache_key)
     if cached is not None:
         return cached
@@ -880,10 +1041,21 @@ _alias_map_cache: dict[str, dict[str, list[str]]] = {}
 _ALIAS_MAP_LOCK = threading.Lock()
 
 # Directories to skip when walking for tsconfig files.
-_TSCONFIG_SKIP_DIRS = frozenset({
-    "node_modules", ".git", "dist", "build", "out", ".cache",
-    ".next", ".nuxt", ".svelte-kit", ".turbo", ".vercel",
-})
+_TSCONFIG_SKIP_DIRS = frozenset(
+    {
+        "node_modules",
+        ".git",
+        "dist",
+        "build",
+        "out",
+        ".cache",
+        ".next",
+        ".nuxt",
+        ".svelte-kit",
+        ".turbo",
+        ".vercel",
+    }
+)
 
 
 def _norm_alias_replacement(rep: str, tsconfig_dir_rel: str = "") -> str:
@@ -903,7 +1075,11 @@ def _norm_alias_replacement(rep: str, tsconfig_dir_rel: str = "") -> str:
     if tsconfig_dir_rel:
         # Replacement is relative to tsconfig_dir_rel (e.g. ".svelte-kit").
         # posixpath.normpath resolves ".." segments.
-        combined = posixpath.normpath(posixpath.join(tsconfig_dir_rel, base)) if base else tsconfig_dir_rel
+        combined = (
+            posixpath.normpath(posixpath.join(tsconfig_dir_rel, base))
+            if base
+            else tsconfig_dir_rel
+        )
         if combined == ".":
             combined = ""
         return (combined + "/*") if is_wildcard else combined
@@ -937,7 +1113,9 @@ def _load_tsconfig_aliases(source_root: str) -> dict[str, list[str]]:
         for pattern, reps in paths.items():
             if pattern in alias_map:
                 continue  # earlier config wins
-            normalized = [_norm_alias_replacement(r, tsconfig_dir_rel) for r in (reps or []) if r]
+            normalized = [
+                _norm_alias_replacement(r, tsconfig_dir_rel) for r in (reps or []) if r
+            ]
             if normalized:
                 alias_map[pattern] = normalized
 
@@ -945,6 +1123,7 @@ def _load_tsconfig_aliases(source_root: str) -> dict[str, list[str]]:
         """Read a tsconfig/jsconfig file as plain JSON or JSONC (comments + trailing commas)."""
         try:
             from ..config import _strip_jsonc
+
             return json.loads(_strip_jsonc(path.read_text("utf-8", errors="replace")))
         except Exception:
             return {}
@@ -961,7 +1140,10 @@ def _load_tsconfig_aliases(source_root: str) -> dict[str, list[str]]:
     svelte_cfg = root / ".svelte-kit" / "tsconfig.json"
     if svelte_cfg.is_file():
         data = _load_json(svelte_cfg)
-        _ingest(data.get("compilerOptions", {}).get("paths", {}), tsconfig_dir_rel=".svelte-kit")
+        _ingest(
+            data.get("compilerOptions", {}).get("paths", {}),
+            tsconfig_dir_rel=".svelte-kit",
+        )
 
     # Generic discovery: walk all tsconfig*.json / jsconfig*.json files in the
     # repo tree (depth ≤ 4, skipping build/dependency dirs), following each
@@ -1015,12 +1197,18 @@ def _load_tsconfig_aliases(source_root: str) -> dict[str, list[str]]:
         try:
             for entry in sorted(directory.iterdir()):
                 if entry.is_dir():
-                    if entry.name not in _TSCONFIG_SKIP_DIRS and not entry.name.startswith("."):
+                    if (
+                        entry.name not in _TSCONFIG_SKIP_DIRS
+                        and not entry.name.startswith(".")
+                    ):
                         _walk_tsconfigs(entry, depth + 1)
                 elif (
                     entry.is_file()
                     and entry.suffix == ".json"
-                    and (entry.name.startswith("tsconfig") or entry.name.startswith("jsconfig"))
+                    and (
+                        entry.name.startswith("tsconfig")
+                        or entry.name.startswith("jsconfig")
+                    )
                 ):
                     _ingest_tsconfig_file(entry)
         except PermissionError:
@@ -1045,7 +1233,7 @@ def _expand_aliases(specifier: str, alias_map: dict[str, list[str]]) -> list[str
             prefix = pattern[:-1]  # e.g. "@/"
             if not specifier.startswith(prefix):
                 continue
-            rest = specifier[len(prefix):]  # e.g. "lib/utils"
+            rest = specifier[len(prefix) :]  # e.g. "lib/utils"
             for rep in replacements:
                 if rep.endswith("/*"):
                     rep_dir = rep[:-2]  # e.g. "src/lib" or "" (repo root)
@@ -1084,7 +1272,9 @@ def build_re_export_maps(
         for imp in file_imports:
             if not imp.get("is_re_export"):
                 continue
-            target = resolve_specifier(imp["specifier"], src_file, source_files, alias_map, psr4_map)
+            target = resolve_specifier(
+                imp["specifier"], src_file, source_files, alias_map, psr4_map
+            )
             if not target or target == src_file:
                 continue
             kind = imp.get("re_export_kind", "wildcard")
@@ -1126,7 +1316,9 @@ def expand_barrel_leaves(
     leaves: set[str] = {direct}
     # Each queue entry is (barrel, names) — names=[] means "expand everything"
     queue: deque = deque([(direct, list(consumer_names))])
-    visited: set[tuple[str, str]] = set()  # (barrel, name) — re-walk barrel under different name contexts
+    visited: set[tuple[str, str]] = (
+        set()
+    )  # (barrel, name) — re-walk barrel under different name contexts
 
     while queue:
         barrel, names = queue.popleft()
@@ -1177,10 +1369,13 @@ def expand_barrel_leaves(
     return leaves
 
 
+from collections.abc import Collection
+
+
 def resolve_specifier(
     specifier: str,
     importer_path: str,
-    source_files: set[str],
+    source_files: Collection[str],
     alias_map: Optional[dict[str, list[str]]] = None,
     psr4_map: Optional[dict[str, str]] = None,
 ) -> Optional[str]:

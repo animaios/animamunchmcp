@@ -4,6 +4,8 @@ Each test: build a representative response, encode through the dispatcher,
 decode via the public decoder, verify key fields and row contents survive.
 """
 
+from typing import Any
+
 import pytest
 
 from jcodemunch_mcp.encoding import encode_response
@@ -11,7 +13,7 @@ from jcodemunch_mcp.encoding.decoder import decode
 from jcodemunch_mcp.encoding.schemas import registry
 
 
-def _rt(tool: str, response: dict) -> dict:
+def _rt(tool: str, response: dict[str, Any]) -> dict[str, Any]:
     payload, meta = encode_response(tool, response, "compact")
     assert isinstance(payload, str), (
         f"expected compact payload for {tool}, got {type(payload)}"
