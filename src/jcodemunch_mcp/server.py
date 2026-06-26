@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import IO, Any, Optional
@@ -78,15 +79,14 @@ _CANONICAL_TOOL_NAMES: tuple[str, ...] = (
     # Relationships
     "find_importers",
     "find_references",
-    "check_references",
     "get_dependency_graph",
     "get_class_hierarchy",
     "get_related_symbols",
     "get_call_hierarchy",
     # Impact & Safety
     "get_blast_radius",
+    "check_rename_safe",
     "check_safe",
-    "get_impact_preview",
     "get_changed_symbols",
     "plan_refactoring",
     "get_symbol_provenance",
@@ -108,7 +108,6 @@ _CANONICAL_TOOL_NAMES: tuple[str, ...] = (
     "get_churn_rate",
     "get_hotspots",
     "get_repo_health",
-    "get_symbol_importance",
     "get_repo_map",
     "get_dead_code_v2",
     "get_untested_symbols",
@@ -116,12 +115,9 @@ _CANONICAL_TOOL_NAMES: tuple[str, ...] = (
     "search_ast",
     "embed_repo",
     "get_session_context",
-    "plan_turn",
     "register_edit",
     # Agent stand-up briefing
     "digest",
-    # Runtime tier switching
-    "set_tool_tier",
     # Composite retrieval
     "winnow_symbols",
     # Runtime trace ingest + analytics
@@ -167,7 +163,6 @@ _SNIPPET_TOOL_CATEGORIES: list[tuple[str, list[str]]] = [
         [
             "find_importers",
             "find_references",
-            "check_references",
             "get_dependency_graph",
             "get_class_hierarchy",
             "get_related_symbols",
@@ -180,7 +175,6 @@ _SNIPPET_TOOL_CATEGORIES: list[tuple[str, list[str]]] = [
         [
             "get_blast_radius",
             "check_safe",
-            "get_impact_preview",
             "get_changed_symbols",
             "plan_refactoring",
             "get_symbol_provenance",
@@ -208,7 +202,6 @@ _SNIPPET_TOOL_CATEGORIES: list[tuple[str, list[str]]] = [
             "get_churn_rate",
             "get_hotspots",
             "get_repo_health",
-            "get_symbol_importance",
             "get_repo_map",
             "find_similar_symbols",
             "get_dead_code_v2",
@@ -219,9 +212,8 @@ _SNIPPET_TOOL_CATEGORIES: list[tuple[str, list[str]]] = [
     ),
     ("Diffs & Embeddings", ["embed_repo"]),
     (
-        "Session-Aware Routing",
+        "Session",
         [
-            "plan_turn",
             "get_session_context",
             "register_edit",
             "digest",
@@ -234,109 +226,9 @@ _SNIPPET_TOOL_CATEGORIES: list[tuple[str, list[str]]] = [
             "find_hot_paths",
         ],
     ),
-    ("Runtime Tier Switching", ["set_tool_tier"]),
     ("Self-Guide", ["jcodemunch_guide"]),
 ]
 
-# --------------------------------------------------------------------------- #
-# Tool profiles: tiered sets for controlling context budget.                   #
-# core ⊂ standard ⊂ full.  Config key: tool_profile (default "full").         #
-# --------------------------------------------------------------------------- #
-_TOOL_TIER_CORE: frozenset[str] = frozenset(
-    {
-        # Indexing
-        "index_repo",
-        "index_folder",
-        "index_file",
-        # Discovery
-        "list_repos",
-        "resolve_repo",
-        "get_repo_outline",
-        "get_file_tree",
-        "get_file_outline",
-        # Search & Retrieval
-        "search_symbols",
-        "get_symbol_source",
-        "get_file_content",
-        "search_text",
-        "get_context_bundle",
-        "get_ranked_context",
-        "assemble_task_context",
-        # Relationships
-        "find_importers",
-        "find_references",
-    }
-)
-
-_TOOL_TIER_STANDARD: frozenset[str] = _TOOL_TIER_CORE | frozenset(
-    {
-        # Indexing extras
-        "summarize_repo",
-        "embed_repo",
-        "import_runtime_signal",
-        "find_hot_paths",
-        # Discovery extras
-        "suggest_queries",
-        "search_columns",
-        # Relationships
-        "check_references",
-        "get_dependency_graph",
-        "get_class_hierarchy",
-        "get_related_symbols",
-        "get_call_hierarchy",
-        # Impact & Safety
-        "get_blast_radius",
-        "check_safe",
-        "get_impact_preview",
-        "get_changed_symbols",
-        # Symbol navigation
-        "find_implementations",
-        # Quality & Metrics
-        "get_symbol_complexity",
-        "get_churn_rate",
-        "get_hotspots",
-        "get_symbol_importance",
-        "get_repo_map",
-        "get_dead_code_v2",
-        "get_untested_symbols",
-        "find_similar_symbols",
-        "get_repo_health",
-        "search_ast",
-        "winnow_symbols",
-        # Architecture
-        "get_dependency_cycles",
-        "get_coupling_metrics",
-        "render_diagram",
-        "get_project_intel",
-        # Agent stand-up briefing
-        "digest",
-    }
-)
-
-# full = everything (no filter applied)
-
-# TODO: Purge the entire tiering system (tool_profile / core/standard/full).
-# No one uses it — plan_turn(model=) and set_tool_tier are vestigial.
-# Collapse to a single flat tool surface and delete _TOOL_TIER_CORE,
-# _TOOL_TIER_STANDARD, _ALWAYS_PRESENT_TOOLS, _UNDISABLEABLE_TOOLS,
-# _PROFILE_TIERS, and the tier-filtering logic in _build_tools_list.
-
-_PROFILE_TIERS: dict[str, frozenset[str] | None] = {
-    "core": _TOOL_TIER_CORE,
-    "standard": _TOOL_TIER_STANDARD,
-    "full": None,  # None = no filtering
-}
-
-# Tools that survive tier filtering (always visible in core/standard tiers).
-# jcodemunch_guide is included so a one-line CLAUDE.md keeps working at any tier.
-_ALWAYS_PRESENT_TOOLS: frozenset[str] = frozenset({"set_tool_tier", "jcodemunch_guide"})
-
-# Subset of _ALWAYS_PRESENT_TOOLS that ALSO survives disabled_tools. These are
-# runtime tier controls — disabling them would lock the user out of switching
-# tiers in-session. jcodemunch_guide is intentionally NOT in this set (issue
-# #298): it's a documentation snippet, not a control surface, so users who
-# explicitly list it in disabled_tools should be honored.
-_UNDISABLEABLE_TOOLS: frozenset[str] = frozenset({"set_tool_tier"})
 
 # --- The Counter: adaptive tool surface (front door) ----------------------- #
 # order/menu/route collapse the ~83-tool surface to a 3-tool front door without
@@ -345,15 +237,15 @@ from . import counter as _counter
 
 _COUNTER_FRONT_DOOR: frozenset[str] = _counter.FRONT_DOOR
 
-# Unfiltered tool catalog, captured by _build_tools_list before tier/surface
+# Unfiltered tool catalog, captured by _build_tools_list before surface
 # filtering. Single source of truth for menu() and order()'s action allowlist,
-# so the front door can surface/dispatch any action regardless of resident tier.
+# so the front door can surface/dispatch any action regardless of surface mode.
 _RAW_CATALOG: "Optional[list]" = None
 
 
 def _effective_surface() -> str:
     """Active tool surface. 'counter' collapses list_tools to the front door;
-    anything else (default 'full') preserves existing tiered behavior unchanged.
+    anything else (default 'full') lists all tools.
     Env JCODEMUNCH_TOOL_SURFACE wins over config 'tool_surface'.
     """
     env = os.environ.get("JCODEMUNCH_TOOL_SURFACE")
@@ -426,7 +318,7 @@ def _counter_front_door_tools() -> list:
                 "ready-to-run argument templates. With execute=true, dispatches the "
                 "top recommendation and returns its result in the same call, "
                 "collapsing discover-then-call into one round-trip. Recommends "
-                "assemble_task_context / plan_turn for context-gathering intents."
+                "assemble_task_context for context-gathering intents."
             ),
             inputSchema={
                 "type": "object",
@@ -443,10 +335,6 @@ def _counter_front_door_tools() -> list:
                         "type": "boolean",
                         "description": "If true, dispatch the top recommended action and return its result.",
                         "default": False,
-                    },
-                    "model": {
-                        "type": "string",
-                        "description": "Optional active model id; piggybacks tier-switch like plan_turn(model=...).",
                     },
                 },
                 "required": ["task"],
@@ -477,115 +365,6 @@ def _catalog_rows() -> "list[dict]":
 
 def _catalog_names() -> set:
     return {t.name for t in _raw_catalog_tools() if t.name not in _COUNTER_FRONT_DOOR}
-
-
-# --- Runtime session tier state -------------------------------------------- #
-import threading
-import uuid
-import weakref
-from typing import Hashable
-
-# Tier overrides are keyed by MCP session identity so concurrent HTTP clients
-# don't clobber each other. Stdio and tests have no active session; they land
-# on the "__default__" sentinel, preserving pre-v1.61 single-session semantics.
-#
-# Earlier versions used an LRU-capped OrderedDict keyed by id(session). That
-# had two bugs (audit findings F2 + F3):
-#   F2: id() is reused after GC, so a freed session's tier could be inherited
-#       by a freshly-allocated replacement at the same address.
-#   F3: LRU eviction silently reset a live session's tier to config default.
-# Both are fixed by keying on a per-session UUID tracked in a WeakKeyDict;
-# entries disappear exactly when the session object is collected, and there
-# is no cap to evict from.
-_SESSION_TIER_DEFAULT_KEY: Hashable = "__default__"
-_session_tier_overrides: dict[Hashable, str] = {}
-_session_tier_lock = threading.Lock()
-
-# Maps a live session object → a stable uuid used as the dict key above.
-# WeakKeyDictionary drops entries automatically when the session is freed,
-# and the matching override entry is purged lazily via the finalizer below.
-_session_uuid: "weakref.WeakKeyDictionary[Any, str]" = weakref.WeakKeyDictionary()
-
-
-def _session_key() -> Hashable:
-    """Return a stable hashable key for the active MCP session.
-
-    Priority:
-      1. `session.session_id` if the MCP library exposes one (HTTP transport).
-      2. A per-process UUID tracked in a WeakKeyDictionary keyed by the
-         session object. Survives for the lifetime of the session and
-         disappears with it — no id() reuse after GC (F2), no LRU eviction
-         required (F3).
-      3. The default sentinel when there is no active session (stdio/tests).
-    """
-    session = _get_mcp_session()
-    if session is None:
-        return _SESSION_TIER_DEFAULT_KEY
-    sid = getattr(session, "session_id", None)
-    if isinstance(sid, str) and sid:
-        return sid
-    try:
-        existing = _session_uuid.get(session)
-        if existing is not None:
-            return existing
-        new_uuid = uuid.uuid4().hex
-        _session_uuid[session] = new_uuid
-        # When the session is GC'd, remove its override entry too so the
-        # dict doesn't grow unbounded with stale keys.
-        weakref.finalize(session, _drop_override, new_uuid)
-        return new_uuid
-    except TypeError:
-        # Session object isn't weakref-able — fall back to id(). Known to
-        # be risky after GC but there's no safer hashable available here.
-        return id(session)
-
-
-def _drop_override(key: Hashable) -> None:
-    with _session_tier_lock:
-        _session_tier_overrides.pop(key, None)
-
-
-def _set_session_tier(tier: str | None) -> None:
-    """Atomically set (or clear, when tier is None) the active session's override."""
-    key = _session_key()
-    with _session_tier_lock:
-        if tier is None:
-            _session_tier_overrides.pop(key, None)
-            return
-        _session_tier_overrides[key] = tier
-
-
-def _reset_session_tiers() -> None:
-    """Clear every session's tier override. Test helper."""
-    with _session_tier_lock:
-        _session_tier_overrides.clear()
-    _session_uuid.clear()
-
-
-def _effective_profile() -> str:
-    """Return the active tier, preferring the session override over config."""
-    key = _session_key()
-    with _session_tier_lock:
-        override = _session_tier_overrides.get(key)
-    if override is not None:
-        return override
-    return config_module.get("tool_profile", "full") or "full"
-
-
-def _resolve_tier_bundle(profile: str) -> frozenset[str] | None:
-    """Return the set of tool names allowed for the given profile.
-
-    Reads from config['tool_tier_bundles'] first, falls back to baked-in
-    _TOOL_TIER_CORE / _TOOL_TIER_STANDARD constants if the config key is
-    missing or malformed. 'full' returns None (no filter).
-    """
-    if profile == "full":
-        return None
-    bundles = config_module.get("tool_tier_bundles") or {}
-    if isinstance(bundles, dict) and isinstance(bundles.get(profile), list):
-        return frozenset(bundles[profile])
-    # Fallback to constants.
-    return _PROFILE_TIERS.get(profile)
 
 
 async def _emit_tools_list_changed() -> None:
@@ -630,85 +409,6 @@ def _get_mcp_session(mcp_server: Server | None = None) -> Any | None:
     return getattr(request_context, "session", None)
 
 
-def _note_adaptive_tiering_transport(transport: str) -> None:
-    """Log an INFO line when adaptive_tiering is active under an HTTP transport.
-
-    As of v1.61, tier overrides are session-keyed, so HTTP transports handle
-    concurrent clients safely. The v1.60.1 refuse-to-start guard was removed.
-    This hook stays as an observability breadcrumb.
-    """
-    if not config_module.get("adaptive_tiering", False):
-        return
-    logger.info(
-        "adaptive_tiering active under transport=%s; tier overrides are session-keyed.",
-        transport,
-    )
-
-
-def _log_startup_validation_warnings() -> None:
-    """Emit WARNING logs for any bundle/disabled_tools overlap at startup."""
-    from .tier_resolver import validate_bundle_disabled_overlap
-
-    try:
-        cfg = {
-            "tool_tier_bundles": config_module.get("tool_tier_bundles") or {},
-            "disabled_tools": config_module.get("disabled_tools") or [],
-        }
-        for msg in validate_bundle_disabled_overlap(cfg):
-            logger.warning(msg)
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("startup validation failed: %s", exc, exc_info=True)
-
-
-async def _apply_model_announcement(model: str) -> dict:
-    """Resolve model → tier, switch if changed, emit list_changed if changed.
-
-    Gated by the adaptive_tiering config flag. When the flag is false
-    (the default), this is a no-op: returns the current tier without
-    switching. set_tool_tier is not affected by this flag because it is
-    an explicit user invocation.
-    """
-    from .tier_resolver import resolve_model_to_tier
-
-    adaptive = bool(config_module.get("adaptive_tiering", False))
-    if not adaptive:
-        return {
-            "ok": True,
-            "tier": _effective_profile(),
-            "changed": False,
-            "adaptive_tiering": False,
-            "_meta": {
-                "hint": (
-                    "adaptive_tiering is disabled in config.jsonc — "
-                    "model self-report accepted but tier was not "
-                    "switched. Set adaptive_tiering: true to enable."
-                )
-            },
-        }
-
-    mp = config_module.get("model_tier_map") or {}
-    tier, match_reason = resolve_model_to_tier(model, mp)
-    prev = _effective_profile()
-    changed = tier != prev
-    res = {
-        "ok": True,
-        "tier": tier,
-        "changed": changed,
-        "match_reason": match_reason,
-        "adaptive_tiering": True,
-    }
-    if match_reason == "unmatched_fallback":
-        res.setdefault("_meta", {})["warning"] = (
-            f"model {model!r} did not match any entry in model_tier_map; "
-            f"falling back to 'full'. Add a pattern to model_tier_map to "
-            f"route this model explicitly."
-        )
-    if changed:
-        _set_session_tier(tier)
-        await _emit_tools_list_changed()
-    return res
-
-
 # Parameters stripped from tool schemas when compact_schemas is enabled.
 # These are advanced/rarely-used params that cost tokens every session but
 # are used <5% of the time.  The underlying handler still accepts them.
@@ -751,7 +451,6 @@ _COMPACT_STRIP_PARAMS: dict[str, set[str]] = {
 # of mechanical names an agent already knows. Dropping the enum keeps the param
 # fully usable as a free-string filter (the tool tolerates any language string)
 # while reclaiming the tokens. Keyed by param name so every tool that exposes a
-# `language` enum (search_symbols, search_ast, ...) benefits across all tiers.
 _COMPACT_DEMOTE_ENUM_PARAMS: frozenset[str] = frozenset({"language"})
 
 # Tools eligible for Agent Selector complexity scoring
@@ -762,9 +461,8 @@ _AGENT_SELECTOR_TOOLS = frozenset(
         "search_symbols",
         "search_text",
         "get_symbol_source",
-        "plan_turn",
         "get_blast_radius",
-        "get_impact_preview",
+        "get_call_hierarchy",
         "get_dependency_graph",
     }
 )
@@ -1675,7 +1373,7 @@ def _build_tools_list() -> list[Tool]:
         ),
         Tool(
             name="find_references",
-            description="Find all files that import or reference an identifier via the import graph. Answers 'where is this imported / re-exported?'. SCOPE: import sites + dbt `{{ ref() }}` edges + (when `include_call_chain=true`) symbols whose bodies textually mention the identifier. Does NOT exhaustively enumerate every call site across the codebase — for that, combine with search_text or use get_call_hierarchy on the resolved symbol_id. Use `identifiers` for batch queries.",
+            description="Find all files that import or reference an identifier via the import graph. Answers 'where is this imported / re-exported?'. SCOPE: import sites + dbt `{{ ref() }}` edges + (when `include_call_chain=true`) symbols whose bodies textually mention the identifier. Does NOT exhaustively enumerate every call site across the codebase — for that, combine with search_text or use get_call_hierarchy on the resolved symbol_id. Use `identifiers` for batch queries. With `quick=true`, returns a lightweight is_referenced {bool} envelope (import_count + content_count) for fast dead-code detection — the former check_references mode.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -1699,35 +1397,20 @@ def _build_tools_list() -> list[Tool]:
                         "default": False,
                         "description": "When true (singular mode only), each reference entry includes calling_symbols: symbols in that file whose bodies mention the identifier. Default false.",
                     },
-                },
-                "required": ["repo"],
-            },
-        ),
-        Tool(
-            name="check_references",
-            description="Check if an identifier is referenced anywhere: imports + file content. Combines find_references and search_text into one call. Returns is_referenced (bool) for quick dead-code detection. Accepts multiple identifiers in one call via identifiers param.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {"type": "string", "description": "Repository identifier"},
-                    "identifier": {
-                        "type": "string",
-                        "description": "Single identifier to check",
-                    },
-                    "identifiers": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Multiple identifiers to check in one call. Returns grouped results.",
+                    "quick": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "When true, return a lightweight is_referenced {bool} envelope with import_count and content_count instead of the full reference list. This is the merged check_references mode for quick dead-code detection.",
                     },
                     "search_content": {
                         "type": "boolean",
                         "default": True,
-                        "description": "Also search file contents (not just imports). Set false for fast import-only check.",
+                        "description": "Also search file contents, not just imports (quick mode only). Default true.",
                     },
                     "max_content_results": {
                         "type": "integer",
                         "default": 20,
-                        "description": "Max files to return per identifier for content search.",
+                        "description": "Max files to return per identifier for content search (quick mode only).",
                     },
                 },
                 "required": ["repo"],
@@ -1875,7 +1558,7 @@ def _build_tools_list() -> list[Tool]:
                 "(by tracking git HEAD between calls), (b) the current risk surface "
                 "(top hotspots by complexity × churn), and (c) dead-code candidates. "
                 "Each item references symbol_ids the agent can immediately query "
-                "with get_symbol_source / get_call_hierarchy / check_references. "
+                "with get_symbol_source / get_call_hierarchy / find_references. "
                 "Designed for session-start context injection: call once when you "
                 "open a repo, get oriented to the load-bearing changes without cold "
                 "exploration."
@@ -1908,39 +1591,6 @@ def _build_tools_list() -> list[Tool]:
                     },
                 },
                 "required": ["repo"],
-            },
-        ),
-        Tool(
-            name="plan_turn",
-            description="Plan the next turn by analyzing query against the codebase. Returns confidence level (high/medium/low), recommended symbols/files, and guidance. Use as opening move for any task.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository identifier.",
-                    },
-                    "query": {
-                        "type": "string",
-                        "description": "What you're looking for (task description or symbol name).",
-                    },
-                    "max_recommended": {
-                        "type": "integer",
-                        "description": "Maximum number of symbols to recommend.",
-                        "default": 5,
-                    },
-                    "model": {
-                        "type": "string",
-                        "description": (
-                            "Optional. Your active model identifier (e.g. 'claude-haiku-4-5'). "
-                            "When supplied and adaptive_tiering is enabled, plan_turn invokes "
-                            "the tier-switch logic as a side effect — the exposed tool list is "
-                            "narrowed to the tier mapped to this model via config.jsonc:"
-                            "model_tier_map."
-                        ),
-                    },
-                },
-                "required": ["repo", "query"],
             },
         ),
         Tool(
@@ -2124,7 +1774,8 @@ def _build_tools_list() -> list[Tool]:
                 "Uses AST-derived call detection: callers = symbols in importing files that "
                 "mention this name; callees = imported symbols mentioned in this symbol's body. "
                 "Useful for understanding how a symbol fits into the call graph before refactoring. "
-                "For a 'what breaks if I delete this?' answer, use get_impact_preview instead."
+                "Set include_impact=true for a transitive 'what breaks if I delete this?' analysis "
+                "with affected symbols grouped by file and call-chain paths."
             ),
             inputSchema={
                 "type": "object",
@@ -2148,33 +1799,14 @@ def _build_tools_list() -> list[Tool]:
                         "description": "Maximum hops to traverse (1–5). Default 3.",
                         "default": 3,
                     },
-                },
-                "required": ["repo", "symbol_id"],
-            },
-        ),
-        Tool(
-            name="get_impact_preview",
-            description=(
-                "Show what breaks if a symbol is removed or renamed. "
-                "Walks the call graph transitively to find every symbol that calls this one, "
-                "returning affected symbols grouped by file with call-chain paths. "
-                "Use this before deleting or renaming a symbol to understand full impact. "
-                "For a structured caller/callee tree, use get_call_hierarchy instead."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository identifier (owner/repo or just repo name)",
-                    },
-                    "symbol_id": {
-                        "type": "string",
-                        "description": "Symbol name or full ID to analyse. Use search_symbols to find IDs.",
+                    "include_impact": {
+                        "type": "boolean",
+                        "description": "When true, additionally walk the call graph transitively and return an 'impact' key with affected symbols grouped by file and call-chain paths (the former get_impact_preview behavior). Use this before deleting or renaming a symbol to understand full impact. Default false.",
+                        "default": False,
                     },
                     "include_decisions": {
                         "type": "boolean",
-                        "description": "When true, attach a read-only 'decisions' block: decision-bearing commits (revert/perf/refactor/rename/bugfix) mined from the git history of the focal symbol's file and the impacted files, plus a volatility read. Surfaced from the commit record; nothing is persisted. Default false (spends a few git-log calls).",
+                        "description": "When true and include_impact is true, attach a read-only 'decisions' block inside the impact result: decision-bearing commits (revert/perf/refactor/rename/bugfix) mined from the git history of the focal symbol's file and the impacted files, plus a volatility read. Surfaced from the commit record; nothing is persisted. Default false (spends a few git-log calls).",
                         "default": False,
                     },
                 },
@@ -2322,7 +1954,7 @@ def _build_tools_list() -> list[Tool]:
             name="check_safe",
             description=(
                 "Composite preflight: can this symbol be safely deleted or edited? "
-                "Combines find_importers (cross-repo), check_references, dead-code "
+                "Combines find_importers (cross-repo), find_references(quick=true), dead-code "
                 "confidence, runtime evidence, and entry-point heuristics into a "
                 "single verdict + one-line recommended_action. Use mode='delete' "
                 "for deletion safety (verdict: safe_to_delete / test_coverage_only / "
@@ -2749,40 +2381,6 @@ def _build_tools_list() -> list[Tool]:
             },
         ),
         Tool(
-            name="get_symbol_importance",
-            description=(
-                "Return the most architecturally important symbols in a repo, ranked by "
-                "PageRank or in-degree centrality on the import graph. Useful for "
-                "orientation: surfaces the symbols that most of the codebase depends on. "
-                "New tool: use after indexing to understand repo architecture at a glance."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository identifier (owner/repo or just repo name)",
-                    },
-                    "top_n": {
-                        "type": "integer",
-                        "description": "Number of top symbols to return (default 20, max 200)",
-                        "default": 20,
-                    },
-                    "algorithm": {
-                        "type": "string",
-                        "enum": ["pagerank", "degree"],
-                        "description": "'pagerank' (default) = full PageRank on import graph; 'degree' = simple in-degree count (faster).",
-                        "default": "pagerank",
-                    },
-                    "scope": {
-                        "type": "string",
-                        "description": "Limit to a subdirectory prefix (e.g. 'src/core')",
-                    },
-                },
-                "required": ["repo"],
-            },
-        ),
-        Tool(
             name="find_similar_symbols",
             description=(
                 "Find clusters of similar functions/methods/classes — consolidation candidates. "
@@ -2852,7 +2450,10 @@ def _build_tools_list() -> list[Tool]:
                 "greedy-packs signatures (not bodies) under token_budget. Designed for "
                 "cold-start orientation — 'I just cloned this repo, what matters here?'. "
                 "Pair with get_tectonic_map (module topology) "
-                "and get_ranked_context (query-driven) once you know what to ask for."
+                "and get_ranked_context (query-driven) once you know what to ask for. "
+                "When group_by='flat', returns a flat ranked list of most architecturally "
+                "important symbols by PageRank or in-degree centrality — the same as the "
+                "former get_symbol_importance tool."
             ),
             inputSchema={
                 "type": "object",
@@ -2863,7 +2464,7 @@ def _build_tools_list() -> list[Tool]:
                     },
                     "token_budget": {
                         "type": "integer",
-                        "description": "Hard cap on returned tokens (default 2048).",
+                        "description": "Hard cap on returned tokens (default 2048). Ignored when group_by='flat'.",
                         "default": 2048,
                     },
                     "scope": {
@@ -2872,13 +2473,35 @@ def _build_tools_list() -> list[Tool]:
                     },
                     "max_per_file": {
                         "type": "integer",
-                        "description": "Max signatures emitted per file (default 5, capped at 50).",
+                        "description": "Max signatures emitted per file (default 5, capped at 50). Ignored when group_by='flat'.",
                         "default": 5,
                     },
                     "include_kinds": {
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "Optional list of symbol kinds to restrict results (e.g. ['class', 'function']).",
+                    },
+                    "group_by": {
+                        "type": "string",
+                        "enum": ["file", "flat"],
+                        "description": (
+                            "'file' (default) groups symbols by file with greedy token packing. "
+                            "'flat' returns a flat ranked list of most architecturally important "
+                            "symbols by PageRank or in-degree centrality (the former "
+                            "get_symbol_importance behaviour)."
+                        ),
+                        "default": "file",
+                    },
+                    "algorithm": {
+                        "type": "string",
+                        "enum": ["pagerank", "degree"],
+                        "description": "'pagerank' (default) = full PageRank on import graph; 'degree' = simple in-degree count (faster). Only used when group_by='flat'.",
+                        "default": "pagerank",
+                    },
+                    "top_n": {
+                        "type": "integer",
+                        "description": "Number of top symbols to return in flat mode (default 20, max 200). Only used when group_by='flat'.",
+                        "default": 20,
                     },
                 },
                 "required": ["repo"],
@@ -3149,11 +2772,11 @@ def _build_tools_list() -> list[Tool]:
             name="render_diagram",
             description=(
                 "Render any graph-producing tool's output as rich, annotated Mermaid markup. "
-                "Pass the raw output dict from get_call_hierarchy, get_signal_chains, "
-                "get_tectonic_map, get_dependency_cycles, get_impact_preview, "
+                "Pass the raw output dict from get_call_hierarchy (with include_impact=true), get_signal_chains, "
+                "get_tectonic_map, get_dependency_cycles, "
                 "get_blast_radius, or get_dependency_graph. Auto-detects the source tool "
                 "and picks the optimal diagram type: flowchart TD (call hierarchy, blast radius), "
-                "flowchart BT (impact preview), flowchart LR (tectonic plates, dependency graph, "
+                "flowchart BT (call hierarchy with impact), flowchart LR (tectonic plates, dependency graph, "
                 "cycles), or sequenceDiagram (signal chains). Encodes metadata as visual signals: "
                 "edge colors for resolution confidence, node shapes for symbol kind, subgraph "
                 "grouping by file/plate/depth, risk heat coloring. Themes: 'flow' (blue/purple "
@@ -3315,27 +2938,7 @@ def _build_tools_list() -> list[Tool]:
                 "required": ["repo", "criteria"],
             },
         ),
-        # --- Runtime tier-switch tools (always force-included below) ---------
-        Tool(
-            name="set_tool_tier",
-            description=(
-                "Explicit tier override for the current session. "
-                "Narrows or widens the exposed tool list to 'core' / 'standard' / 'full'. "
-                "Prefer plan_turn(model=...) for routine per-task use; use "
-                "set_tool_tier only when you need an explicit override (e.g. escalate "
-                "mid-task to 'full' after a capability-gated failure)."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "tier": {
-                        "type": "string",
-                        "enum": ["core", "standard", "full"],
-                    },
-                },
-                "required": ["tier"],
-            },
-        ),
+        # --- Self-guide tool -------
         Tool(
             name="jcodemunch_guide",
             description=(
@@ -3344,8 +2947,7 @@ def _build_tools_list() -> list[Tool]:
                 '--generate`. Lets an agent keep a one-line CLAUDE.md (e.g. "Call '
                 'jcodemunch_guide and strictly follow its instructions.") instead of '
                 "pasting a static snippet that drifts from the installed version. "
-                "Idempotent, no repo context required. Honors disabled_tools and tier "
-                "filtering — list 'jcodemunch_guide' in disabled_tools to hide it."
+                "Idempotent, no repo context required. Honors disabled_tools"
             ),
             inputSchema={
                 "type": "object",
@@ -3359,44 +2961,21 @@ def _build_tools_list() -> list[Tool]:
     _RAW_CATALOG = list(all_tools)
     surface = _effective_surface()
     if surface == "counter":
-        # Collapse to the front door + always-present controls. Tier filtering
-        # is intentionally bypassed: 'counter' is the surface choice itself.
-        keep = _COUNTER_FRONT_DOOR | _ALWAYS_PRESENT_TOOLS
+        # Collapse to the front door. Surface choice bypasses disabled_tools.
+        keep = _COUNTER_FRONT_DOOR
         tools = [t for t in all_tools if t.name in keep]
         _apply_description_overrides(tools)
         return tools
-    # Non-counter surfaces keep existing behavior byte-for-byte: the front-door
-    # tools stay hidden (still callable via call_tool), so 'full' and the
-    # existing tiers are unchanged on upgrade.
+    # Non-counter surfaces: front-door tools stay hidden
+    # (still callable via call_tool), only non-front-door tools appear.
     all_tools = [t for t in all_tools if t.name not in _COUNTER_FRONT_DOOR]
-    # Start with a mutable copy for filtering.
-    tools = list(all_tools)
-    # --- Profile filtering ---------------------------------------------------
-    profile = _effective_profile()
-    allowed = _resolve_tier_bundle(profile)
-    if allowed is not None:
-        tools = [t for t in tools if t.name in allowed]
-
-    # Filter out disabled tools. _UNDISABLEABLE_TOOLS (runtime tier controls)
-    # are never removed by default — disabling them would lock the user out of
-    # switching tiers in-session. Other meta tools (jcodemunch_guide) honor
-    # disabled_tools. Users who set `allow_disabling_tier_controls=true` opt
-    # out of the safety net (issue #299) — useful for tool-cap budgets.
+    # Filter out disabled tools (simple set difference).
     disabled = config_module.get("disabled_tools", [])
-    allow_disable_tier = config_module.get("allow_disabling_tier_controls", False)
-    protected = frozenset() if allow_disable_tier else _UNDISABLEABLE_TOOLS
     if disabled:
-        disabled_set = set(disabled) - protected
-        if disabled_set:
-            tools = [t for t in tools if t.name not in disabled_set]
-
-    # Re-add tier-survivors that weren't disabled. Anything in
-    # _ALWAYS_PRESENT_TOOLS but explicitly in disabled_tools stays hidden.
-    disabled_set = set(disabled) if disabled else set()
-    present_names = {t.name for t in tools}
-    missing = _ALWAYS_PRESENT_TOOLS - present_names - (disabled_set - protected)
-    if missing:
-        tools.extend(t for t in all_tools if t.name in missing)
+        disabled_set = set(disabled)
+        tools = [t for t in all_tools if t.name not in disabled_set]
+    else:
+        tools = list(all_tools)
 
     # SQL gating: auto-disable search_columns when SQL not in languages
     languages = config_module.get("languages")
@@ -3525,7 +3104,7 @@ complexity, churn, test gaps, and change volume. Includes actionable recommendat
 **Deep path** (manual drill-down):
 1. **get_changed_symbols** → map the git diff to added/removed/modified/renamed symbols.
 2. **get_blast_radius** on each changed file → depth-scored transitive impact + `has_test_reach` per file.
-3. **get_impact_preview** on key changed symbols → "what breaks?" analysis.
+3. **get_call_hierarchy** (include_impact=true) on key changed symbols → "what breaks?" analysis.
 4. **get_symbol_provenance** on unfamiliar symbols → understand why the code exists before changing it.
 5. **get_untested_symbols** on affected files → flag unreached symbols in the blast radius.
 6. **get_coupling_metrics** on changed files → check if the change increases coupling.
@@ -3832,9 +3411,6 @@ async def _handle_route(arguments: dict) -> list[TextContent] | CallToolResult:
                     type="text", text=json.dumps(payload, separators=(",", ":"))
                 )
             ]
-        model = arguments.get("model")
-        if model and action == "plan_turn":
-            exec_args["model"] = model
         result = await call_tool(action, exec_args)
         head = TextContent(
             type="text",
@@ -3933,15 +3509,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
         # Project-level tool disabling: check if tool is disabled for this project
         # Global disabled tools are filtered out in list_tools() schema; project-level
         # rejection happens here since schema is global (can't be changed per-project).
-        # `allow_disabling_tier_controls=true` lets users opt out of the
-        # _UNDISABLEABLE_TOOLS safety net (issue #299).
-        allow_disable_tier = config_module.get(
-            "allow_disabling_tier_controls", False, repo=repo_arg
-        )
-        protected_at_call = frozenset() if allow_disable_tier else _UNDISABLEABLE_TOOLS
-        if name not in protected_at_call and config_module.is_tool_disabled(
-            name, repo=repo_arg
-        ):
+        if config_module.is_tool_disabled(name, repo=repo_arg):
             return _error_call_result(
                 json.dumps(
                     {
@@ -4225,20 +3793,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     max_results=arguments.get("max_results", 50),
                     storage_path=storage_path,
                     include_call_chain=arguments.get("include_call_chain", False),
-                )
-            )
-        elif name == "check_references":
-            from .tools.check_references import check_references
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    check_references,
-                    repo=arguments["repo"],
-                    identifier=arguments.get("identifier"),
-                    identifiers=arguments.get("identifiers"),
+                    quick=arguments.get("quick", False),
                     search_content=arguments.get("search_content", True),
                     max_content_results=arguments.get("max_content_results", 20),
-                    storage_path=storage_path,
                 )
             )
         elif name == "search_columns":
@@ -4335,27 +3892,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     storage_path=storage_path,
                 )
             )
-        elif name == "plan_turn":
-            from .tools.plan_turn import plan_turn
-
-            # Extract model for tier-switch piggyback before passing to plan_turn
-            model = (
-                arguments.pop("model", None) if isinstance(arguments, dict) else None
-            )
-            result = await asyncio.to_thread(
-                functools.partial(
-                    plan_turn,
-                    repo=arguments["repo"],
-                    query=arguments["query"],
-                    max_recommended=arguments.get("max_recommended", 5),
-                    storage_path=storage_path,
-                )
-            )
-            announcement = None
-            if isinstance(model, str) and model:
-                announcement = await _apply_model_announcement(model)
-            if announcement is not None and isinstance(result, dict):
-                result["tier_announcement"] = announcement
         elif name == "register_edit":
             from .tools.register_edit import register_edit
 
@@ -4413,17 +3949,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     direction=arguments.get("direction", "both"),
                     depth=arguments.get("depth", 3),
                     storage_path=storage_path,
-                )
-            )
-        elif name == "get_impact_preview":
-            from .tools.get_impact_preview import get_impact_preview
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    get_impact_preview,
-                    repo=arguments["repo"],
-                    symbol_id=arguments["symbol_id"],
-                    storage_path=storage_path,
+                    include_impact=arguments.get("include_impact", False),
                     include_decisions=arguments.get("include_decisions", False),
                 )
             )
@@ -4638,19 +4164,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     storage_path=storage_path,
                 )
             )
-        elif name == "get_symbol_importance":
-            from .tools.get_symbol_importance import get_symbol_importance
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    get_symbol_importance,
-                    repo=arguments["repo"],
-                    top_n=arguments.get("top_n", 20),
-                    algorithm=arguments.get("algorithm", "pagerank"),
-                    scope=arguments.get("scope"),
-                    storage_path=storage_path,
-                )
-            )
         elif name == "get_repo_map":
             from .tools.get_repo_map import get_repo_map
 
@@ -4663,6 +4176,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     max_per_file=arguments.get("max_per_file", 5),
                     include_kinds=arguments.get("include_kinds"),
                     storage_path=storage_path,
+                    group_by=arguments.get("group_by", "file"),
+                    algorithm=arguments.get("algorithm", "pagerank"),
+                    top_n=arguments.get("top_n", 20),
                 )
             )
         elif name == "find_similar_symbols":
@@ -4813,16 +4329,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     storage_path=storage_path,
                 )
             )
-        elif name == "set_tool_tier":
-            tier = arguments.get("tier")
-            if tier not in ("core", "standard", "full"):
-                result = {"error": f"invalid tier: {tier!r}"}
-            else:
-                prev = _effective_profile()
-                _set_session_tier(tier)
-                if tier != prev:
-                    await _emit_tools_list_changed()
-                result = {"ok": True, "tier": tier, "changed": tier != prev}
         elif name == "jcodemunch_guide":
             from . import __version__ as _ver
 
@@ -5288,8 +4794,6 @@ async def run_stdio_server():
         logger.debug("version_check probe failed", exc_info=True)
     # Feature 10: Restore session state on startup
     _restore_session_state()
-    # Log tier bundle / disabled_tools overlap warnings
-    _log_startup_validation_warnings()
 
     # Handshake watchdog. If the client never reaches any of our MCP
     # handlers (list_tools, list_resources, list_prompts, get_prompt,
@@ -5509,8 +5013,6 @@ async def run_sse_server(host: str, port: int):
         port,
         os.path.expanduser(os.environ.get("CODE_INDEX_PATH", "~/.code-index/")),
     )
-    _note_adaptive_tiering_transport("sse")
-    _log_startup_validation_warnings()
     # Feature 10: Restore session state on startup
     _restore_session_state()
     config = uvicorn.Config(starlette_app, host=host, port=port, log_level="warning")
@@ -5720,8 +5222,6 @@ async def run_streamable_http_server(host: str, port: int):
         port,
         os.path.expanduser(os.environ.get("CODE_INDEX_PATH", "~/.code-index/")),
     )
-    _note_adaptive_tiering_transport("streamable-http")
-    _log_startup_validation_warnings()
     # Feature 10: Restore session state on startup
     _restore_session_state()
     config = uvicorn.Config(starlette_app, host=host, port=port, log_level="warning")
@@ -6120,19 +5620,8 @@ def _run_config(check: bool = False, init: bool = False, upgrade: bool = False) 
     else:
         row("languages", _fmt_list(languages), _detect_source("languages", None))
 
-    # ── Tool Profile ──────────────────────────────────────────────────────
-    section("Tool Profile")
-    profile = _cfg.get("tool_profile", "full")
-    profile_display = {
-        "core": f"{green('core')} (~16 tools)",
-        "standard": f"{yellow('standard')} (~40 tools)",
-        "full": f"{dim('full')} (all tools)",
-    }
-    row(
-        "tool_profile",
-        profile_display.get(profile, profile),
-        _detect_source("tool_profile", "full"),
-    )
+    # ── Compact Schemas ──────────────────────────────────────────────────
+    section("Compact Schemas")
     compact = _cfg.get("compact_schemas", False)
     row(
         "compact_schemas",
@@ -6148,34 +5637,6 @@ def _run_config(check: bool = False, init: bool = False, upgrade: bool = False) 
         _fmt_list(disabled) if disabled else dim("(none)"),
         _detect_source("disabled_tools", []),
     )
-
-    # ── Tool Tiering ──────────────────────────────────────────────────────
-    section("Tool Tiering")
-    adaptive = _cfg.get("adaptive_tiering", False)
-    row(
-        "adaptive_tiering",
-        green("enabled") if adaptive else dim("disabled"),
-        _detect_source("adaptive_tiering", False),
-    )
-    bundles = _cfg.get("tool_tier_bundles") or {}
-    if isinstance(bundles, dict):
-        for tier_name in ("core", "standard"):
-            tools_in_tier = bundles.get(tier_name, [])
-            if isinstance(tools_in_tier, list):
-                row(f"  {tier_name} tier", f"{len(tools_in_tier)} tools", "config")
-    # Check for bundle/disabled overlap
-    from .tier_resolver import validate_bundle_disabled_overlap
-
-    overlap_cfg = {
-        "tool_tier_bundles": bundles,
-        "disabled_tools": disabled,
-    }
-    overlap_warnings = validate_bundle_disabled_overlap(overlap_cfg)
-    if overlap_warnings:
-        for msg in overlap_warnings:
-            print(f"  {WARN} {yellow(msg)}")
-    else:
-        print(f"  {CHECK} {green('No bundle/disabled_tools overlap')}")
 
     # ── Descriptions ──────────────────────────────────────────────────────
     section("Descriptions")

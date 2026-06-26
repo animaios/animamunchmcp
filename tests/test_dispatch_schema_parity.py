@@ -21,17 +21,19 @@ import textwrap
 from jcodemunch_mcp import server as server_mod
 from jcodemunch_mcp.server import _build_tools_list
 
-
 # Cross-cutting keys consumed by call_tool that are intentionally NOT per-tool
 # inputSchema properties.
 _NON_SCHEMA_KEYS = {
-    "format",   # popped before dispatch (compact-output selector, server.py)
+    "format",  # popped before dispatch (compact-output selector, server.py)
 }
 
 # (tool, key) pairs the dispatch reads as a documented forgiving alias of a
 # declared property — accepted input, deliberately not surfaced in the schema.
 _KNOWN_FORGIVING_ALIASES = {
-    ("get_file_outline", "file"),  # alias for file_path (arguments.get("file_path") or .get("file"))
+    (
+        "get_file_outline",
+        "file",
+    ),  # alias for file_path (arguments.get("file_path") or .get("file"))
 }
 
 
@@ -99,11 +101,9 @@ def _full_schema_props() -> dict[str, set[str]]:
 
     cfg = config_module._GLOBAL_CONFIG  # type: ignore[attr-defined]
     original = {
-        k: cfg.get(k)
-        for k in ("tool_profile", "compact_schemas", "render_diagram_viewer_enabled")
+        k: cfg.get(k) for k in ("compact_schemas", "render_diagram_viewer_enabled")
     }
     try:
-        cfg["tool_profile"] = "full"
         cfg["compact_schemas"] = False
         # Enable feature flags that gate config-conditional schema properties so
         # the property superset is declared (e.g. render_diagram.open_in_viewer is

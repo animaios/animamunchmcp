@@ -20,10 +20,10 @@ import time
 from typing import Optional
 
 from ..storage import IndexStore
+from ._graph_utils import build_adjacency
 from ._utils import resolve_repo
 from .get_dead_code_v2 import get_dead_code_v2
 from .get_dependency_cycles import get_dependency_cycles
-from .get_dependency_graph import _build_adjacency
 from .get_hotspots import get_hotspots
 
 
@@ -95,8 +95,12 @@ def _count_unstable_modules(index) -> tuple[int, int]:
         return 0, 0
     source_files = frozenset(index.source_files)
     alias_map = getattr(index, "alias_map", None)
-    fwd = _build_adjacency(
-        index.imports, source_files, alias_map, getattr(index, "psr4_map", None)
+    fwd = build_adjacency(
+        index.imports,
+        source_files,
+        alias_map,
+        getattr(index, "psr4_map", None),
+        expand_barrels=True,
     )
 
     # Build reverse (importers per file). The graph still includes test

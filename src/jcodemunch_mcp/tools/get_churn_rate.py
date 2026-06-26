@@ -11,31 +11,13 @@ most reliable approximation).
 from __future__ import annotations
 
 import logging
-import subprocess
 import time
 from typing import Optional
 
 from ..storage import IndexStore
-from ._utils import resolve_repo
+from ._utils import resolve_repo, run_git
 
 logger = logging.getLogger(__name__)
-
-
-def _run_git(args: list[str], cwd: str, timeout: int = 15) -> tuple[int, str, str]:
-    try:
-        r = subprocess.run(
-            ["git"] + args,
-            cwd=cwd, capture_output=True, text=True,
-            timeout=timeout, stdin=subprocess.DEVNULL,
-        )
-        return r.returncode, r.stdout.strip(), r.stderr.strip()
-    except FileNotFoundError:
-        return -1, "", "git not found on PATH"
-    except subprocess.TimeoutExpired:
-        return -2, "", "git command timed out"
-    except Exception as exc:
-        logger.debug("git subprocess error: %s", exc, exc_info=True)
-        return -3, "", str(exc)
 
 
 def get_churn_rate(
@@ -100,14 +82,14 @@ def get_churn_rate(
             return {"error": f"Symbol {target!r} has no file in index."}
 
     # Verify git availability
-    rc, _, err = _run_git(["rev-parse", "--git-dir"], cwd=cwd)
+    rc, _, err = run_git(["rev-parse", "--git-dir"], cwd=cwd)
     if rc != 0:
         if rc == -1:
             return {"error": "git not found on PATH."}
         return {"error": f"Not a git repository: {err}"}
 
     # Fetch commits in the window: format hash|author_email|ISO date
-    rc2, log_out, log_err = _run_git(
+    rc2, log_out, log_err = run_git(
         [
             "log",
             "--follow",
@@ -122,7 +104,9 @@ def get_churn_rate(
     if rc2 not in (0, 128):  # 128 = no commits but still OK
         return {"error": f"git log failed: {log_err}"}
 
-    commits_raw = [line for line in log_out.splitlines() if line.strip()] if log_out else []
+    commits_raw = (
+        [line for line in log_out.splitlines() if line.strip()] if log_out else []
+    )
     commit_count = len(commits_raw)
 
     authors: list[str] = sorted(
@@ -133,10 +117,10 @@ def get_churn_rate(
         for line in commits_raw
         if len((parts := line.split("|"))) >= 3 and parts[2]
     ]
-    last_modified = dates[0] if dates else None   # git log is newest-first
+    last_modified = dates[0] if dates else None  # git log is newest-first
 
     # First-ever commit (beyond the window)
-    rc3, first_out, _ = _run_git(
+    rc3, first_out, _ = run_git(
         ["log", "--follow", "--diff-filter=A", "--format=%aI", "--", file_path],
         cwd=cwd,
         timeout=30,

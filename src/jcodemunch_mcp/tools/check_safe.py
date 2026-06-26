@@ -276,11 +276,12 @@ def _gather_signals(
 
     # ── Identifier text refs ─────────────────────────────────────────────
     try:
-        from .check_references import check_references  # noqa: PLC0415
+        from .find_references import find_references  # noqa: PLC0415
 
-        ref_out = check_references(
+        ref_out = find_references(
             repo=f"{owner}/{name}",
             identifiers=[target_name],
+            quick=True,
             search_content=True,
             max_content_results=20,
             storage_path=storage_path,
@@ -316,7 +317,9 @@ def _gather_signals(
                             }
                         )
     except Exception as exc:  # noqa: BLE001
-        logger.debug("check_safe: check_references skipped: %s", exc, exc_info=True)
+        logger.debug(
+            "check_safe: find_references quick skipped: %s", exc, exc_info=True
+        )
 
     # ── Test coverage flag ───────────────────────────────────────────────
     signals.has_test_coverage = (signals.test_import_count + signals.test_ref_count) > 0
@@ -502,7 +505,7 @@ def check_safe(
 ) -> dict:
     """Composite preflight: can this symbol be deleted or edited safely?
 
-    ``mode='delete'`` combines find_importers (cross-repo), check_references,
+    ``mode='delete'`` combines find_importers (cross-repo), find_references(quick=True),
     get_dead_code_v2 confidence, runtime evidence, and entry-point heuristics
     into a single verdict + one-line recommended_action.
 

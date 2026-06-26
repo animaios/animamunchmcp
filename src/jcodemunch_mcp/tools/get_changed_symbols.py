@@ -3,53 +3,37 @@
 from __future__ import annotations
 
 import logging
-import subprocess
 import time
 from pathlib import Path
 from typing import Optional
 
-from ..storage import IndexStore
-from ..parser import parse_file, get_language_for_path
+from ..parser import get_language_for_path, parse_file
 from ..parser.symbols import compute_content_hash
-from ._utils import index_status_to_tool_error, resolve_repo
-from .get_blast_radius import _build_reverse_adjacency, _bfs_importers
+from ..storage import IndexStore
+from ._graph_utils import build_adjacency
+from ._utils import index_status_to_tool_error, resolve_repo, run_git
+from .get_blast_radius import _bfs_importers
 
 logger = logging.getLogger(__name__)
 
 
-def _run_git(args: list[str], cwd: str, timeout: int = 10) -> tuple[int, str, str]:
-    """Run a git command; return (returncode, stdout, stderr)."""
-    try:
-        r = subprocess.run(
-            ["git"] + args,
-            cwd=cwd, capture_output=True, text=True,
-            timeout=timeout, stdin=subprocess.DEVNULL,
-        )
-        return r.returncode, r.stdout.strip(), r.stderr.strip()
-    except FileNotFoundError:
-        return -1, "", "git not found on PATH"
-    except subprocess.TimeoutExpired:
-        return -2, "", "git command timed out"
-    except Exception as exc:  # pragma: no cover
-        logger.debug("git subprocess error: %s", exc, exc_info=True)
-        return -3, "", str(exc)
-
-
 def _resolve_sha(sha: str, cwd: str) -> Optional[str]:
     """Expand a SHA/ref to full 40-char hex. Returns None on failure."""
-    rc, out, _ = _run_git(["rev-parse", "--verify", sha], cwd=cwd)
+    rc, out, _ = run_git(["rev-parse", "--verify", sha], cwd=cwd)
     return out if rc == 0 and len(out) >= 7 else None
 
 
 def _get_file_content_at(sha: str, file_path: str, cwd: str) -> Optional[str]:
     """Return file content at a given git SHA, or None (binary / not present)."""
-    rc, out, _ = _run_git(["show", f"{sha}:{file_path}"], cwd=cwd, timeout=15)
+    rc, out, _ = run_git(["show", f"{sha}:{file_path}"], cwd=cwd, timeout=15)
     if rc != 0:
         return None
     return out
 
 
-def _parse_symbols_from_content(content: str, rel_path: str, repo: str | None = None) -> dict[str, dict]:
+def _parse_symbols_from_content(
+    content: str, rel_path: str, repo: str | None = None
+) -> dict[str, dict]:
     """Parse content → dict keyed by symbol qualified_name#kind → symbol dict."""
     language = get_language_for_path(rel_path)
     if not language:
@@ -69,7 +53,7 @@ def _parse_symbols_from_content(content: str, rel_path: str, repo: str | None = 
         ch = sym.content_hash
         if not ch:
             if sym.line and sym.end_line:
-                body = "".join(lines[sym.line - 1:sym.end_line])
+                body = "".join(lines[sym.line - 1 : sym.end_line])
             else:
                 body = sym.signature
             ch = compute_content_hash(body.encode("utf-8"))
@@ -130,17 +114,19 @@ def get_changed_symbols(
     if not index.source_root:
         return {
             "error": "get_changed_symbols requires a locally indexed repo (index_folder). "
-                     "GitHub-indexed repos (index_repo) do not have a local git working tree.",
+            "GitHub-indexed repos (index_repo) do not have a local git working tree.",
             "is_local": False,
         }
 
     cwd = index.source_root
 
     # Verify git is available and this is a git repo
-    rc, _, err = _run_git(["rev-parse", "--git-dir"], cwd=cwd)
+    rc, _, err = run_git(["rev-parse", "--git-dir"], cwd=cwd)
     if rc != 0:
         if rc == -1:
-            return {"error": "git not found on PATH. Install git and ensure it is in PATH."}
+            return {
+                "error": "git not found on PATH. Install git and ensure it is in PATH."
+            }
         return {"error": f"Not a git repository or git unavailable: {err}"}
 
     # Resolve since_sha — default to the SHA stored at index time
@@ -162,13 +148,13 @@ def get_changed_symbols(
         return {"error": f"until_sha not found: {until_sha!r}"}
 
     # Count commits spanned
-    rc2, count_out, _ = _run_git(
+    rc2, count_out, _ = run_git(
         ["rev-list", "--count", f"{resolved_since}..{resolved_until}"], cwd=cwd
     )
     commits_spanned = int(count_out) if rc2 == 0 and count_out.isdigit() else None
 
     # Get changed files (name-only diff, exclude binary files)
-    rc3, diff_out, diff_err = _run_git(
+    rc3, diff_out, diff_err = run_git(
         ["diff", "--name-only", "--diff-filter=ACDMRT", resolved_since, resolved_until],
         cwd=cwd,
     )
@@ -188,7 +174,8 @@ def get_changed_symbols(
             pass  # storage_path is outside the repo — no exclusion needed
 
     changed_files = [
-        f for f in all_diff_files
+        f
+        for f in all_diff_files
         if not (storage_exclude_prefix and f.startswith(storage_exclude_prefix))
     ]
 
@@ -196,7 +183,13 @@ def get_changed_symbols(
     rev_adj = None
     if include_blast_radius and index.imports is not None:
         source_files = frozenset(index.source_files)
-        rev_adj = _build_reverse_adjacency(index.imports, source_files, index.alias_map, getattr(index, "psr4_map", None))
+        rev_adj = build_adjacency(
+            index.imports,
+            source_files,
+            index.alias_map,
+            getattr(index, "psr4_map", None),
+            direction="reverse",
+        )
 
     # For each changed file, parse both versions and diff symbol sets
     added_symbols: list[dict] = []
@@ -215,7 +208,9 @@ def get_changed_symbols(
         after_syms: dict[str, dict] = {}
 
         if before_content is not None:
-            before_syms = _parse_symbols_from_content(before_content, file_path, repo=cwd)
+            before_syms = _parse_symbols_from_content(
+                before_content, file_path, repo=cwd
+            )
         if after_content is not None:
             after_syms = _parse_symbols_from_content(after_content, file_path, repo=cwd)
 
@@ -242,7 +237,11 @@ def get_changed_symbols(
             b = before_syms[key]
             a = after_syms[key]
             # Detect rename: same body hash but different name
-            if b["name"] != a["name"] and b["content_hash"] == a["content_hash"] and b["content_hash"]:
+            if (
+                b["name"] != a["name"]
+                and b["content_hash"] == a["content_hash"]
+                and b["content_hash"]
+            ):
                 entry = dict(a)
                 entry["change_type"] = "renamed"
                 entry["previous_name"] = b["name"]
@@ -250,7 +249,9 @@ def get_changed_symbols(
                     flat, _ = _bfs_importers(file_path, rev_adj, max_blast_depth)
                     entry["blast_radius"] = flat
                 changed_symbols.append(entry)
-            elif b["content_hash"] != a["content_hash"] and (b["content_hash"] or a["content_hash"]):
+            elif b["content_hash"] != a["content_hash"] and (
+                b["content_hash"] or a["content_hash"]
+            ):
                 entry = dict(a)
                 entry["change_type"] = "modified"
                 if include_blast_radius and rev_adj is not None:

@@ -6,6 +6,7 @@ since v1.91.0). Use this when a repo's coupling score looks suspicious
 to confirm whether it's dominated by tests/scripts/etc. or by real
 production-code instability.
 """
+
 from __future__ import annotations
 
 import sys
@@ -13,9 +14,9 @@ from collections import Counter
 from pathlib import Path
 
 from jcodemunch_mcp.storage import IndexStore
-from jcodemunch_mcp.tools.get_dependency_graph import _build_adjacency
-from jcodemunch_mcp.tools.get_repo_health import _is_production_path
+from jcodemunch_mcp.tools._graph_utils import build_adjacency
 from jcodemunch_mcp.tools._utils import resolve_repo
+from jcodemunch_mcp.tools.get_repo_health import _is_production_path
 
 
 def main(repo: str = "jgravelle/jcodemunch-mcp") -> int:
@@ -26,11 +27,12 @@ def main(repo: str = "jgravelle/jcodemunch-mcp") -> int:
         return 2
 
     source_files = frozenset(index.source_files)
-    fwd = _build_adjacency(
+    fwd = build_adjacency(
         index.imports,
         source_files,
         getattr(index, "alias_map", None),
         getattr(index, "psr4_map", None),
+        expand_barrels=True,
     )
     rev: dict[str, list] = {}
     for src, targets in fwd.items():
@@ -50,11 +52,15 @@ def main(repo: str = "jgravelle/jcodemunch-mcp") -> int:
     prod_unstable = [r for r in unstable if _is_production_path(r[0])]
     prod_total = sum(1 for f in index.source_files if _is_production_path(f))
 
-    print(f"raw unstable:        {len(unstable)} / {len(index.source_files)} "
-          f"= {len(unstable)/len(index.source_files)*100:.1f}%")
-    print(f"production unstable: {len(prod_unstable)} / {prod_total} "
-          f"= {(len(prod_unstable)/prod_total*100 if prod_total else 0):.1f}%  "
-          f"<-- coupling axis denominator (v1.91.0+)")
+    print(
+        f"raw unstable:        {len(unstable)} / {len(index.source_files)} "
+        f"= {len(unstable) / len(index.source_files) * 100:.1f}%"
+    )
+    print(
+        f"production unstable: {len(prod_unstable)} / {prod_total} "
+        f"= {(len(prod_unstable) / prod_total * 100 if prod_total else 0):.1f}%  "
+        f"<-- coupling axis denominator (v1.91.0+)"
+    )
     print()
     print(f"{'instab':>7}  {'Ca':>4}  {'Ce':>4}  {'prod':>4}  path")
     print("-" * 76)

@@ -1,12 +1,144 @@
 """get_call_hierarchy: callers and callees for any indexed symbol, N levels deep."""
 
 import time
+from collections import defaultdict
 from typing import Optional
 
 from ..storage import IndexStore
+from ._call_graph import (
+    bfs_callees,
+    bfs_callers,
+    build_symbols_by_file,
+    find_direct_callers,
+)
+from ._graph_utils import build_adjacency
 from ._utils import index_status_to_tool_error, resolve_repo
-from .get_blast_radius import _build_reverse_adjacency, _find_symbol
-from ._call_graph import build_symbols_by_file, bfs_callers, bfs_callees
+from .decision_context import resolve_decision_context
+from .get_blast_radius import _find_symbol
+
+# Max traversal depth for transitive impact walk (bounds compute on pathological graphs)
+_IMPACT_MAX_DEPTH = 5
+
+
+def _compute_impact(
+    index,
+    store,
+    owner,
+    name,
+    sym,
+    reverse_adj,
+    symbols_by_file,
+    include_decisions: bool = False,
+) -> dict:
+    """Walk the call graph transitively from callers — the get_impact_preview logic.
+
+    Returns the impact sub-dict (affected_files, affected_symbol_count,
+    affected_symbols, affected_by_file, call_chains, _meta, and optionally
+    decisions).
+    """
+    sym_id = sym.get("id", "")
+    symbol_index: dict[str, dict] = getattr(index, "_symbol_index", {})
+
+    # DFS collecting call chains.
+    # visited maps symbol_id → chain that reached it (shortest first-seen).
+    # chain = [sym_id (target), ..., caller_id]
+    visited: dict[str, list[str]] = {sym_id: [sym_id]}
+    affected_symbols: list[dict] = []
+
+    # Stack entries: (sym_dict, chain_up_to_this_sym)
+    stack: list[tuple[dict, list[str]]] = [(sym, [sym_id])]
+
+    while stack:
+        curr_sym, curr_chain = stack.pop()
+
+        if len(curr_chain) > _IMPACT_MAX_DEPTH:
+            continue
+
+        callers = find_direct_callers(
+            index, store, owner, name, curr_sym, reverse_adj, symbols_by_file
+        )
+
+        for caller in callers:
+            cid = caller["id"]
+            if cid in visited:
+                continue
+            new_chain = curr_chain + [cid]
+            visited[cid] = new_chain
+
+            affected_symbols.append(
+                {
+                    "id": cid,
+                    "name": caller["name"],
+                    "kind": caller["kind"],
+                    "file": caller["file"],
+                    "line": caller["line"],
+                    "call_chain": new_chain,
+                }
+            )
+
+            caller_full = symbol_index.get(cid)
+            if caller_full:
+                stack.append((caller_full, new_chain))
+
+    # Group by file
+    by_file: dict[str, list[dict]] = defaultdict(list)
+    for entry in affected_symbols:
+        by_file[entry["file"]].append(entry)
+
+    # Determine methodology based on available data
+    get_callers_fn = getattr(index, "get_callers_by_name", None)
+    callers_by_name = get_callers_fn() if get_callers_fn else None
+    has_call_data = bool(callers_by_name)
+    if has_call_data:
+        impact_methodology = "ast_call_references"
+        impact_confidence = "medium"
+        impact_source = "ast_call_references"
+        impact_tip = (
+            "AST-based: shows every symbol that transitively calls this one via stored "
+            "call references. More precise than text heuristic. "
+            "call_chain = [target_id, intermediate..., caller_id]."
+        )
+    else:
+        impact_methodology = "text_heuristic"
+        impact_confidence = "low"
+        impact_source = "text_heuristic"
+        impact_tip = (
+            "Text-heuristic: shows every symbol that transitively calls this one "
+            "via word-token matching. May have false positives for common names. "
+            "call_chain = [target_id, intermediate..., caller_id]."
+        )
+
+    result: dict = {
+        "affected_files": len(by_file),
+        "affected_symbol_count": len(affected_symbols),
+        "affected_symbols": affected_symbols,
+        "affected_by_file": {
+            f: [
+                {"id": s["id"], "name": s["name"], "kind": s["kind"], "line": s["line"]}
+                for s in syms
+            ]
+            for f, syms in sorted(by_file.items())
+        },
+        "call_chains": [
+            {"symbol_id": s["id"], "chain": s["call_chain"]} for s in affected_symbols
+        ],
+        "_meta": {
+            "methodology": impact_methodology,
+            "confidence_level": impact_confidence,
+            "source": impact_source,
+            "tip": impact_tip,
+        },
+    }
+
+    # Surface decision context (read-only git archaeology) only on request.
+    if include_decisions:
+        decision_files = [sym.get("file", "")] + sorted(by_file.keys())
+        result["decisions"] = resolve_decision_context(
+            getattr(index, "source_root", None),
+            decision_files,
+        )
+
+    return result
 
 
 def get_call_hierarchy(
@@ -15,6 +147,8 @@ def get_call_hierarchy(
     direction: str = "both",
     depth: int = 3,
     storage_path: Optional[str] = None,
+    include_impact: bool = False,
+    include_decisions: bool = False,
 ) -> dict:
     """Return incoming callers and outgoing callees for a symbol, N levels deep.
 
@@ -28,10 +162,22 @@ def get_call_hierarchy(
         direction: 'callers' | 'callees' | 'both'. Default 'both'.
         depth: Maximum hops to traverse (1–5). Default 3.
         storage_path: Custom storage path.
+        include_impact: When True, additionally walk the call graph transitively
+            from all callers and return an ``impact`` key with the same structure
+            as the former get_impact_preview output — affected symbols grouped by
+            file with call-chain paths showing how each is reached. Default False.
+        include_decisions: When True and include_impact is True, attach a read-only
+            ``decisions`` block inside the impact sub-dict — decision-bearing commits
+            (revert/perf/refactor/rename/bugfix) mined from the git history of
+            the focal symbol's file and the impacted files, plus a volatility read.
+            Surface-only; nothing is persisted. Default False (spends a few git-log
+            calls).
 
     Returns:
         Dict with symbol info, callers list, callees list, depth_reached, and _meta.
-        Each caller/callee entry includes {id, name, kind, file, line, depth}.
+        When include_impact is True, also includes an ``impact`` key with affected
+        symbols grouped by file. Each caller/callee entry includes
+        {id, name, kind, file, line, depth}.
     """
     depth = max(1, min(depth, 5))
     if direction not in ("callers", "callees", "both"):
@@ -60,7 +206,9 @@ def get_call_hierarchy(
     if not matches:
         return {"error": f"Symbol not found: '{symbol_id}'. Try search_symbols first."}
     if len(matches) > 1:
-        ambiguous = [{"name": s["name"], "file": s["file"], "id": s["id"]} for s in matches]
+        ambiguous = [
+            {"name": s["name"], "file": s["file"], "id": s["id"]} for s in matches
+        ]
         return {
             "error": (
                 f"Ambiguous symbol '{symbol_id}': found {len(matches)} definitions. "
@@ -71,11 +219,12 @@ def get_call_hierarchy(
 
     sym = matches[0]
     symbols_by_file = build_symbols_by_file(index)
-    reverse_adj = _build_reverse_adjacency(
+    reverse_adj = build_adjacency(
         index.imports,
         frozenset(index.source_files),
         getattr(index, "alias_map", None),
         getattr(index, "psr4_map", None),
+        direction="reverse",
     )
 
     callers: list[dict] = []
@@ -107,18 +256,20 @@ def get_call_hierarchy(
             key = (de.get("interface_name", ""), de.get("method_name", ""))
             grouped.setdefault(key, []).append(de)
         for (iface, method), impls in grouped.items():
-            dispatches.append({
-                "interface": iface,
-                "method": method,
-                "implementations": [
-                    {
-                        "name": imp.get("impl_name", ""),
-                        "file": imp.get("impl_file", ""),
-                        "line": imp.get("impl_line", 0),
-                    }
-                    for imp in impls
-                ],
-            })
+            dispatches.append(
+                {
+                    "interface": iface,
+                    "method": method,
+                    "implementations": [
+                        {
+                            "name": imp.get("impl_name", ""),
+                            "file": imp.get("impl_file", ""),
+                            "line": imp.get("impl_line", 0),
+                        }
+                        for imp in impls
+                    ],
+                }
+            )
 
     # Determine methodology based on available data
     get_callers = getattr(index, "get_callers_by_name", None)
@@ -168,7 +319,7 @@ def get_call_hierarchy(
             "Text-heuristic: callers = symbols in importing files that mention this "
             "name as a word token; callees = imported symbols mentioned in this "
             "symbol's body. May have false positives for common names or dynamic "
-            "dispatch. Use get_impact_preview for a transitive 'what breaks?' view."
+            "dispatch. Use include_impact=true for a transitive 'what breaks?' view."
         )
 
     # Summarize resolution tiers across all edges
@@ -204,8 +355,24 @@ def get_call_hierarchy(
         },
     }
 
+    # Transitive impact walk (formerly get_impact_preview).
+    # Additive: absent include_impact=True the response is backward-compatible.
+    if include_impact:
+        impact = _compute_impact(
+            index,
+            store,
+            owner,
+            name,
+            sym,
+            reverse_adj,
+            symbols_by_file,
+            include_decisions=include_decisions,
+        )
+        response["impact"] = impact
+
     # Phase 2: runtime confidence — zero-cost no-op when no traces ingested.
     from ..runtime.confidence import attach_runtime_confidence as _attach_runtime
+
     _db_path_str = str(store._sqlite._db_path(owner, name))
     _stamped: list[dict] = [response["symbol"], *callers, *callees]
     _summary = _attach_runtime(_stamped, _db_path_str, id_field="id")

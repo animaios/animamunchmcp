@@ -34,7 +34,7 @@ import time
 from typing import Optional
 
 from ..storage import IndexStore
-from ..parser.imports import resolve_specifier
+from ._graph_utils import build_adjacency
 from ._utils import resolve_repo
 
 logger = logging.getLogger(__name__)
@@ -52,12 +52,12 @@ logger = logging.getLogger(__name__)
 # The static-only regime is preserved bit-for-bit so the score is
 # backwards-compatible against pre-Phase-7 baselines on repos that don't
 # ingest runtime data.
-_W_BLAST = 0.30     # blast radius breadth
+_W_BLAST = 0.30  # blast radius breadth
 _W_COMPLEXITY = 0.25  # max cyclomatic among changed symbols
-_W_CHURN = 0.15     # historical volatility
+_W_CHURN = 0.15  # historical volatility
 _W_TEST_GAP = 0.20  # untested changed symbols
-_W_VOLUME = 0.10    # sheer volume of changes
-_W_RUNTIME = 0.15   # log(runtime hits) for changed symbols (Phase 7)
+_W_VOLUME = 0.10  # sheer volume of changes
+_W_RUNTIME = 0.15  # log(runtime hits) for changed symbols (Phase 7)
 
 # Normalisation constant for runtime hit counts — log1p(1M) ≈ 13.8 maps
 # to a runtime score of 1.0. Anything below 1M traffic on a single
@@ -107,9 +107,10 @@ def _load_runtime_signal_for_changed(
     conn.row_factory = sqlite3.Row
     try:
         try:
-            present = conn.execute(
-                "SELECT 1 FROM runtime_calls LIMIT 1"
-            ).fetchone() is not None
+            present = (
+                conn.execute("SELECT 1 FROM runtime_calls LIMIT 1").fetchone()
+                is not None
+            )
         except sqlite3.OperationalError:
             return per_sym, frozenset(), False
         if not present:
@@ -135,7 +136,9 @@ def _load_runtime_signal_for_changed(
                     tuple(changed_symbol_ids),
                 ).fetchall()
                 for r in rs_rows:
-                    per_sym[r["symbol_id"]] = per_sym.get(r["symbol_id"], 0) + int(r["n"] or 0)
+                    per_sym[r["symbol_id"]] = per_sym.get(r["symbol_id"], 0) + int(
+                        r["n"] or 0
+                    )
             except sqlite3.OperationalError:
                 # Pre-v16 DB without runtime_stack_events — runtime_calls only is fine.
                 pass
@@ -170,28 +173,20 @@ def _runtime_traffic_score(per_sym_hits: dict[str, int]) -> float:
     return _clamp01(sum(contributions) / len(contributions))
 
 
-def _build_reverse_adjacency(
-    imports: dict, source_files: frozenset, alias_map: Optional[dict] = None,
-    psr4_map: Optional[dict] = None,
-) -> dict[str, list[str]]:
-    """Return {file: [files_that_import_it]} from raw import data."""
-    rev: dict[str, list[str]] = {}
-    for src_file, file_imports in imports.items():
-        for imp in file_imports:
-            target = resolve_specifier(imp["specifier"], src_file, source_files, alias_map, psr4_map)
-            if target and target != src_file:
-                rev.setdefault(target, []).append(src_file)
-    return {k: list(dict.fromkeys(v)) for k, v in rev.items()}
-
-
 def _is_test_file(path: str) -> bool:
     """Quick heuristic for test files."""
     p = path.lower().replace("\\", "/")
     return (
-        "/test" in p or "/tests/" in p or "/__tests__/" in p
-        or p.startswith("test") or p.startswith("tests/")
-        or "_test." in p or ".test." in p or ".spec." in p
-        or "_spec." in p or "test_" in p.split("/")[-1]
+        "/test" in p
+        or "/tests/" in p
+        or "/__tests__/" in p
+        or p.startswith("test")
+        or p.startswith("tests/")
+        or "_test." in p
+        or ".test." in p
+        or ".spec." in p
+        or "_spec." in p
+        or "test_" in p.split("/")[-1]
     )
 
 
@@ -288,9 +283,12 @@ def get_pr_risk_profile(
     blast_files: set[str] = set()
     if index.imports is not None:
         source_files = frozenset(index.source_files)
-        rev_adj = _build_reverse_adjacency(
-            index.imports, source_files, index.alias_map,
+        rev_adj = build_adjacency(
+            index.imports,
+            source_files,
+            index.alias_map,
             getattr(index, "psr4_map", None),
+            direction="reverse",
         )
         for f in changed_files:
             # Direct importers only (depth=1) for aggregate scoring
@@ -316,12 +314,14 @@ def get_pr_risk_profile(
         if idx_sym:
             cyc = idx_sym.get("cyclomatic", 0) or 0
             if cyc > 0:
-                complexities.append({
-                    "symbol": cs.get("name", ""),
-                    "file": cs.get("file", ""),
-                    "cyclomatic": cyc,
-                    "max_nesting": idx_sym.get("max_nesting", 0) or 0,
-                })
+                complexities.append(
+                    {
+                        "symbol": cs.get("name", ""),
+                        "file": cs.get("file", ""),
+                        "cyclomatic": cyc,
+                        "max_nesting": idx_sym.get("max_nesting", 0) or 0,
+                    }
+                )
             max_cyclomatic = max(max_cyclomatic, cyc)
 
     # Normalise: cyclomatic 1-5 = low, 10 = medium, 20+ = high
@@ -330,7 +330,8 @@ def get_pr_risk_profile(
     # -------------------------------------------------------------------
     # Step 4: Churn signal (historical volatility of touched files)
     # -------------------------------------------------------------------
-    from .get_hotspots import _run_git as _hotspot_git, _get_file_churn
+    from ._utils import run_git as _hotspot_git
+    from .get_hotspots import _get_file_churn
 
     cwd = index.source_root
     file_churn: dict[str, int] = {}
@@ -368,13 +369,17 @@ def get_pr_risk_profile(
             # Check: does any test file import this file?
             test_importers = [f for f in rev_adj.get(cs_file, []) if f in test_file_set]
             if not test_importers:
-                untested_symbols.append({
-                    "symbol": cs_name,
-                    "file": cs_file,
-                    "change_type": cs.get("change_type", "unknown"),
-                })
+                untested_symbols.append(
+                    {
+                        "symbol": cs_name,
+                        "file": cs_file,
+                        "change_type": cs.get("change_type", "unknown"),
+                    }
+                )
 
-    non_test_changed = [cs for cs in all_changed if not _is_test_file(cs.get("file", ""))]
+    non_test_changed = [
+        cs for cs in all_changed if not _is_test_file(cs.get("file", ""))
+    ]
     untested_ratio = len(untested_symbols) / max(len(non_test_changed), 1)
     signal_test_gap = _clamp01(untested_ratio)
 
@@ -429,7 +434,8 @@ def get_pr_risk_profile(
         # runtime weight (0.15) slots in without inflating the total.
         scale = 1.0 - _W_RUNTIME
         risk_score = round(
-            scale * (
+            scale
+            * (
                 _W_BLAST * signal_blast
                 + _W_COMPLEXITY * signal_complexity
                 + _W_CHURN * signal_churn
@@ -469,14 +475,16 @@ def get_pr_risk_profile(
         cyc = (idx_sym.get("cyclomatic", 0) or 0) if idx_sym else 0
         churn = file_churn.get(cs_file, 0)
         score = round(cyc * math.log1p(churn), 4) if cyc else 0.0
-        hottest.append({
-            "symbol": cs.get("name", ""),
-            "file": cs.get("file", ""),
-            "change_type": cs.get("change_type", "unknown"),
-            "cyclomatic": cyc,
-            "file_churn": churn,
-            "hotspot_score": score,
-        })
+        hottest.append(
+            {
+                "symbol": cs.get("name", ""),
+                "file": cs.get("file", ""),
+                "change_type": cs.get("change_type", "unknown"),
+                "cyclomatic": cyc,
+                "file_churn": churn,
+                "hotspot_score": score,
+            }
+        )
     hottest.sort(key=lambda x: -x["hotspot_score"])
     top_5 = hottest[:5]
 
@@ -518,10 +526,16 @@ def get_pr_risk_profile(
             "evidence at all. Either the new code is unreachable, or your trace coverage has "
             "a blind spot — investigate before merging. "
             f"Files: {', '.join(dark_code_files[:5])}"
-            + (f" (+{len(dark_code_files) - 5} more)" if len(dark_code_files) > 5 else "")
+            + (
+                f" (+{len(dark_code_files) - 5} more)"
+                if len(dark_code_files) > 5
+                else ""
+            )
         )
     if not recommendations:
-        recommendations.append("No major risk signals detected. Routine review recommended.")
+        recommendations.append(
+            "No major risk signals detected. Routine review recommended."
+        )
 
     # Effective weights — the static-only mix is unchanged; the
     # runtime-aware mix scales each static weight by 0.85 to make room

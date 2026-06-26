@@ -699,7 +699,7 @@ def run_taskcomplete() -> int:
     and runs three diagnostic checks scoped to those files:
       1. get_dead_code_v2 — newly-orphaned symbols
       2. get_untested_symbols — new code with no test reachability
-      3. check_references — dangling references to deleted/renamed symbols
+      3. find_references(quick=True) — dangling references to deleted/renamed symbols
 
     Returns exit code (always 0 — errors are swallowed to avoid blocking).
     """
@@ -788,7 +788,7 @@ def run_taskcomplete() -> int:
 
         # 3. Dangling references — check symbols that were in edited files
         try:
-            from ..tools.check_references import check_references
+            from ..tools.find_references import find_references
 
             edited_syms = [
                 sym["name"]
@@ -797,11 +797,11 @@ def run_taskcomplete() -> int:
             ][:10]
             if edited_syms:
                 for sym_name in edited_syms:
-                    ref_result = check_references(
-                        repo_id, identifier=sym_name, max_content_results=3
+                    ref_result = find_references(
+                        repo_id, identifier=sym_name, quick=True, max_content_results=3
                     )
                     if ref_result and not ref_result.get("error"):
-                        if ref_result.get("total_references", 0) == 0:
+                        if not ref_result.get("is_referenced", False):
                             diag.setdefault("unreferenced_symbols", []).append(sym_name)
         except Exception:
             pass
@@ -941,19 +941,18 @@ def run_subagentstart() -> int:
     parts.append(
         "search_symbols, get_symbol_source, get_context_bundle, get_file_content, "
         "search_text, get_ranked_context, find_importers, find_references, "
-        "check_references, get_dependency_graph, get_class_hierarchy, "
-        "get_call_hierarchy, get_blast_radius, get_impact_preview, "
+        "get_dependency_graph, get_class_hierarchy, "
+        "get_call_hierarchy, get_blast_radius, "
         "get_changed_symbols, get_dead_code_v2, get_untested_symbols, "
         "get_symbol_complexity, get_churn_rate, get_hotspots, get_repo_health, "
         "get_coupling_metrics, get_extraction_candidates, "
         "plan_refactoring, "
         "get_file_outline, get_file_tree, get_repo_outline, index_folder, "
-        "index_repo, embed_repo, plan_turn, suggest_queries, "
+        "index_repo, embed_repo, suggest_queries, "
         "get_session_context, "
         "get_layer_violations, "
         "get_dead_code_v2, search_columns"
     )
-    parts.append("\nUse `plan_turn` to get recommended approach for your task.")
 
     result = {"systemMessage": "\n".join(parts)}
     json.dump(result, sys.stdout)

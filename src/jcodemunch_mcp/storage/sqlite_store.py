@@ -182,7 +182,7 @@ _PRAGMAS = [
     "PRAGMA wal_autocheckpoint = 1000",
     "PRAGMA cache_size = -8000",
     "PRAGMA busy_timeout = 5000",
-    "PRAGMA mmap_size = 268435456",   # 256 MB memory-mapped I/O
+    "PRAGMA mmap_size = 268435456",  # 256 MB memory-mapped I/O
     "PRAGMA temp_store = MEMORY",
 ]
 
@@ -201,9 +201,18 @@ _NON_REPO_DB_FILES = frozenset({"telemetry.db", "org_savings.db"})
 
 # Keys stored in the meta table
 _META_KEYS = [
-    "repo", "owner", "name", "indexed_at", "index_version",
-    "git_head", "source_root", "git_root", "source_roots", "display_name",
-    "languages", "context_metadata",
+    "repo",
+    "owner",
+    "name",
+    "indexed_at",
+    "index_version",
+    "git_head",
+    "source_root",
+    "git_root",
+    "source_roots",
+    "display_name",
+    "languages",
+    "context_metadata",
 ]
 
 # Lazily initialised to avoid circular import with index_store.
@@ -216,7 +225,9 @@ _file_hash: Callable[[str], str] = lambda x: ""
 def _ensure_index_store_deps() -> None:
     global _INDEX_VERSION, _file_hash
     if _INDEX_VERSION is None:
-        from .index_store import INDEX_VERSION, _file_hash as _fh
+        from .index_store import INDEX_VERSION
+        from .index_store import _file_hash as _fh
+
         _INDEX_VERSION = INDEX_VERSION
         _file_hash = _fh
 
@@ -243,6 +254,7 @@ def _safe_json_load_list(raw: str) -> list[str]:
 # Module-level because every tool creates a new IndexStore() per call.
 # Thread-safe: watcher runs incremental_save from a background thread.
 
+
 class _CacheEntry(NamedTuple):
     mtime_ns: int
     code_index: "CodeIndex"
@@ -253,7 +265,9 @@ _cache_lock = threading.Lock()
 _CACHE_MAX_SIZE = 32
 
 
-def _cache_get(owner: str, name: str, mtime_ns: int, branch: str = "") -> Optional["CodeIndex"]:
+def _cache_get(
+    owner: str, name: str, mtime_ns: int, branch: str = ""
+) -> Optional["CodeIndex"]:
     """Return cached CodeIndex if fresh, else None."""
     key = (owner, name, branch)
     with _cache_lock:
@@ -264,7 +278,9 @@ def _cache_get(owner: str, name: str, mtime_ns: int, branch: str = "") -> Option
     return None
 
 
-def _cache_put(owner: str, name: str, mtime_ns: int, code_index: "CodeIndex", branch: str = "") -> None:
+def _cache_put(
+    owner: str, name: str, mtime_ns: int, code_index: "CodeIndex", branch: str = ""
+) -> None:
     """Store a CodeIndex in the cache, evicting LRU if full."""
     key = (owner, name, branch)
     with _cache_lock:
@@ -345,7 +361,9 @@ def _migrate_v4_to_v5(conn: sqlite3.Connection) -> None:
         ("index_version", "5"),
     )
     conn.execute("COMMIT")
-    logger.info("Migrated symbols table from v4 to v5 (promoted data fields to columns)")
+    logger.info(
+        "Migrated symbols table from v4 to v5 (promoted data fields to columns)"
+    )
 
 
 def _migrate_v5_to_v6(conn: sqlite3.Connection) -> None:
@@ -388,7 +406,7 @@ def _migrate_v7_to_v8(conn: sqlite3.Connection) -> None:
     )
     logger.warning(
         "Migrated v7→v8: call_references were not stored in v7. "
-        "Call graph features (get_call_hierarchy, get_impact_preview, etc.) "
+        "Call graph features (get_call_hierarchy, etc.) "
         "will use text heuristics. Run 'jcodemunch-mcp index-folder' to fully "
         "re-index and enable AST-based call graphs."
     )
@@ -547,7 +565,9 @@ def _migrate_v15_to_v16(conn: sqlite3.Connection) -> None:
         "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
         ("index_version", "16"),
     )
-    logger.info("Migrated v15→v16: added runtime_stack_events table for stack-log ingest")
+    logger.info(
+        "Migrated v15→v16: added runtime_stack_events table for stack-log ingest"
+    )
 
 
 def _unlink_retry(path: Path, retries: int = 3, delay: float = 0.1) -> bool:
@@ -743,7 +763,9 @@ class SQLiteIndexStore:
         if not db_path.exists():
             return
 
-        file_sizes = {fp: len(content.encode("utf-8")) for fp, content in raw_files.items()}
+        file_sizes = {
+            fp: len(content.encode("utf-8")) for fp, content in raw_files.items()
+        }
 
         conn = self._connect(db_path)
         try:
@@ -763,19 +785,29 @@ class SQLiteIndexStore:
             for fp in set(changed_files) | set(new_files):
                 # Gather symbols for this file
                 file_syms = [s for s in new_symbols if s.file == fp]
-                sym_data = json.dumps([self._symbol_to_dict_for_delta(s) for s in file_syms]) if file_syms else "[]"
-                rows.append((
-                    branch, fp, "modify" if fp in changed_files else "add",
-                    sym_data,
-                    (file_hashes or {}).get(fp, ""),
-                    (file_mtimes or {}).get(fp),
-                    (file_languages or {}).get(fp, ""),
-                    (file_summaries or {}).get(fp, ""),
-                    json.dumps((file_imports or {}).get(fp, [])),
-                    file_sizes.get(fp),
-                ))
+                sym_data = (
+                    json.dumps([self._symbol_to_dict_for_delta(s) for s in file_syms])
+                    if file_syms
+                    else "[]"
+                )
+                rows.append(
+                    (
+                        branch,
+                        fp,
+                        "modify" if fp in changed_files else "add",
+                        sym_data,
+                        (file_hashes or {}).get(fp, ""),
+                        (file_mtimes or {}).get(fp),
+                        (file_languages or {}).get(fp, ""),
+                        (file_summaries or {}).get(fp, ""),
+                        json.dumps((file_imports or {}).get(fp, [])),
+                        file_sizes.get(fp),
+                    )
+                )
             for fp in deleted_files:
-                rows.append((branch, fp, "delete", None, None, None, None, None, None, None))
+                rows.append(
+                    (branch, fp, "delete", None, None, None, None, None, None, None)
+                )
 
             if rows:
                 conn.executemany(
@@ -812,7 +844,10 @@ class SQLiteIndexStore:
         _cache_evict(owner, safe_name)
 
     def load_branch_delta(
-        self, owner: str, name: str, branch: str,
+        self,
+        owner: str,
+        name: str,
+        branch: str,
     ) -> Optional[dict]:
         """Load a branch delta from the database.
 
@@ -892,13 +927,15 @@ class SQLiteIndexStore:
                     "SELECT COUNT(*) FROM branch_deltas WHERE branch = ?",
                     (r["branch"],),
                 ).fetchone()[0]
-                result.append({
-                    "branch": r["branch"],
-                    "git_head": r["git_head"] or "",
-                    "indexed_at": r["indexed_at"] or "",
-                    "base_head": r["base_head"] or "",
-                    "delta_file_count": count,
-                })
+                result.append(
+                    {
+                        "branch": r["branch"],
+                        "git_head": r["git_head"] or "",
+                        "indexed_at": r["indexed_at"] or "",
+                        "base_head": r["base_head"] or "",
+                        "delta_file_count": count,
+                    }
+                )
             return result
         finally:
             conn.close()
@@ -925,7 +962,10 @@ class SQLiteIndexStore:
         return deleted
 
     def compose_branch_index(
-        self, base_index: "CodeIndex", branch: str, delta: dict,
+        self,
+        base_index: "CodeIndex",
+        branch: str,
+        delta: dict,
     ) -> "CodeIndex":
         """Compose a branch-aware CodeIndex by overlaying a delta on the base index.
 
@@ -978,7 +1018,9 @@ class SQLiteIndexStore:
         files_to_remove = deleted_files | modified_files
 
         # Patch symbols: drop symbols from removed/modified files, add delta symbols
-        retained_syms = [s for s in base_index.symbols if s.get("file") not in files_to_remove]
+        retained_syms = [
+            s for s in base_index.symbols if s.get("file") not in files_to_remove
+        ]
         new_syms = []
         for fp, syms in delta_symbols_by_file.items():
             new_syms.extend(syms)
@@ -996,8 +1038,12 @@ class SQLiteIndexStore:
 
         composed_hashes = _patch(base_index.file_hashes, delta_hashes, files_to_remove)
         composed_mtimes = _patch(base_index.file_mtimes, delta_mtimes, files_to_remove)
-        composed_languages = _patch(base_index.file_languages, delta_languages, files_to_remove)
-        composed_summaries = _patch(base_index.file_summaries, delta_summaries, files_to_remove)
+        composed_languages = _patch(
+            base_index.file_languages, delta_languages, files_to_remove
+        )
+        composed_summaries = _patch(
+            base_index.file_summaries, delta_summaries, files_to_remove
+        )
         composed_sizes = _patch(base_index.file_sizes, delta_sizes, files_to_remove)
 
         base_imports = base_index.imports if base_index.imports is not None else {}
@@ -1037,13 +1083,19 @@ class SQLiteIndexStore:
     def _symbol_to_dict_for_delta(self, symbol: "Symbol") -> dict:
         """Convert a Symbol to a serializable dict for branch delta storage."""
         return {
-            "id": symbol.id, "file": symbol.file, "name": symbol.name,
-            "kind": symbol.kind or "", "signature": symbol.signature or "",
-            "summary": symbol.summary or "", "docstring": symbol.docstring or "",
+            "id": symbol.id,
+            "file": symbol.file,
+            "name": symbol.name,
+            "kind": symbol.kind or "",
+            "signature": symbol.signature or "",
+            "summary": symbol.summary or "",
+            "docstring": symbol.docstring or "",
             "qualified_name": symbol.qualified_name or symbol.name,
             "language": symbol.language or "",
-            "decorators": symbol.decorators or [], "keywords": symbol.keywords or [],
-            "parent": symbol.parent, "line": symbol.line or 0,
+            "decorators": symbol.decorators or [],
+            "keywords": symbol.keywords or [],
+            "parent": symbol.parent,
+            "line": symbol.line or 0,
             "end_line": symbol.end_line or 0,
             "byte_offset": symbol.byte_offset or 0,
             "byte_length": symbol.byte_length or 0,
@@ -1088,26 +1140,41 @@ class SQLiteIndexStore:
         Waits up to 60s for a parallel writer to finish; raises if longer.
         """
         _ensure_index_store_deps()
-        from .index_store import CodeIndex
         from . import process_locks
+        from .index_store import CodeIndex
 
-        normalized_source_files = sorted(dict.fromkeys(source_files or list(raw_files.keys())))
+        normalized_source_files = sorted(
+            dict.fromkeys(source_files or list(raw_files.keys()))
+        )
 
         if file_hashes is None:
             file_hashes = {fp: _file_hash(content) for fp, content in raw_files.items()}
 
         # Serialize symbols
         serialized_symbols = [
-            {"id": s.id, "file": s.file, "name": s.name, "qualified_name": s.qualified_name,
-             "kind": s.kind, "language": s.language, "signature": s.signature,
-             "docstring": s.docstring, "summary": s.summary, "decorators": s.decorators,
-             "keywords": s.keywords, "parent": s.parent, "line": s.line,
-             "end_line": s.end_line, "byte_offset": s.byte_offset,
-             "byte_length": s.byte_length, "content_hash": s.content_hash,
-             "cyclomatic": getattr(s, "cyclomatic", 0) or 0,
-             "max_nesting": getattr(s, "max_nesting", 0) or 0,
-             "param_count": getattr(s, "param_count", 0) or 0,
-             "call_references": getattr(s, "call_references", []) or []}
+            {
+                "id": s.id,
+                "file": s.file,
+                "name": s.name,
+                "qualified_name": s.qualified_name,
+                "kind": s.kind,
+                "language": s.language,
+                "signature": s.signature,
+                "docstring": s.docstring,
+                "summary": s.summary,
+                "decorators": s.decorators,
+                "keywords": s.keywords,
+                "parent": s.parent,
+                "line": s.line,
+                "end_line": s.end_line,
+                "byte_offset": s.byte_offset,
+                "byte_length": s.byte_length,
+                "content_hash": s.content_hash,
+                "cyclomatic": getattr(s, "cyclomatic", 0) or 0,
+                "max_nesting": getattr(s, "max_nesting", 0) or 0,
+                "param_count": getattr(s, "param_count", 0) or 0,
+                "call_references": getattr(s, "call_references", []) or [],
+            }
             for s in symbols
         ]
 
@@ -1119,10 +1186,14 @@ class SQLiteIndexStore:
                 lang_counts[lang] = lang_counts.get(lang, 0) + 1
             languages = lang_counts
 
-        file_sizes = {fp: len(content.encode("utf-8")) for fp, content in raw_files.items()}
+        file_sizes = {
+            fp: len(content.encode("utf-8")) for fp, content in raw_files.items()
+        }
 
         index = CodeIndex(
-            repo=f"{owner}/{name}", owner=owner, name=name,
+            repo=f"{owner}/{name}",
+            owner=owner,
+            name=name,
             indexed_at=datetime.now().isoformat(),
             source_files=normalized_source_files,
             languages=languages or {},
@@ -1152,17 +1223,29 @@ class SQLiteIndexStore:
         ) as got_lock:
             if not got_lock:
                 detail = process_locks.current_holder_diagnostic(
-                    "indexwrite", lock_target, storage_root,
+                    "indexwrite",
+                    lock_target,
+                    storage_root,
                 )
                 raise RuntimeError(
                     f"Could not acquire index-write lock for {lock_target} "
                     f"after 60s{detail}"
                 )
             return self._save_index_locked(
-                owner, name, db_path, index, symbols,
-                normalized_source_files, raw_files,
-                file_hashes, file_languages, file_mtimes,
-                file_blob_shas, file_summaries, file_sizes, imports,
+                owner,
+                name,
+                db_path,
+                index,
+                symbols,
+                normalized_source_files,
+                raw_files,
+                file_hashes,
+                file_languages,
+                file_mtimes,
+                file_blob_shas,
+                file_summaries,
+                file_sizes,
+                imports,
             )
 
     def _save_index_locked(
@@ -1247,7 +1330,9 @@ class SQLiteIndexStore:
         _cache_put(owner, safe_name, _db_mtime_ns(db_path), index)
         return index
 
-    def load_index(self, owner: str, name: str, branch: str = "") -> Optional["CodeIndex"]:
+    def load_index(
+        self, owner: str, name: str, branch: str = ""
+    ) -> Optional["CodeIndex"]:
         """Load index from SQLite, constructing a CodeIndex dataclass.
 
         When branch is non-empty and a branch delta exists, the base index
@@ -1287,21 +1372,30 @@ class SQLiteIndexStore:
                 logger.warning("Corrupt index version for %s/%s", owner, name)
                 return None
             if stored_version > cast(int, _INDEX_VERSION):
-                logger.warning("Index version %d > current %d for %s/%s", stored_version, _INDEX_VERSION, owner, name)
+                logger.warning(
+                    "Index version %d > current %d for %s/%s",
+                    stored_version,
+                    _INDEX_VERSION,
+                    owner,
+                    name,
+                )
                 return None
 
             symbol_rows = conn.execute("SELECT * FROM symbols").fetchall()
             file_rows = conn.execute("SELECT * FROM files").fetchall()
 
-            index = self._build_index_from_rows(meta, symbol_rows, file_rows, owner, name)
+            index = self._build_index_from_rows(
+                meta, symbol_rows, file_rows, owner, name
+            )
 
             # Warn if call references were not migrated (v7→v8 case)
             if meta.get("call_refs_missing") == "1":
                 logger.warning(
                     "Index %s/%s was migrated from v7 which did not store call references. "
-                    "get_call_hierarchy and get_impact_preview will use text heuristics. "
+                    "get_call_hierarchy (and include_impact) will use text heuristics. "
                     "Run 'jcodemunch-mcp index-folder' to re-index for AST-based call graphs.",
-                    owner, name,
+                    owner,
+                    name,
                 )
         finally:
             conn.close()
@@ -1316,8 +1410,11 @@ class SQLiteIndexStore:
                         "Branch delta for '%s' on %s/%s is stale "
                         "(base_head %s != current %s). Delta will be applied but may be inaccurate. "
                         "Re-run index_folder on the branch to refresh.",
-                        branch, owner, name,
-                        delta["base_head"][:8], (index.git_head or "")[:8],
+                        branch,
+                        owner,
+                        name,
+                        delta["base_head"][:8],
+                        (index.git_head or "")[:8],
                     )
                 index = self.compose_branch_index(index, branch, delta)
 
@@ -1385,12 +1482,16 @@ class SQLiteIndexStore:
                         source_root=meta.get("source_root", ""),
                     )
 
-                symbol_count = conn.execute("SELECT COUNT(*) FROM symbols").fetchone()[0]
+                symbol_count = conn.execute("SELECT COUNT(*) FROM symbols").fetchone()[
+                    0
+                ]
                 file_count = conn.execute("SELECT COUNT(*) FROM files").fetchone()[0]
                 try:
                     languages = json.loads(meta.get("languages", "{}"))
                 except (TypeError, json.JSONDecodeError):
-                    logger.warning("Corrupted languages JSON in metadata, defaulting to empty")
+                    logger.warning(
+                        "Corrupted languages JSON in metadata, defaulting to empty"
+                    )
                     languages = {}
                 base_kwargs = {
                     "repo": meta.get("repo", repo_id),
@@ -1483,7 +1584,10 @@ class SQLiteIndexStore:
             files_to_remove: set[str] = set(deleted_files) | set(changed_files)
             if files_to_remove:
                 placeholders = ",".join("?" * len(files_to_remove))
-                conn.execute(f"DELETE FROM symbols WHERE file IN ({placeholders})", tuple(files_to_remove))
+                conn.execute(
+                    f"DELETE FROM symbols WHERE file IN ({placeholders})",
+                    tuple(files_to_remove),
+                )
 
             # Preserve existing hash/mtime for changed files before deleting them
             preserved: dict[str, dict] = {}
@@ -1494,12 +1598,17 @@ class SQLiteIndexStore:
                     changed_files,
                 ).fetchall()
                 for r in rows:
-                    preserved[r["path"]] = {"hash": r["hash"] or "", "mtime_ns": r["mtime_ns"]}
+                    preserved[r["path"]] = {
+                        "hash": r["hash"] or "",
+                        "mtime_ns": r["mtime_ns"],
+                    }
 
             # Delete file records for deleted files
             if deleted_files:
                 placeholders = ",".join("?" * len(deleted_files))
-                conn.execute(f"DELETE FROM files WHERE path IN ({placeholders})", deleted_files)
+                conn.execute(
+                    f"DELETE FROM files WHERE path IN ({placeholders})", deleted_files
+                )
 
             # Insert new symbols
             if new_symbols:
@@ -1514,7 +1623,9 @@ class SQLiteIndexStore:
 
             # Update file records for changed + new files
             changed_or_new = sorted(set(changed_files) | set(new_files))
-            incr_file_sizes = {fp: len(c.encode("utf-8")) for fp, c in raw_files.items()}
+            incr_file_sizes = {
+                fp: len(c.encode("utf-8")) for fp, c in raw_files.items()
+            }
             for fp in changed_or_new:
                 # Prefer caller-supplied values; fall back to preserved (for changed files)
                 # or empty (for truly new files)
@@ -1571,11 +1682,14 @@ class SQLiteIndexStore:
                 changed_or_new_set = set(changed_or_new)
                 deleted_set = set(deleted_files)
                 mtime_only = [
-                    (mt, fp) for fp, mt in file_mtimes.items()
+                    (mt, fp)
+                    for fp, mt in file_mtimes.items()
                     if fp not in changed_or_new_set and fp not in deleted_set
                 ]
                 if mtime_only:
-                    conn.executemany("UPDATE files SET mtime_ns = ? WHERE path = ?", mtime_only)
+                    conn.executemany(
+                        "UPDATE files SET mtime_ns = ? WHERE path = ?", mtime_only
+                    )
 
             # Always read meta (small). Only read all rows when no cached index to patch.
             meta = self._read_meta(conn)
@@ -1626,14 +1740,16 @@ class SQLiteIndexStore:
             )
         else:
             # Cold path: build from DB rows (no cached index available)
-            index = self._build_index_from_rows(meta, all_symbol_rows, all_file_rows, owner, name)
+            index = self._build_index_from_rows(
+                meta, all_symbol_rows, all_file_rows, owner, name
+            )
 
             # Carry forward cached BM25 token bags from unchanged symbols.
             # (Only needed in cold path — patch path retains them automatically.)
             # Matched by symbol id; content_hash must match on both sides to
             # guarantee the symbol text is identical.
             old_sym_map = {}
-            for sym in (old_index.symbols if old_index else []):
+            for sym in old_index.symbols if old_index else []:
                 tokens = sym.get("_tokens")
                 ch = sym.get("content_hash")
                 if tokens is not None and ch:
@@ -1692,7 +1808,9 @@ class SQLiteIndexStore:
             conn.close()
 
         old_hashes = {r["path"]: r["hash"] for r in rows if r["hash"]}
-        old_mtimes = {r["path"]: r["mtime_ns"] for r in rows if r["mtime_ns"] is not None}
+        old_mtimes = {
+            r["path"]: r["mtime_ns"] for r in rows if r["mtime_ns"] is not None
+        }
 
         old_set = set(old_hashes.keys())
         new_set = set(current_mtimes.keys())
@@ -1737,7 +1855,9 @@ class SQLiteIndexStore:
     ) -> tuple[list[str], list[str], list[str]]:
         """Detect changed, new, and deleted files by comparing hashes."""
         _ensure_index_store_deps()
-        current_hashes = {fp: _file_hash(content) for fp, content in current_files.items()}
+        current_hashes = {
+            fp: _file_hash(content) for fp, content in current_files.items()
+        }
         return self.detect_changes_from_hashes(owner, name, current_hashes)
 
     def detect_changes_from_hashes(
@@ -1765,8 +1885,7 @@ class SQLiteIndexStore:
         new_files = list(new_set - old_set)
         deleted_files = list(old_set - new_set)
         changed_files = [
-            fp for fp in (old_set & new_set)
-            if old_hashes[fp] != current_hashes[fp]
+            fp for fp in (old_set & new_set) if old_hashes[fp] != current_hashes[fp]
         ]
 
         return changed_files, new_files, deleted_files
@@ -1792,7 +1911,9 @@ class SQLiteIndexStore:
                 return None
             return remap(meta.get("source_root", ""), _pairs)
         except Exception:
-            logger.debug("Failed to get source_root for %s/%s", owner, name, exc_info=True)
+            logger.debug(
+                "Failed to get source_root for %s/%s", owner, name, exc_info=True
+            )
             return None
 
     def list_repos(self) -> list[dict]:
@@ -1812,14 +1933,18 @@ class SQLiteIndexStore:
                 parts = slug.split("-", 1)
                 owner, name = parts if len(parts) == 2 else ("local", slug)
                 status = self.inspect_index(owner, name)
-                repos.append({
-                    "repo": status.repo,
-                    **status.as_fields(include_empty=True),
-                })
+                repos.append(
+                    {
+                        "repo": status.repo,
+                        **status.as_fields(include_empty=True),
+                    }
+                )
         repos.sort(key=lambda repo: repo["repo"])
         return repos
 
-    def _list_repo_from_db(self, db_path: Path, _pairs: Optional[list] = None) -> Optional[dict]:
+    def _list_repo_from_db(
+        self, db_path: Path, _pairs: Optional[list] = None
+    ) -> Optional[dict]:
         """Read repo metadata from a .db file for list_repos."""
         if _pairs is None:
             _pairs = parse_path_map()
@@ -1848,12 +1973,14 @@ class SQLiteIndexStore:
                         "SELECT COUNT(*) FROM branch_deltas WHERE branch = ?",
                         (r["branch"],),
                     ).fetchone()[0]
-                    branches.append({
-                        "branch": r["branch"],
-                        "git_head": r["git_head"] or "",
-                        "indexed_at": r["indexed_at"] or "",
-                        "delta_file_count": delta_count,
-                    })
+                    branches.append(
+                        {
+                            "branch": r["branch"],
+                            "git_head": r["git_head"] or "",
+                            "indexed_at": r["indexed_at"] or "",
+                            "delta_file_count": delta_count,
+                        }
+                    )
             except Exception:
                 pass  # branch tables may not exist on pre-v9 DBs
         finally:
@@ -1875,12 +2002,14 @@ class SQLiteIndexStore:
         try:
             index_version = int(meta.get("index_version", "0"))
         except (TypeError, ValueError):
-            entry.update({
-                "loadable": False,
-                "status": "sqlite_corrupt",
-                "load_error": "sqlite_corrupt",
-                "hint": "Re-index this repository to rebuild corrupt SQLite metadata.",
-            })
+            entry.update(
+                {
+                    "loadable": False,
+                    "status": "sqlite_corrupt",
+                    "load_error": "sqlite_corrupt",
+                    "hint": "Re-index this repository to rebuild corrupt SQLite metadata.",
+                }
+            )
             if branches:
                 entry["branches"] = branches
             return entry
@@ -1893,12 +2022,14 @@ class SQLiteIndexStore:
 
         loadable = index_version <= cast(int, _INDEX_VERSION)
         status = "loadable" if loadable else "sqlite_future_version"
-        entry.update({
-            "languages": languages,
-            "index_version": index_version,
-            "loadable": loadable,
-            "status": status,
-        })
+        entry.update(
+            {
+                "languages": languages,
+                "index_version": index_version,
+                "loadable": loadable,
+                "status": status,
+            }
+        )
         if not loadable:
             entry["load_error"] = status
             entry["hint"] = "Re-index this repository with the current server version."
@@ -1967,7 +2098,10 @@ class SQLiteIndexStore:
         return deleted
 
     def get_symbol_content(
-        self, owner: str, name: str, symbol_id: str,
+        self,
+        owner: str,
+        name: str,
+        symbol_id: str,
         _index: Optional["CodeIndex"] = None,
     ) -> Optional[str]:
         """Read symbol source using stored byte offsets from content cache."""
@@ -1980,7 +2114,9 @@ class SQLiteIndexStore:
             if sym_dict is None:
                 return None
 
-        file_path = self._safe_content_path(self._content_dir(owner, name), sym_dict["file"])
+        file_path = self._safe_content_path(
+            self._content_dir(owner, name), sym_dict["file"]
+        )
         if not file_path or not file_path.exists():
             return None
 
@@ -1991,7 +2127,10 @@ class SQLiteIndexStore:
         return source_bytes.decode("utf-8", errors="replace")
 
     def get_file_content(
-        self, owner: str, name: str, file_path: str,
+        self,
+        owner: str,
+        name: str,
+        file_path: str,
         _index: Optional["CodeIndex"] = None,
     ) -> Optional[str]:
         """Read a cached file's full content."""
@@ -2002,7 +2141,9 @@ class SQLiteIndexStore:
             if not self.has_file(owner, name, file_path):
                 return None
 
-        content_path = self._safe_content_path(self._content_dir(owner, name), file_path)
+        content_path = self._safe_content_path(
+            self._content_dir(owner, name), file_path
+        )
         if not content_path or not content_path.exists():
             return None
 
@@ -2014,7 +2155,9 @@ class SQLiteIndexStore:
         """Path to raw content directory."""
         return self.base_path / self._repo_slug(owner, name)
 
-    def _safe_content_path(self, content_dir: Path, relative_path: str) -> Optional[Path]:
+    def _safe_content_path(
+        self, content_dir: Path, relative_path: str
+    ) -> Optional[Path]:
         """Resolve a content path and ensure it stays within content_dir."""
         try:
             dir_key = str(content_dir)
@@ -2038,6 +2181,7 @@ class SQLiteIndexStore:
         """
         try:
             from .. import config as _cfg
+
             if _cfg.get("cache_mode", "full") == "metadata_only":
                 return  # skip body persistence; symbol table still written
         except Exception:
@@ -2059,10 +2203,17 @@ class SQLiteIndexStore:
         """Convert a Symbol to a row tuple for INSERT (v8 schema)."""
         call_refs = getattr(symbol, "call_references", []) or []
         return (
-            symbol.id, symbol.file, symbol.name, symbol.kind,
-            symbol.signature, symbol.summary, symbol.docstring,
-            symbol.line, symbol.end_line,
-            symbol.byte_offset, symbol.byte_length,
+            symbol.id,
+            symbol.file,
+            symbol.name,
+            symbol.kind,
+            symbol.signature,
+            symbol.summary,
+            symbol.docstring,
+            symbol.line,
+            symbol.end_line,
+            symbol.byte_offset,
+            symbol.byte_length,
             symbol.parent,
             symbol.qualified_name,
             symbol.language,
@@ -2070,7 +2221,9 @@ class SQLiteIndexStore:
             json.dumps(symbol.keywords) if symbol.keywords else "[]",
             symbol.content_hash,
             getattr(symbol, "ecosystem_context", ""),
-            json.dumps(call_refs) if call_refs else None,  # data column — v8: call_references as JSON array
+            json.dumps(call_refs)
+            if call_refs
+            else None,  # data column — v8: call_references as JSON array
             getattr(symbol, "cyclomatic", 0) or None,
             getattr(symbol, "max_nesting", 0) or None,
             getattr(symbol, "param_count", 0) or None,
@@ -2082,10 +2235,17 @@ class SQLiteIndexStore:
         keywords = d.get("keywords", [])
         call_refs = d.get("call_references", [])
         return (
-            d["id"], d["file"], d["name"], d.get("kind", ""),
-            d.get("signature", ""), d.get("summary", ""), d.get("docstring", ""),
-            d.get("line", 0), d.get("end_line", 0),
-            d.get("byte_offset", 0), d.get("byte_length", 0),
+            d["id"],
+            d["file"],
+            d["name"],
+            d.get("kind", ""),
+            d.get("signature", ""),
+            d.get("summary", ""),
+            d.get("docstring", ""),
+            d.get("line", 0),
+            d.get("end_line", 0),
+            d.get("byte_offset", 0),
+            d.get("byte_length", 0),
             d.get("parent"),
             d.get("qualified_name", d.get("name", "")),
             d.get("language", ""),
@@ -2093,7 +2253,9 @@ class SQLiteIndexStore:
             json.dumps(keywords) if keywords else "[]",
             d.get("content_hash", ""),
             d.get("ecosystem_context", ""),
-            json.dumps(call_refs) if call_refs else None,  # data column — v8: call_references as JSON array
+            json.dumps(call_refs)
+            if call_refs
+            else None,  # data column — v8: call_references as JSON array
             d.get("cyclomatic") or None,
             d.get("max_nesting") or None,
             d.get("param_count") or None,
@@ -2106,7 +2268,10 @@ class SQLiteIndexStore:
             try:
                 data = json.loads(row["data"])
             except (json.JSONDecodeError, ValueError):
-                logger.warning("Corrupted JSON in symbol data column for row %s, skipping legacy fields", row["name"])
+                logger.warning(
+                    "Corrupted JSON in symbol data column for row %s, skipping legacy fields",
+                    row["name"],
+                )
                 # Keep corrupt v8 rows on the array path so row-backed metadata still loads.
                 data = []
             if isinstance(data, list):
@@ -2117,9 +2282,13 @@ class SQLiteIndexStore:
                 language = row["language"] or ""
                 deco_raw = row["decorators"]
                 try:
-                    decorators = json.loads(deco_raw) if deco_raw and deco_raw != "[]" else []
+                    decorators = (
+                        json.loads(deco_raw) if deco_raw and deco_raw != "[]" else []
+                    )
                 except (json.JSONDecodeError, ValueError):
-                    logger.warning("Corrupted decorators JSON for symbol %s", row["name"])
+                    logger.warning(
+                        "Corrupted decorators JSON for symbol %s", row["name"]
+                    )
                     decorators = []
                 kw_raw = row["keywords"]
                 try:
@@ -2143,7 +2312,9 @@ class SQLiteIndexStore:
             language = row["language"] or ""
             deco_raw = row["decorators"]
             try:
-                decorators = json.loads(deco_raw) if deco_raw and deco_raw != "[]" else []
+                decorators = (
+                    json.loads(deco_raw) if deco_raw and deco_raw != "[]" else []
+                )
             except (json.JSONDecodeError, ValueError):
                 logger.warning("Corrupted decorators JSON for symbol %s", row["name"])
                 decorators = []
@@ -2275,17 +2446,27 @@ class SQLiteIndexStore:
         new_file_mtimes = _patch_dict(old.file_mtimes, file_mtimes, files_to_remove)
         new_file_mtimes.update(mtime_only_dict)  # mtime-only drift updates
         new_file_hashes = _patch_dict(old.file_hashes, file_hashes, files_to_remove)
-        new_file_languages = _patch_dict(old.file_languages, file_languages, files_to_remove)
-        new_file_summaries = _patch_dict(old.file_summaries, file_summaries, files_to_remove)
-        new_file_blob_shas = _patch_dict(old.file_blob_shas, file_blob_shas, files_to_remove)
+        new_file_languages = _patch_dict(
+            old.file_languages, file_languages, files_to_remove
+        )
+        new_file_summaries = _patch_dict(
+            old.file_summaries, file_summaries, files_to_remove
+        )
+        new_file_blob_shas = _patch_dict(
+            old.file_blob_shas, file_blob_shas, files_to_remove
+        )
         new_file_sizes = _patch_dict(old.file_sizes, file_sizes, files_to_remove)
 
         if old.imports is not None:
-            new_imports: Optional[dict] = _patch_dict(old.imports, imports, files_to_remove)
+            new_imports: Optional[dict] = _patch_dict(
+                old.imports, imports, files_to_remove
+            )
         else:
             new_imports = imports or {}
 
-        new_ctx = context_metadata if context_metadata is not None else old.context_metadata
+        new_ctx = (
+            context_metadata if context_metadata is not None else old.context_metadata
+        )
 
         return CodeIndex(
             repo=old.repo,
@@ -2313,7 +2494,12 @@ class SQLiteIndexStore:
         )
 
     def _build_index_from_rows(
-        self, meta: dict, symbol_rows: list, file_rows: list, owner: str, name: str,
+        self,
+        meta: dict,
+        symbol_rows: list,
+        file_rows: list,
+        owner: str,
+        name: str,
     ) -> "CodeIndex":
         """Build a CodeIndex from pre-fetched meta dict, symbol rows, and file rows.
         Used by both load_index and incremental_save to avoid redundant queries."""
@@ -2367,7 +2553,9 @@ class SQLiteIndexStore:
         try:
             context_metadata = json.loads(meta.get("context_metadata", "{}"))
         except (json.JSONDecodeError, ValueError):
-            logger.warning("Corrupted context_metadata JSON in metadata, defaulting to empty")
+            logger.warning(
+                "Corrupted context_metadata JSON in metadata, defaulting to empty"
+            )
             context_metadata = {}
         package_names_raw = meta.get("package_names", "[]")
         try:
@@ -2450,21 +2638,49 @@ class SQLiteIndexStore:
                     result[path] = lang
         if len(result) < len(paths):
             ext_map = {
-                ".py": "python", ".js": "javascript", ".ts": "typescript",
-                ".jsx": "javascript", ".tsx": "typescript", ".go": "go",
-                ".rs": "rust", ".java": "java", ".c": "c", ".cpp": "cpp",
-                ".h": "cpp", ".ino": "arduino", ".pde": "arduino",
-                ".vhd": "vhdl", ".vhdl": "vhdl",
-                ".v": "verilog", ".sv": "verilog",
-                ".cs": "csharp", ".swift": "swift",
-                ".rb": "ruby", ".php": "php", ".dart": "dart",
-                ".kt": "kotlin", ".scala": "scala", ".lua": "lua",
-                ".r": "r", ".m": "objective-c", ".mm": "objective-cpp",
-                ".sh": "bash", ".bash": "bash", ".zsh": "zsh",
-                ".sql": "sql", ".xml": "xml", ".html": "html",
-                ".css": "css", ".scss": "scss", ".less": "less",
-                ".json": "json", ".yaml": "yaml", ".yml": "yaml",
-                ".toml": "toml", ".md": "markdown", ".rst": "rst",
+                ".py": "python",
+                ".js": "javascript",
+                ".ts": "typescript",
+                ".jsx": "javascript",
+                ".tsx": "typescript",
+                ".go": "go",
+                ".rs": "rust",
+                ".java": "java",
+                ".c": "c",
+                ".cpp": "cpp",
+                ".h": "cpp",
+                ".ino": "arduino",
+                ".pde": "arduino",
+                ".vhd": "vhdl",
+                ".vhdl": "vhdl",
+                ".v": "verilog",
+                ".sv": "verilog",
+                ".cs": "csharp",
+                ".swift": "swift",
+                ".rb": "ruby",
+                ".php": "php",
+                ".dart": "dart",
+                ".kt": "kotlin",
+                ".scala": "scala",
+                ".lua": "lua",
+                ".r": "r",
+                ".m": "objective-c",
+                ".mm": "objective-cpp",
+                ".sh": "bash",
+                ".bash": "bash",
+                ".zsh": "zsh",
+                ".sql": "sql",
+                ".xml": "xml",
+                ".html": "html",
+                ".css": "css",
+                ".scss": "scss",
+                ".less": "less",
+                ".json": "json",
+                ".yaml": "yaml",
+                ".yml": "yaml",
+                ".toml": "toml",
+                ".md": "markdown",
+                ".rst": "rst",
                 ".ps1": "powershell",
             }
             for path in paths:
@@ -2476,7 +2692,9 @@ class SQLiteIndexStore:
                     result[path] = lang
         return result
 
-    def _languages_from_file_languages(self, file_languages: dict[str, str]) -> dict[str, int]:
+    def _languages_from_file_languages(
+        self, file_languages: dict[str, str]
+    ) -> dict[str, int]:
         """Compute language -> file count from stored file language metadata."""
         counts: dict[str, int] = {}
         for lang in file_languages.values():
@@ -2505,7 +2723,9 @@ class SQLiteIndexStore:
 
     # ── Migration ───────────────────────────────────────────────────
 
-    def migrate_from_json(self, json_path: Path, owner: str, name: str) -> Optional["CodeIndex"]:
+    def migrate_from_json(
+        self, json_path: Path, owner: str, name: str
+    ) -> Optional["CodeIndex"]:
         """Read a JSON index file and populate the SQLite database.
 
         v1.106.0: serialises against concurrent save_index / migrate_from_json
@@ -2528,7 +2748,8 @@ class SQLiteIndexStore:
         if not isinstance(data, dict) or "indexed_at" not in data:
             logger.warning(
                 "Migration schema validation failed for %s/%s — missing required fields",
-                owner, name,
+                owner,
+                name,
             )
             return None
 
@@ -2539,7 +2760,9 @@ class SQLiteIndexStore:
         # Backfill file_languages from symbols (same as original load_index)
         if not raw_file_languages:
             merged_fl = self._file_languages_for_paths(
-                source_files, symbols, existing=None,
+                source_files,
+                symbols,
+                existing=None,
             )
         else:
             merged_fl = dict(raw_file_languages)
@@ -2558,19 +2781,32 @@ class SQLiteIndexStore:
         lock_target = f"{owner}/{name}"
         storage_root = str(self.base_path)
         with process_locks.held(
-            "indexwrite", lock_target, storage_root, wait_seconds=60.0,
+            "indexwrite",
+            lock_target,
+            storage_root,
+            wait_seconds=60.0,
         ) as got_lock:
             if not got_lock:
                 detail = process_locks.current_holder_diagnostic(
-                    "indexwrite", lock_target, storage_root,
+                    "indexwrite",
+                    lock_target,
+                    storage_root,
                 )
                 raise RuntimeError(
                     f"Could not acquire index-write lock to migrate {lock_target} "
                     f"after 60s{detail}"
                 )
             return self._migrate_from_json_locked(
-                json_path, owner, name, data, source_files, symbols,
-                merged_fl, computed_languages, has_imports_key, stored_imports,
+                json_path,
+                owner,
+                name,
+                data,
+                source_files,
+                symbols,
+                merged_fl,
+                computed_languages,
+                has_imports_key,
+                stored_imports,
             )
 
     def _migrate_from_json_locked(
@@ -2654,7 +2890,11 @@ class SQLiteIndexStore:
 
         # Clean up sidecars (naming: {slug}.meta.json, {slug}.json.sha256, {slug}.json.lock)
         slug = json_path.stem  # e.g. "local-test-abc123"
-        for sidecar_name in (f"{slug}.meta.json", f"{slug}.json.sha256", f"{slug}.json.lock"):
+        for sidecar_name in (
+            f"{slug}.meta.json",
+            f"{slug}.json.sha256",
+            f"{slug}.json.lock",
+        ):
             sidecar = json_path.parent / sidecar_name
             sidecar.unlink(missing_ok=True)
 

@@ -4,8 +4,8 @@ import time
 from typing import Optional
 
 from ..storage import IndexStore
+from ._graph_utils import build_adjacency
 from ._utils import index_status_to_tool_error, resolve_repo
-from .get_dependency_graph import _build_adjacency
 
 
 def get_coupling_metrics(
@@ -65,7 +65,13 @@ def get_coupling_metrics(
 
     source_files = frozenset(index.source_files)
     alias_map = getattr(index, "alias_map", None)
-    fwd = _build_adjacency(index.imports, source_files, alias_map, getattr(index, "psr4_map", None))
+    fwd = build_adjacency(
+        index.imports,
+        source_files,
+        alias_map,
+        getattr(index, "psr4_map", None),
+        expand_barrels=True,
+    )
 
     # Build reverse adjacency (importers)
     rev: dict[str, list[str]] = {}

@@ -294,107 +294,10 @@ DEFAULTS = {
     "meta_fields": [],  # [] = no _meta (token-efficient; set null in config for all fields)
     "languages": None,  # None = all languages
     "languages_adaptive": False,
-    "tool_profile": "full",  # "core", "standard", or "full"
-    "tool_tier_bundles": {
-        "core": [
-            "index_repo",
-            "index_folder",
-            "index_file",
-            "list_repos",
-            "resolve_repo",
-            "get_repo_outline",
-            "get_file_tree",
-            "get_file_outline",
-            "search_symbols",
-            "get_symbol_source",
-            "get_file_content",
-            "search_text",
-            "get_context_bundle",
-            "get_ranked_context",
-            "assemble_task_context",
-            "find_importers",
-            "find_references",
-        ],
-        "standard": [
-            # core ∪ these additional tools
-            "index_repo",
-            "index_folder",
-            "index_file",
-            "list_repos",
-            "resolve_repo",
-            "get_repo_outline",
-            "get_file_tree",
-            "get_file_outline",
-            "search_symbols",
-            "get_symbol_source",
-            "get_file_content",
-            "search_text",
-            "get_context_bundle",
-            "get_ranked_context",
-            "assemble_task_context",
-            "find_importers",
-            "find_references",
-            "summarize_repo",
-            "embed_repo",
-            "suggest_queries",
-            "search_columns",
-            "check_references",
-            "get_dependency_graph",
-            "get_class_hierarchy",
-            "get_related_symbols",
-            "get_call_hierarchy",
-            "get_blast_radius",
-            "check_safe",
-            "find_implementations",
-            "get_impact_preview",
-            "get_changed_symbols",
-            "get_symbol_provenance",
-            "get_pr_risk_profile",
-            "get_symbol_complexity",
-            "get_churn_rate",
-            "get_hotspots",
-            "get_symbol_importance",
-            "get_repo_map",
-            "get_dead_code_v2",
-            "get_untested_symbols",
-            "find_similar_symbols",
-            "get_repo_health",
-            "search_ast",
-            "winnow_symbols",
-            "get_dependency_cycles",
-            "get_coupling_metrics",
-            "get_layer_violations",
-            "get_tectonic_map",
-            "get_signal_chains",
-            "render_diagram",
-            "get_project_intel",
-            "list_workspaces",
-            "digest",
-            "import_runtime_signal",
-            "find_hot_paths",
-        ],
-    },
-    "model_tier_map": {
-        "claude-opus": "full",
-        "claude-sonnet": "standard",
-        "claude-haiku": "core",
-        "gpt-4o": "standard",
-        "gpt-5": "full",
-        "o1": "full",
-        "llama": "core",
-        "*": "full",
-    },
-    "adaptive_tiering": False,
     "compact_schemas": False,
     "server_output": "adaptive",  # "raw", "encoded", or "adaptive"
     "server_output_threshold": 0.15,  # Minimum savings ratio for adaptive mode
     "disabled_tools": ["test_summarizer"],
-    # When True, `disabled_tools` may include `set_tool_tier`.
-    # Default False keeps the in-session tier-switch
-    # safety net intact; opt-in is for users who want to claw back one
-    # tool slot (e.g. against Antigravity's 50-tool cap) and accept that
-    # they cannot switch tiers mid-session. Issue #299, requested by @kecsap.
-    "allow_disabling_tier_controls": False,
     "descriptions": {},
     "transport": "stdio",
     "host": "127.0.0.1",
@@ -442,8 +345,6 @@ DEFAULTS = {
     "negative_evidence_threshold": 0.5,
     "search_result_cache_max": 128,
     "session_journal": True,
-    "plan_turn_high_threshold": 2.0,
-    "plan_turn_medium_threshold": 0.5,
     "turn_budget_tokens": 20000,
     "turn_gap_seconds": 30.0,
     "session_resume": False,
@@ -476,15 +377,10 @@ CONFIG_TYPES = {
     "meta_fields": (list, type(None)),
     "languages": (list, type(None)),
     "languages_adaptive": bool,
-    "tool_profile": str,
-    "tool_tier_bundles": dict,
-    "model_tier_map": dict,
-    "adaptive_tiering": bool,
     "compact_schemas": bool,
     "server_output": str,
     "server_output_threshold": float,
     "disabled_tools": list,
-    "allow_disabling_tier_controls": bool,
     "descriptions": dict,
     "transport": str,
     "host": str,
@@ -534,8 +430,6 @@ CONFIG_TYPES = {
     "negative_evidence_threshold": float,
     "search_result_cache_max": int,
     "session_journal": bool,
-    "plan_turn_high_threshold": float,
-    "plan_turn_medium_threshold": float,
     "turn_budget_tokens": int,
     "turn_gap_seconds": float,
     "session_resume": bool,
@@ -1780,7 +1674,6 @@ def generate_template() -> str:
     all_tools = sorted(
         [
             "assemble_task_context",
-            "check_references",
             "check_safe",
             "digest",
             "embed_repo",
@@ -1805,7 +1698,6 @@ def generate_template() -> str:
             "get_file_outline",
             "get_file_tree",
             "get_hotspots",
-            "get_impact_preview",
             "get_layer_violations",
             "get_pr_risk_profile",
             "get_project_intel",
@@ -1817,7 +1709,6 @@ def generate_template() -> str:
             "get_session_context",
             "get_signal_chains",
             "get_symbol_complexity",
-            "get_symbol_importance",
             "get_symbol_provenance",
             "get_symbol_source",
             "get_tectonic_map",
@@ -1830,7 +1721,6 @@ def generate_template() -> str:
             "list_repos",
             "list_workspaces",
             "plan_refactoring",
-            "plan_turn",
             "register_edit",
             "render_diagram",
             "resolve_repo",
@@ -1838,7 +1728,6 @@ def generate_template() -> str:
             "search_columns",
             "search_symbols",
             "search_text",
-            "set_tool_tier",
             "suggest_queries",
             "summarize_repo",
             "winnow_symbols",
@@ -1981,15 +1870,7 @@ def generate_template() -> str:
   //   Set in global config to auto-create project configs on first index.
   //   Set in project config to enable ongoing adaptation.
 
-  // === Tool Profile ===
-  // Controls how many tools are loaded into the LLM context.
-  //   "core"     — ~16 essential tools (indexing, search, retrieval). Lowest token cost.
-  //   "standard" — core + analytics, architecture, quality tools (~40 tools).
-  //   "full"     — all tools including refactoring, session, and diagnostics (default).
-  // Tip: "core" saves ~5-6k schema tokens per session.
-  // "tool_profile": "full",
 
-  // === Compact Schemas ===
   // When true, strips rarely-used advanced parameters (debug, fusion, semantic_*,
   // fuzzy_*, etc.) from tool schemas. The server still accepts them — they're just
   // hidden from the LLM to save tokens. Saves ~1-2k tokens on top of any profile.
@@ -2020,88 +1901,7 @@ def generate_template() -> str:
   // {tools_str}
   ],
 
-  // === Tier-control escape hatch (issue #299) ===
-  // By default, `set_tool_tier` survives `disabled_tools`
-  // so users can't lock themselves out of in-session tier switching. Set this
-  // to true to opt out of that safety net — useful when you're at a hard tool
-  // cap (e.g. Antigravity's 50-tool limit) and want to claw back one slot,
-  // and you accept that you can't switch tiers mid-session.
-  // "allow_disabling_tier_controls": false,
-
-  // === Tool Tier Bundles ===
-  // Which tools belong to each tier. Edit freely. Both tool_profile (below)
-  // and the runtime set_tool_tier read from here.
-  // NOTE: disabled_tools applies AFTER tier filtering — a tool listed both
-  // in a bundle and in disabled_tools will not be exposed regardless of tier.
-  "tool_tier_bundles": {{
-    "core": [
-      "index_repo", "index_folder", "index_file",
-      "list_repos", "resolve_repo",
-      "get_repo_outline", "get_file_tree", "get_file_outline",
-      "search_symbols", "get_symbol_source", "get_file_content",
-      "search_text", "get_context_bundle", "get_ranked_context",
-      "assemble_task_context",
-      "find_importers", "find_references"
-    ],
-    "standard": [
-      "index_repo", "index_folder", "index_file",
-      "list_repos", "resolve_repo",
-      "get_repo_outline", "get_file_tree", "get_file_outline",
-      "search_symbols", "get_symbol_source", "get_file_content",
-      "search_text", "get_context_bundle", "get_ranked_context",
-      "assemble_task_context",
-      "find_importers", "find_references",
-      "summarize_repo", "embed_repo", "suggest_queries",
-      "search_columns", "check_references",
-      "get_dependency_graph", "get_class_hierarchy",
-      "get_related_symbols", "get_call_hierarchy",
-      "get_blast_radius", "check_safe",
-      "find_implementations",
-      "get_impact_preview", "get_changed_symbols",
-      "get_symbol_provenance",
-      "get_pr_risk_profile", "get_symbol_complexity",
-      "get_churn_rate", "get_hotspots",
-      "get_symbol_importance", "get_repo_map",
-      "get_dead_code_v2", "get_untested_symbols", "find_similar_symbols",
-      "get_repo_health", "search_ast", "winnow_symbols",
-      "get_dependency_cycles", "get_coupling_metrics",
-      "get_layer_violations",
-      "get_tectonic_map", "get_signal_chains", "render_diagram",
-      "get_project_intel", "list_workspaces",
-      "digest",
-      "import_runtime_signal",
-      "find_hot_paths",
-    ]
-  }},
-
-  // === Model → Tier Map ===
-  // Maps model identifiers (self-reported by the agent via
-  // plan_turn(model=...)) to a tier. Matching is fuzzy: normalize (lowercase,
-  // strip provider prefix / date suffix / bracket suffix), then try exact,
-  // glob, substring, "*", hardcoded "full" fallback in that order.
-  // Keep keys specific where possible: very short substrings (e.g. "o1") can
-  // over-match model ids that merely contain that token.
-  "model_tier_map": {{
-    "claude-opus": "full",
-    "claude-sonnet": "standard",
-    "claude-haiku": "core",
-    "gpt-4o": "standard",
-    "gpt-5": "full",
-    "o1": "full",
-    "llama": "core",
-    "*": "full"
-  }},
-
-  // === Adaptive Tiering (opt-in) ===
-  // When true, the exposed tool list narrows at runtime based on the model
-  // identifier self-reported by the agent via plan_turn(model=...). When false (default), the static tool_profile above
-  // controls the exposed tools for the whole session — the runtime tools
-  // accept their arguments but do not switch tiers. set_tool_tier is always
-  // honored regardless of this flag (explicit user override, not automatic
-  // behavior).
-  // "adaptive_tiering": false,
-
-  // === Descriptions ===
+  // === Compact Schemas ===
   // Append text to shortened tool/param descriptions.
   // Empty string = use hardcoded minimal base only.
   // _tool = tool-level description, other keys = param names.
@@ -2318,10 +2118,6 @@ def generate_template() -> str:
   // "session_journal": true,
   //   Track file reads, searches, and edits during the MCP session.
   //   Disable to reduce memory usage in long-running sessions.
-  // "plan_turn_high_threshold": 2.0,
-  //   Minimum BM25 score for plan_turn to report "high" confidence.
-  // "plan_turn_medium_threshold": 0.5,
-  //   Minimum BM25 score for plan_turn to report "medium" confidence.
   // "turn_budget_tokens": 20000,
   //   Max tokens returned across all tool calls in a turn. 0 = disabled.
   // "turn_gap_seconds": 30.0,

@@ -20,7 +20,7 @@ removing any capability:
     return compact entries, so all ~83 schemas need not stay resident.
   * ``route(task, execute)`` -- intent to action. Map a natural-language task
     to the best catalog action(s); optionally dispatch the top one. Composes
-    with ``assemble_task_context`` / ``plan_turn`` (it recommends them for
+    with ``assemble_task_context`` (it recommends it for
     context-gathering intents); it does not replace them.
 
 This module is pure logic with no server import (keeps the dependency one-way:
@@ -48,7 +48,6 @@ STATE_CHANGING_ACTIONS: frozenset[str] = frozenset(
         "index_folder",
         "index_file",
         "register_edit",
-        "set_tool_tier",
         "embed_repo",
         "import_runtime_signal",
         "summarize_repo",
@@ -312,7 +311,6 @@ _QUERY_ARG: dict[str, str] = {
     "search_symbols": "query",
     "search_text": "query",
     "assemble_task_context": "task",
-    "plan_turn": "query",
     "get_file_outline": "file_path",
 }
 

@@ -377,7 +377,7 @@ def _render_markdown(s: dict) -> str:
         for d in dead[:3]:
             sid = d.get("symbol_id") or d.get("name", "?")
             lines.append(f"- `{_truncate_symbol_id(sid)}`")
-        lines.append("Verify with `check_references` before removal.")
+        lines.append("Verify with `find_references(quick=True)` before removal.")
 
     regret = s.get("regret")
     if regret:

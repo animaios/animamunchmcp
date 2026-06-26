@@ -1,6 +1,6 @@
 """decision_context — surface architecture-decision context from the git record.
 
-When an agent runs impact analysis (``get_blast_radius`` / ``get_impact_preview``)
+When an agent runs impact analysis (``get_blast_radius`` / ``get_call_hierarchy`` with include_impact)
 it learns *what* breaks. This resolver adds *why the code is the way it is*: it
 mines the commit history of the symbol-under-analysis and its impacted files for
 **decision-bearing commits** — reverts, performance rewrites, refactors, renames,
@@ -26,7 +26,8 @@ import logging
 from collections import Counter
 from typing import Iterable, Optional
 
-from .get_symbol_provenance import _run_git, _classify_commit, _extract_intent
+from ._utils import run_git
+from .get_symbol_provenance import _classify_commit, _extract_intent
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ _DELIM = "---DECISION_DELIM---"
 
 
 def _git_available(cwd: str) -> bool:
-    rc, _, _ = _run_git(["rev-parse", "--git-dir"], cwd=cwd)
+    rc, _, _ = run_git(["rev-parse", "--git-dir"], cwd=cwd)
     return rc == 0
 
 
@@ -63,7 +64,7 @@ def _decisions_for_file(
         "--",
         rel_file,
     ]
-    rc, out, _ = _run_git(log_args, cwd=cwd, timeout=20)
+    rc, out, _ = run_git(log_args, cwd=cwd, timeout=20)
     if rc != 0 or not out:
         return []
 
@@ -80,21 +81,29 @@ def _decisions_for_file(
         category = _classify_commit(subject)
         if category not in _DECISION_CATEGORIES:
             continue
-        full_message = subject + "\n" + "\n".join(lines[1:]) if len(lines) > 1 else subject
-        found.append({
-            "sha": sha[:12],
-            "author": author,
-            "date": date[:10],
-            "category": category,
-            "subject": subject,
-            "intent": _extract_intent(full_message),
-            "file": rel_file,
-        })
+        full_message = (
+            subject + "\n" + "\n".join(lines[1:]) if len(lines) > 1 else subject
+        )
+        found.append(
+            {
+                "sha": sha[:12],
+                "author": author,
+                "date": date[:10],
+                "category": category,
+                "subject": subject,
+                "intent": _extract_intent(full_message),
+                "file": rel_file,
+            }
+        )
     return found
 
 
 def _summary(
-    decisions: list[dict], by_category: dict, volatility: str, window_days: int, n_files: int
+    decisions: list[dict],
+    by_category: dict,
+    volatility: str,
+    window_days: int,
+    n_files: int,
 ) -> str:
     if not decisions:
         return (
@@ -102,7 +111,8 @@ def _summary(
             f"last {window_days}d across {n_files} examined file(s)."
         )
     breakdown = ", ".join(
-        f"{count} {cat}" for cat, count in sorted(by_category.items(), key=lambda kv: -kv[1])
+        f"{count} {cat}"
+        for cat, count in sorted(by_category.items(), key=lambda kv: -kv[1])
     )
     head = (
         f"{len(decisions)} decision-bearing commit(s) in {window_days}d across "
@@ -207,7 +217,9 @@ def resolve_decision_context(
         "decision_count": len(decisions),
         "by_category": by_category,
         "volatility": volatility,
-        "summary": _summary(decisions, by_category, volatility, window_days, len(examined)),
+        "summary": _summary(
+            decisions, by_category, volatility, window_days, len(examined)
+        ),
         "decisions": decisions,
         "note": "Surfaced read-only from the commit record; nothing is persisted.",
     }

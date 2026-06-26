@@ -13,18 +13,29 @@ from jcodemunch_mcp.encoding.schemas import registry
 
 def _rt(tool: str, response: dict) -> dict:
     payload, meta = encode_response(tool, response, "compact")
-    assert isinstance(payload, str), f"expected compact payload for {tool}, got {type(payload)}"
+    assert isinstance(payload, str), (
+        f"expected compact payload for {tool}, got {type(payload)}"
+    )
     assert meta["encoding"] != "json"
     return decode(payload)
 
 
 def test_registry_loads_all_tier1_encoders():
     expected = {
-        "find_references", "find_importers", "get_call_hierarchy",
-        "get_dependency_graph", "get_blast_radius", "get_impact_preview",
-        "get_signal_chains", "get_dependency_cycles", "get_tectonic_map",
-        "search_symbols", "search_text", "search_ast",
-        "get_file_outline", "get_repo_outline", "get_ranked_context",
+        "find_references",
+        "find_importers",
+        "get_call_hierarchy",
+        "get_dependency_graph",
+        "get_blast_radius",
+        "get_signal_chains",
+        "get_dependency_cycles",
+        "get_tectonic_map",
+        "search_symbols",
+        "search_text",
+        "search_ast",
+        "get_file_outline",
+        "get_repo_outline",
+        "get_ranked_context",
     }
     for tool in expected:
         assert registry.for_tool(tool) is not None, f"missing encoder for {tool}"
@@ -70,7 +81,10 @@ def test_find_references_empty_matches_round_trip():
         "reference_count": 2,
         "references": [
             {"file": "src/a.py", "matches": []},
-            {"file": "src/b.py", "matches": [{"specifier": "models.user", "match_type": "named"}]},
+            {
+                "file": "src/b.py",
+                "matches": [{"specifier": "models.user", "match_type": "named"}],
+            },
         ],
         "_meta": {"timing_ms": 1.0, "truncated": False},
     }
@@ -89,8 +103,16 @@ def test_find_references_batch_round_trip():
                 "identifier": "get_user",
                 "reference_count": 2,
                 "references": [
-                    {"file": "src/a.py", "specifier": "models.user", "match_type": "named"},
-                    {"file": "src/b.py", "specifier": "models.user", "match_type": "named"},
+                    {
+                        "file": "src/a.py",
+                        "specifier": "models.user",
+                        "match_type": "named",
+                    },
+                    {
+                        "file": "src/b.py",
+                        "specifier": "models.user",
+                        "match_type": "named",
+                    },
                 ],
             },
         ],
@@ -109,8 +131,16 @@ def test_find_importers_round_trip():
         "file_path": "src/models/user.py",
         "importer_count": 2,
         "importers": [
-            {"file": "src/api/handlers.py", "specifier": "models.user", "has_importers": True},
-            {"file": "src/api/routes.py", "specifier": "models.user", "has_importers": False},
+            {
+                "file": "src/api/handlers.py",
+                "specifier": "models.user",
+                "has_importers": True,
+            },
+            {
+                "file": "src/api/routes.py",
+                "specifier": "models.user",
+                "has_importers": False,
+            },
         ],
         "_meta": {"timing_ms": 1.2, "truncated": False},
     }
@@ -131,7 +161,11 @@ def test_find_importers_batch_round_trip():
                 "file_path": "src/models/user.py",
                 "importer_count": 1,
                 "importers": [
-                    {"file": "src/api/handlers.py", "specifier": "models.user", "has_importers": True},
+                    {
+                        "file": "src/api/handlers.py",
+                        "specifier": "models.user",
+                        "has_importers": True,
+                    },
                 ],
             },
         ],
@@ -147,18 +181,48 @@ def test_find_importers_batch_round_trip():
 def test_get_call_hierarchy_round_trip():
     resp = {
         "repo": "acme/app",
-        "symbol": {"id": "sym1", "name": "foo", "kind": "function", "file": "x.py", "line": 1},
+        "symbol": {
+            "id": "sym1",
+            "name": "foo",
+            "kind": "function",
+            "file": "x.py",
+            "line": 1,
+        },
         "direction": "both",
         "depth": 2,
         "depth_reached": 2,
         "caller_count": 2,
         "callee_count": 1,
         "callers": [
-            {"id": "c1", "name": "a", "kind": "function", "file": "x.py", "line": 10, "depth": 1, "resolution": "lsp"},
-            {"id": "c2", "name": "b", "kind": "function", "file": "x.py", "line": 20, "depth": 2, "resolution": "ast"},
+            {
+                "id": "c1",
+                "name": "a",
+                "kind": "function",
+                "file": "x.py",
+                "line": 10,
+                "depth": 1,
+                "resolution": "lsp",
+            },
+            {
+                "id": "c2",
+                "name": "b",
+                "kind": "function",
+                "file": "x.py",
+                "line": 20,
+                "depth": 2,
+                "resolution": "ast",
+            },
         ],
         "callees": [
-            {"id": "e1", "name": "helper", "kind": "function", "file": "y.py", "line": 5, "depth": 1, "resolution": "lsp"},
+            {
+                "id": "e1",
+                "name": "helper",
+                "kind": "function",
+                "file": "y.py",
+                "line": 5,
+                "depth": 1,
+                "resolution": "lsp",
+            },
         ],
         "dispatches": [],
         "_meta": {"timing_ms": 4.0, "methodology": "ast+lsp"},
@@ -194,7 +258,13 @@ def test_get_dependency_graph_round_trip():
 def test_get_blast_radius_round_trip():
     resp = {
         "repo": "acme/app",
-        "symbol": {"id": "s1", "name": "get_user", "kind": "function", "file": "auth.py", "line": 42},
+        "symbol": {
+            "id": "s1",
+            "name": "get_user",
+            "kind": "function",
+            "file": "auth.py",
+            "line": 42,
+        },
         "depth": 3,
         "importer_count": 2,
         "confirmed_count": 2,
@@ -298,7 +368,7 @@ def test_search_text_round_trip_adversarial_cells_and_st1_compat():
     """Round-trip adversarial CSV/JSON cell content and ensure st1 decode compatibility."""
     tricky_text = 'target, with "quotes" and newline\nline_two'
     tricky_before = [
-        'before,comma',
+        "before,comma",
         'before "quoted"',
         "before multi\nline",
     ]
@@ -350,7 +420,10 @@ def test_search_text_round_trip_multi_file():
         "result_count": 3,
         "results": [
             {"file": "a.py", "matches": [{"line": 1, "text": "x"}]},
-            {"file": "b.py", "matches": [{"line": 5, "text": "y"}, {"line": 9, "text": "z"}]},
+            {
+                "file": "b.py",
+                "matches": [{"line": 5, "text": "y"}, {"line": 9, "text": "z"}],
+            },
         ],
         "_meta": {"timing_ms": 0.2, "files_searched": 2, "truncated": False},
     }
@@ -364,8 +437,26 @@ def test_search_symbols_round_trip():
         "result_count": 2,
         "query": "user",
         "results": [
-            {"id": "s1", "name": "get_user", "kind": "function", "file": "models/user.py", "line": 10, "score": 0.92, "signature": "def get_user(id)", "summary": "Fetches a user"},
-            {"id": "s2", "name": "User", "kind": "class", "file": "models/user.py", "line": 1, "score": 0.88, "signature": "class User", "summary": "User model"},
+            {
+                "id": "s1",
+                "name": "get_user",
+                "kind": "function",
+                "file": "models/user.py",
+                "line": 10,
+                "score": 0.92,
+                "signature": "def get_user(id)",
+                "summary": "Fetches a user",
+            },
+            {
+                "id": "s2",
+                "name": "User",
+                "kind": "class",
+                "file": "models/user.py",
+                "line": 1,
+                "score": 0.88,
+                "signature": "class User",
+                "summary": "User model",
+            },
         ],
         "_meta": {"timing_ms": 1.3, "total_symbols": 1200, "truncated": False},
     }
@@ -380,10 +471,46 @@ def test_get_file_outline_round_trip():
         "file": "src/models/user.py",
         "symbol_count": 4,
         "symbols": [
-            {"id": "s1", "name": "User", "kind": "class", "signature": "class User", "line": 1, "end_line": 20, "parent": None, "summary": ""},
-            {"id": "s2", "name": "__init__", "kind": "method", "signature": "def __init__(self)", "line": 3, "end_line": 5, "parent": "s1", "summary": ""},
-            {"id": "s3", "name": "name", "kind": "constant", "signature": "name: str", "line": 6, "end_line": 6, "parent": "s1", "summary": ""},
-            {"id": "s4", "name": "get_user", "kind": "function", "signature": "def get_user(uid: int) -> User", "line": 25, "end_line": 40, "parent": None, "summary": ""},
+            {
+                "id": "s1",
+                "name": "User",
+                "kind": "class",
+                "signature": "class User",
+                "line": 1,
+                "end_line": 20,
+                "parent": None,
+                "summary": "",
+            },
+            {
+                "id": "s2",
+                "name": "__init__",
+                "kind": "method",
+                "signature": "def __init__(self)",
+                "line": 3,
+                "end_line": 5,
+                "parent": "s1",
+                "summary": "",
+            },
+            {
+                "id": "s3",
+                "name": "name",
+                "kind": "constant",
+                "signature": "name: str",
+                "line": 6,
+                "end_line": 6,
+                "parent": "s1",
+                "summary": "",
+            },
+            {
+                "id": "s4",
+                "name": "get_user",
+                "kind": "function",
+                "signature": "def get_user(uid: int) -> User",
+                "line": 25,
+                "end_line": 40,
+                "parent": None,
+                "summary": "",
+            },
         ],
         "_meta": {"timing_ms": 0.3},
     }
@@ -415,8 +542,26 @@ def test_get_file_outline_batch_round_trip():
                 "language": "python",
                 "file_summary": "",
                 "symbols": [
-                    {"id": "a1", "name": "foo", "kind": "function", "signature": "def foo()", "line": 1, "end_line": 2, "parent": None, "summary": ""},
-                    {"id": "a2", "name": "bar", "kind": "function", "signature": "def bar(x: int)", "line": 4, "end_line": 6, "parent": None, "summary": ""},
+                    {
+                        "id": "a1",
+                        "name": "foo",
+                        "kind": "function",
+                        "signature": "def foo()",
+                        "line": 1,
+                        "end_line": 2,
+                        "parent": None,
+                        "summary": "",
+                    },
+                    {
+                        "id": "a2",
+                        "name": "bar",
+                        "kind": "function",
+                        "signature": "def bar(x: int)",
+                        "line": 4,
+                        "end_line": 6,
+                        "parent": None,
+                        "summary": "",
+                    },
                 ],
                 "_meta": {"symbol_count": 2},
             },
@@ -426,8 +571,26 @@ def test_get_file_outline_batch_round_trip():
                 "language": "python",
                 "file_summary": "",
                 "symbols": [
-                    {"id": "b1", "name": "Widget", "kind": "class", "signature": "class Widget", "line": 1, "end_line": 10, "parent": None, "summary": ""},
-                    {"id": "b2", "name": "render", "kind": "method", "signature": "def render(self)", "line": 3, "end_line": 5, "parent": "b1", "summary": ""},
+                    {
+                        "id": "b1",
+                        "name": "Widget",
+                        "kind": "class",
+                        "signature": "class Widget",
+                        "line": 1,
+                        "end_line": 10,
+                        "parent": None,
+                        "summary": "",
+                    },
+                    {
+                        "id": "b2",
+                        "name": "render",
+                        "kind": "method",
+                        "signature": "def render(self)",
+                        "line": 3,
+                        "end_line": 5,
+                        "parent": "b1",
+                        "summary": "",
+                    },
                 ],
                 "_meta": {"symbol_count": 2},
             },
@@ -473,8 +636,20 @@ def test_get_repo_outline_round_trip():
         "file_count": 2,
         "symbol_count": 4,
         "files": [
-            {"file": "a.py", "language": "python", "symbol_count": 2, "line_count": 30, "summary": "foo"},
-            {"file": "b.py", "language": "python", "symbol_count": 2, "line_count": 40, "summary": "bar"},
+            {
+                "file": "a.py",
+                "language": "python",
+                "symbol_count": 2,
+                "line_count": 30,
+                "summary": "foo",
+            },
+            {
+                "file": "b.py",
+                "language": "python",
+                "symbol_count": 2,
+                "line_count": 40,
+                "summary": "bar",
+            },
         ],
         "_meta": {"timing_ms": 2.0, "is_stale": False},
     }
@@ -483,96 +658,176 @@ def test_get_repo_outline_round_trip():
     assert out["files"][0]["language"] == "python"
 
 
-@pytest.mark.parametrize("tool,resp", [
-    ("get_impact_preview", {
-        "repo": "a/b",
-        "symbol": {"id": "s1", "name": "foo", "kind": "function", "file": "x.py", "line": 1},
-        "affected_files": 2,
-        "affected_symbol_count": 3,
-        "affected_symbols": [
-            {"id": "t1", "name": "bar", "kind": "function", "file": "y.py", "line": 10, "depth": 1},
-            {"id": "t2", "name": "baz", "kind": "function", "file": "y.py", "line": 20, "depth": 1},
-        ],
-        "_meta": {"timing_ms": 1.0},
-    }),
-    ("get_signal_chains", {
-        "repo": "a/b",
-        "gateway_count": 1,
-        "chain_count": 2,
-        "orphan_symbols": 0,
-        "orphan_symbol_pct": 0.0,
-        "chains": [
+@pytest.mark.parametrize(
+    "tool,resp",
+    [
+        (
+            "get_signal_chains",
             {
-                "gateway": "routes.py::create_user",
-                "gateway_name": "create_user",
-                "kind": "http",
-                "label": "POST /api/users",
-                "depth": 3,
-                "reach": 4,
-                "symbols": ["create_user", "validate", "save", "notify"],
-                "files_touched": ["routes.py", "validators.py", "repo.py", "mailer.py"],
-                "file_count": 4,
+                "repo": "a/b",
+                "gateway_count": 1,
+                "chain_count": 2,
+                "orphan_symbols": 0,
+                "orphan_symbol_pct": 0.0,
+                "chains": [
+                    {
+                        "gateway": "routes.py::create_user",
+                        "gateway_name": "create_user",
+                        "kind": "http",
+                        "label": "POST /api/users",
+                        "depth": 3,
+                        "reach": 4,
+                        "symbols": ["create_user", "validate", "save", "notify"],
+                        "files_touched": [
+                            "routes.py",
+                            "validators.py",
+                            "repo.py",
+                            "mailer.py",
+                        ],
+                        "file_count": 4,
+                    },
+                    {
+                        "gateway": "cli.py::seed_db",
+                        "gateway_name": "seed_db",
+                        "kind": "cli",
+                        "label": "cli:seed-db",
+                        "depth": 2,
+                        "reach": 3,
+                        "symbols": ["seed_db", "generate", "insert"],
+                        "files_touched": ["cli.py", "factory.py", "repo.py"],
+                        "file_count": 3,
+                    },
+                ],
+                "kind_summary": {"http": 1, "cli": 1},
+                "_meta": {
+                    "timing_ms": 5.0,
+                    "max_depth": 5,
+                    "include_tests": True,
+                    "symbols_on_chains": 6,
+                    "total_functions_methods": 12,
+                },
             },
+        ),
+        (
+            "get_signal_chains",
             {
-                "gateway": "cli.py::seed_db",
-                "gateway_name": "seed_db",
-                "kind": "cli",
-                "label": "cli:seed-db",
-                "depth": 2,
-                "reach": 3,
-                "symbols": ["seed_db", "generate", "insert"],
-                "files_touched": ["cli.py", "factory.py", "repo.py"],
-                "file_count": 3,
+                "repo": "a/b",
+                "symbol": "validate",
+                "symbol_id": "validators.py::validate",
+                "chain_count": 1,
+                "chains": [
+                    {
+                        "gateway": "routes.py::create_user",
+                        "gateway_name": "create_user",
+                        "kind": "http",
+                        "label": "POST /api/users",
+                        "chain_reach": 4,
+                        "depth_from_gateway": 1,
+                    },
+                ],
+                "on_no_chain": False,
+                "_meta": {
+                    "timing_ms": 3.0,
+                    "max_depth": 5,
+                    "include_tests": False,
+                    "symbols_on_chains": 1,
+                    "total_functions_methods": 8,
+                    "total_gateways": 1,
+                },
             },
-        ],
-        "kind_summary": {"http": 1, "cli": 1},
-        "_meta": {"timing_ms": 5.0, "max_depth": 5, "include_tests": True, "symbols_on_chains": 6, "total_functions_methods": 12},
-    }),
-    ("get_signal_chains", {
-        "repo": "a/b",
-        "symbol": "validate",
-        "symbol_id": "validators.py::validate",
-        "chain_count": 1,
-        "chains": [
-            {"gateway": "routes.py::create_user", "gateway_name": "create_user", "kind": "http", "label": "POST /api/users", "chain_reach": 4, "depth_from_gateway": 1},
-        ],
-        "on_no_chain": False,
-        "_meta": {"timing_ms": 3.0, "max_depth": 5, "include_tests": False, "symbols_on_chains": 1, "total_functions_methods": 8, "total_gateways": 1},
-    }),
-    ("search_ast", {
-        "result_count": 1,
-        "query": "call:print",
-        "results": [
-            {"file": "a.py", "line": 10, "match_type": "call", "snippet": "print(x)", "symbol_id": "s1", "symbol_name": "foo"},
-        ],
-        "_meta": {"timing_ms": 1.0, "files_searched": 20},
-    }),
-    ("get_ranked_context", {
-        "total_tokens": 500,
-        "budget_tokens": 1000,
-        "items_included": 2,
-        "items_considered": 10,
-        "context_items": [
-            {"id": "s1", "name": "foo", "kind": "function", "file": "a.py", "line": 1, "score": 0.9, "token_cost": 250, "summary": "does foo"},
-            {"id": "s2", "name": "bar", "kind": "function", "file": "b.py", "line": 1, "score": 0.8, "token_cost": 250, "summary": "does bar"},
-        ],
-        "_meta": {"timing_ms": 2.0, "fusion": True},
-    }),
-    ("get_tectonic_map", {
-        "repo": "a/b",
-        "plate_count": 1,
-        "file_count": 2,
-        "plates": [{"plate_id": 0, "anchor": "src/core.py", "file_count": 2, "cohesion": 0.82, "majority_directory": "src", "drifter_count": 0, "nexus_alert": False}],
-        "drifter_summary": [{"file": "src/config/loader.py", "current_directory": "src/config", "belongs_with": "src", "plate_anchor": "src/core.py"}],
-        "isolated_files": ["README.md"],
-        "signals_used": ["structural", "behavioral", "temporal"],
-        "_meta": {"timing_ms": 3.0, "methodology": "tectonic"},
-    }),
-])
+        ),
+        (
+            "search_ast",
+            {
+                "result_count": 1,
+                "query": "call:print",
+                "results": [
+                    {
+                        "file": "a.py",
+                        "line": 10,
+                        "match_type": "call",
+                        "snippet": "print(x)",
+                        "symbol_id": "s1",
+                        "symbol_name": "foo",
+                    },
+                ],
+                "_meta": {"timing_ms": 1.0, "files_searched": 20},
+            },
+        ),
+        (
+            "get_ranked_context",
+            {
+                "total_tokens": 500,
+                "budget_tokens": 1000,
+                "items_included": 2,
+                "items_considered": 10,
+                "context_items": [
+                    {
+                        "id": "s1",
+                        "name": "foo",
+                        "kind": "function",
+                        "file": "a.py",
+                        "line": 1,
+                        "score": 0.9,
+                        "token_cost": 250,
+                        "summary": "does foo",
+                    },
+                    {
+                        "id": "s2",
+                        "name": "bar",
+                        "kind": "function",
+                        "file": "b.py",
+                        "line": 1,
+                        "score": 0.8,
+                        "token_cost": 250,
+                        "summary": "does bar",
+                    },
+                ],
+                "_meta": {"timing_ms": 2.0, "fusion": True},
+            },
+        ),
+        (
+            "get_tectonic_map",
+            {
+                "repo": "a/b",
+                "plate_count": 1,
+                "file_count": 2,
+                "plates": [
+                    {
+                        "plate_id": 0,
+                        "anchor": "src/core.py",
+                        "file_count": 2,
+                        "cohesion": 0.82,
+                        "majority_directory": "src",
+                        "drifter_count": 0,
+                        "nexus_alert": False,
+                    }
+                ],
+                "drifter_summary": [
+                    {
+                        "file": "src/config/loader.py",
+                        "current_directory": "src/config",
+                        "belongs_with": "src",
+                        "plate_anchor": "src/core.py",
+                    }
+                ],
+                "isolated_files": ["README.md"],
+                "signals_used": ["structural", "behavioral", "temporal"],
+                "_meta": {"timing_ms": 3.0, "methodology": "tectonic"},
+            },
+        ),
+    ],
+)
 def test_remaining_tier1_round_trip(tool, resp):
     out = _rt(tool, resp)
     # Just confirm the decode produces something usable with table keys preserved.
-    for table_key in ("affected_symbols", "chains", "results", "context_items", "plates"):
+    for table_key in (
+        "affected_symbols",
+        "chains",
+        "results",
+        "context_items",
+        "plates",
+    ):
         if table_key in resp:
             assert table_key in out, f"{tool} lost {table_key}"
 
@@ -584,10 +839,24 @@ def test_get_signal_chains_lookup_round_trip():
         "symbol_id": "validators.py::validate",
         "chain_count": 1,
         "chains": [
-            {"gateway": "routes.py::create_user", "gateway_name": "create_user", "kind": "http", "label": "POST /api/users", "chain_reach": 4, "depth_from_gateway": 1},
+            {
+                "gateway": "routes.py::create_user",
+                "gateway_name": "create_user",
+                "kind": "http",
+                "label": "POST /api/users",
+                "chain_reach": 4,
+                "depth_from_gateway": 1,
+            },
         ],
         "on_no_chain": False,
-        "_meta": {"timing_ms": 3.0, "max_depth": 5, "include_tests": False, "symbols_on_chains": 1, "total_functions_methods": 8, "total_gateways": 1},
+        "_meta": {
+            "timing_ms": 3.0,
+            "max_depth": 5,
+            "include_tests": False,
+            "symbols_on_chains": 1,
+            "total_functions_methods": 8,
+            "total_gateways": 1,
+        },
     }
     out = _rt("get_signal_chains", resp)
     assert out["symbol"] == "validate"
@@ -619,7 +888,13 @@ def test_get_signal_chains_discovery_meta_shape():
             },
         ],
         "kind_summary": {"http": 1},
-        "_meta": {"timing_ms": 5.0, "max_depth": 5, "include_tests": True, "symbols_on_chains": 4, "total_functions_methods": 12},
+        "_meta": {
+            "timing_ms": 5.0,
+            "max_depth": 5,
+            "include_tests": True,
+            "symbols_on_chains": 4,
+            "total_functions_methods": 12,
+        },
     }
     out = _rt("get_signal_chains", resp)
     assert out["_meta"] == {
@@ -660,7 +935,11 @@ def test_get_tectonic_map_round_trip_realistic():
                 "anchor": "src/api/server.py",
                 "file_count": 3,
                 "cohesion": 0.82,
-                "files": ["src/api/server.py", "src/api/routes.py", "src/api/middleware.py"],
+                "files": [
+                    "src/api/server.py",
+                    "src/api/routes.py",
+                    "src/api/middleware.py",
+                ],
                 "majority_directory": "src/api",
             },
             {
@@ -668,7 +947,11 @@ def test_get_tectonic_map_round_trip_realistic():
                 "anchor": "src/db/models.py",
                 "file_count": 3,
                 "cohesion": 0.65,
-                "files": ["src/db/models.py", "src/db/queries.py", "src/config/loader.py"],
+                "files": [
+                    "src/db/models.py",
+                    "src/db/queries.py",
+                    "src/config/loader.py",
+                ],
                 "majority_directory": "src/db",
                 "drifters": ["src/config/loader.py"],
                 "drifter_count": 1,
@@ -679,7 +962,14 @@ def test_get_tectonic_map_round_trip_realistic():
         ],
         "isolated_files": ["README.md"],
         "signals_used": ["structural", "behavioral", "temporal"],
-        "drifter_summary": [{"file": "src/config/loader.py", "current_directory": "src/config", "belongs_with": "src/db", "plate_anchor": "src/db/models.py"}],
+        "drifter_summary": [
+            {
+                "file": "src/config/loader.py",
+                "current_directory": "src/config",
+                "belongs_with": "src/db",
+                "plate_anchor": "src/db/models.py",
+            }
+        ],
         "_meta": {"timing_ms": 15.0, "methodology": "tectonic"},
     }
     out = _rt("get_tectonic_map", resp)

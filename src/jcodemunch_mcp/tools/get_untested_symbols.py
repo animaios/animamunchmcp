@@ -7,9 +7,9 @@ import logging
 import time
 from typing import Optional
 
-from ..parser.imports import resolve_specifier
 from ..storage import IndexStore
 from ._call_graph import _word_match
+from ._graph_utils import build_adjacency
 from ._utils import index_status_to_tool_error, resolve_repo
 from .get_dead_code_v2 import _is_test_file
 
@@ -19,24 +19,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
-
-
-def _build_reverse_adjacency(
-    imports: dict,
-    source_files: frozenset,
-    alias_map: Optional[dict] = None,
-    psr4_map: Optional[dict] = None,
-) -> dict[str, list[str]]:
-    """Return {file: [files_that_import_it]} from raw import data."""
-    rev: dict[str, list[str]] = {}
-    for src_file, file_imports in imports.items():
-        for imp in file_imports:
-            target = resolve_specifier(
-                imp["specifier"], src_file, source_files, alias_map, psr4_map
-            )
-            if target and target != src_file:
-                rev.setdefault(target, []).append(src_file)
-    return {k: list(dict.fromkeys(v)) for k, v in rev.items()}
 
 
 def _test_files_that_import(file_path: str, rev: dict[str, list[str]]) -> list[str]:
@@ -134,11 +116,12 @@ def get_untested_symbols(
         }
 
     source_files = frozenset(index.source_files)
-    rev = _build_reverse_adjacency(
+    rev = build_adjacency(
         index.imports,
         source_files,
         index.alias_map,
         getattr(index, "psr4_map", None),
+        direction="reverse",
     )
 
     # Partition: which files are tests?

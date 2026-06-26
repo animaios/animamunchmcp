@@ -3,12 +3,12 @@
 import time
 from typing import Optional
 
-from ..storage import IndexStore
 from ..parser.imports import (
     build_re_export_maps,
     expand_barrel_leaves,
     resolve_specifier,
 )
+from ..storage import IndexStore
 from ._utils import index_status_to_tool_error, resolve_repo
 from .package_registry import (
     extract_root_package_from_specifier,
@@ -30,7 +30,9 @@ def _resolve_to_leaves(
     For `export { Foo } from './foo'` in a barrel, only consumers that
     actually import `Foo` from the barrel credit `./foo`.
     """
-    direct = resolve_specifier(imp["specifier"], src_file, source_files, alias_map, psr4_map)
+    direct = resolve_specifier(
+        imp["specifier"], src_file, source_files, alias_map, psr4_map
+    )
     if not direct:
         return set()
     return expand_barrel_leaves(direct, imp.get("names", []), wildcard_map, named_map)
@@ -64,7 +66,10 @@ def _find_importers_single(
     # credit only consumers that actually import `Foo` from the barrel.
     # Old indexes without `re_export_kind` default to wildcard semantics.
     wildcard_map, named_map = build_re_export_maps(
-        index.imports, source_files, alias_map, psr4_map,
+        index.imports,
+        source_files,
+        alias_map,
+        psr4_map,
     )
 
     # Build a set of all files that are imported by at least one other file
@@ -77,7 +82,15 @@ def _find_importers_single(
             if imp.get("is_re_export"):
                 continue  # re-exports forward, not consume
             files_that_are_imported.update(
-                _resolve_to_leaves(imp, src_file, source_files, alias_map, psr4_map, wildcard_map, named_map)
+                _resolve_to_leaves(
+                    imp,
+                    src_file,
+                    source_files,
+                    alias_map,
+                    psr4_map,
+                    wildcard_map,
+                    named_map,
+                )
             )
 
     results = []
@@ -88,14 +101,24 @@ def _find_importers_single(
         for imp in file_imports:
             if imp.get("is_re_export"):
                 continue  # re-export-only files are forwarders, not consumers
-            leaves = _resolve_to_leaves(imp, src_file, source_files, alias_map, psr4_map, wildcard_map, named_map)
+            leaves = _resolve_to_leaves(
+                imp,
+                src_file,
+                source_files,
+                alias_map,
+                psr4_map,
+                wildcard_map,
+                named_map,
+            )
             if file_path in leaves:
-                results.append({
-                    "file": src_file,
-                    "specifier": imp["specifier"],
-                    "names": imp.get("names", []),
-                    "has_importers": src_file in files_that_are_imported,
-                })
+                results.append(
+                    {
+                        "file": src_file,
+                        "specifier": imp["specifier"],
+                        "names": imp.get("names", []),
+                        "has_importers": src_file in files_that_are_imported,
+                    }
+                )
                 break  # one match per file is enough
 
     results.sort(key=lambda r: r["file"])
@@ -110,10 +133,14 @@ def _find_importers_single(
         "_meta": {
             "timing_ms": round(elapsed, 1),
             "truncated": truncated,
-            "tip": "Tip: use file_paths=['{0}','...'] to query multiple files in one call.".format(file_path)
+            "tip": "Tip: use file_paths=['{0}','...'] to query multiple files in one call.".format(
+                file_path
+            )
             if truncated
             else "Tip: use file_paths=['{0}','...'] to query multiple files in one call. "
-                 "For usage-site matching beyond imports, also try check_references.".format(file_path),
+            "For usage-site matching beyond imports, also try find_references(quick=True).".format(
+                file_path
+            ),
         },
     }
 
@@ -147,7 +174,10 @@ def _find_importers_batch(
 
     # v1.94.0: symbol-aware barrel resolution. See _find_importers_single.
     wildcard_map, named_map = build_re_export_maps(
-        index.imports, source_files, alias_map, psr4_map,
+        index.imports,
+        source_files,
+        alias_map,
+        psr4_map,
     )
 
     # Pass 1: build files_that_are_imported (counts barrel-expanded leaves)
@@ -157,7 +187,15 @@ def _find_importers_batch(
             if imp.get("is_re_export"):
                 continue
             files_that_are_imported.update(
-                _resolve_to_leaves(imp, src_file, source_files, alias_map, psr4_map, wildcard_map, named_map)
+                _resolve_to_leaves(
+                    imp,
+                    src_file,
+                    source_files,
+                    alias_map,
+                    psr4_map,
+                    wildcard_map,
+                    named_map,
+                )
             )
 
     # Pass 2: build import_map. Each importer is recorded under every leaf
@@ -167,7 +205,15 @@ def _find_importers_batch(
         for imp in file_imports:
             if imp.get("is_re_export"):
                 continue
-            leaves = _resolve_to_leaves(imp, src_file, source_files, alias_map, psr4_map, wildcard_map, named_map)
+            leaves = _resolve_to_leaves(
+                imp,
+                src_file,
+                source_files,
+                alias_map,
+                psr4_map,
+                wildcard_map,
+                named_map,
+            )
             if not leaves:
                 continue
             entry = {
@@ -183,11 +229,13 @@ def _find_importers_batch(
     for file_path in file_paths:
         file_results = import_map.get(file_path, [])  # O(1) lookup
         file_results.sort(key=lambda r: r["file"])
-        results.append({
-            "file_path": file_path,
-            "importer_count": len(file_results),
-            "importers": file_results[:max_results],
-        })
+        results.append(
+            {
+                "file_path": file_path,
+                "importer_count": len(file_results),
+                "importers": file_results[:max_results],
+            }
+        )
 
     return {
         "repo": f"{owner}/{name}",
@@ -233,14 +281,16 @@ def _find_cross_repo_importers(
                 lang = other_index.file_languages.get(src_file, "")
                 root_pkg = extract_root_package_from_specifier(specifier, lang)
                 if root_pkg and root_pkg in pkg_names:
-                    cross_results.append({
-                        "file": src_file,
-                        "specifier": specifier,
-                        "names": imp.get("names", []),
-                        "has_importers": True,  # cross-repo — not analyzed further
-                        "cross_repo": True,
-                        "source_repo": other_repo_id,
-                    })
+                    cross_results.append(
+                        {
+                            "file": src_file,
+                            "specifier": specifier,
+                            "names": imp.get("names", []),
+                            "has_importers": True,  # cross-repo — not analyzed further
+                            "cross_repo": True,
+                            "source_repo": other_repo_id,
+                        }
+                    )
                     break  # one match per file per other-repo is enough
 
     return cross_results
@@ -283,12 +333,17 @@ def find_importers(
     # Normalize: some MCP clients send file_paths=[] alongside file_path when they mean singular mode
     if file_path is not None and file_paths is not None and len(file_paths) == 0:
         file_paths = None
-    if (file_path is None and file_paths is None) or (file_path is not None and file_paths is not None):
-        raise ValueError("Provide exactly one of 'file_path' or 'file_paths', not both and not neither.")
+    if (file_path is None and file_paths is None) or (
+        file_path is not None and file_paths is not None
+    ):
+        raise ValueError(
+            "Provide exactly one of 'file_path' or 'file_paths', not both and not neither."
+        )
 
     # Resolve cross_repo default from config if not explicitly provided
     if cross_repo is None:
         from .. import config as _cfg
+
         cross_repo = bool(_cfg.get("cross_repo_default", False))
 
     start = time.perf_counter()
@@ -324,14 +379,22 @@ def find_importers(
                     "file_count": len(file_paths),
                 },
             }
-        result = _find_importers_batch(file_paths, index, max_results, owner, name, start)
+        result = _find_importers_batch(
+            file_paths, index, max_results, owner, name, start
+        )
         if cross_repo:
             # len(file_paths) == 1 here — equivalent to the singular cross-repo path.
             try:
                 from .list_repos import list_repos
+
                 all_repos = list_repos(storage_path=storage_path).get("repos", [])
                 cross_results = _find_cross_repo_importers(
-                    file_paths[0], repo_id, all_repos, store, owner, name,
+                    file_paths[0],
+                    repo_id,
+                    all_repos,
+                    store,
+                    owner,
+                    name,
                 )
                 if cross_results and "results" in result:
                     # Attach cross-repo results to the batch response
@@ -340,16 +403,26 @@ def find_importers(
                 pass
         return result
     else:
-        result = _find_importers_single(file_path, index, max_results, owner, name, start)
+        result = _find_importers_single(
+            file_path, index, max_results, owner, name, start
+        )
         if cross_repo and "importers" in result:
             try:
                 from .list_repos import list_repos
+
                 all_repos = list_repos(storage_path=storage_path).get("repos", [])
                 cross_results = _find_cross_repo_importers(
-                    file_path, repo_id, all_repos, store, owner, name,
+                    file_path,
+                    repo_id,
+                    all_repos,
+                    store,
+                    owner,
+                    name,
                 )
                 if cross_results:
-                    result["importers"] = result.get("importers", []) + cross_results[:max_results]
+                    result["importers"] = (
+                        result.get("importers", []) + cross_results[:max_results]
+                    )
                     result["cross_repo_importer_count"] = len(cross_results)
             except Exception:
                 pass

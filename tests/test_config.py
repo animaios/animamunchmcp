@@ -6,35 +6,50 @@ from pathlib import Path
 
 import pytest
 
-from tests import _platform_path, _platform_path_str
 from src.jcodemunch_mcp.config import _strip_jsonc
+from tests import _platform_path, _platform_path_str
 
 
 class TestJSONCParser:
     """Test JSONC comment stripping."""
 
-    @pytest.mark.parametrize("text,id", [
-        ('{"key": "value" // this is a comment\n}', "jsonc_line_comment"),
-        ('{"key": "value"} // comment', "jsonc_line_comment_no_trailing"),
-        ('{"key" /* comment */: "value"}', "jsonc_block_comment"),
-        ('{"a": 1, "b": 2,}', "jsonc_trailing_comma_object"),
-        ('{"a": {"b": 1,}, "c": 2,}', "jsonc_trailing_comma_nested"),
-        ('{"arr": [1, 2, 3,]}', "jsonc_trailing_comma_array"),
-        ('{\n  "key": "value", // comment\n}', "jsonc_trailing_comma_with_comment"),
-        ('{"key": "value", // comment\n}', "jsonc_comment_before_closing_brace"),
-        ('{"a": {"b": {"c": 1,},}, "d": [{"e": 2,},],}', "jsonc_multiple_trailing_commas"),
-    ], ids=lambda x: x[1] if isinstance(x, tuple) else "custom")
+    @pytest.mark.parametrize(
+        "text,id",
+        [
+            ('{"key": "value" // this is a comment\n}', "jsonc_line_comment"),
+            ('{"key": "value"} // comment', "jsonc_line_comment_no_trailing"),
+            ('{"key" /* comment */: "value"}', "jsonc_block_comment"),
+            ('{"a": 1, "b": 2,}', "jsonc_trailing_comma_object"),
+            ('{"a": {"b": 1,}, "c": 2,}', "jsonc_trailing_comma_nested"),
+            ('{"arr": [1, 2, 3,]}', "jsonc_trailing_comma_array"),
+            ('{\n  "key": "value", // comment\n}', "jsonc_trailing_comma_with_comment"),
+            ('{"key": "value", // comment\n}', "jsonc_comment_before_closing_brace"),
+            (
+                '{"a": {"b": {"c": 1,},}, "d": [{"e": 2,},],}',
+                "jsonc_multiple_trailing_commas",
+            ),
+        ],
+        ids=lambda x: x[1] if isinstance(x, tuple) else "custom",
+    )
     def test_strips_comments_and_trailing_commas(self, text, id):
         """Should strip comments and trailing commas, producing valid JSON."""
         result = _strip_jsonc(text)
         json.loads(result)  # Must be valid JSON
 
-    @pytest.mark.parametrize("text,expected", [
-        ('{"url": "http://example.com", "note": "use /* here*/"}',
-         {"url": "http://example.com", "note": "use /* here*/"}),
-        ('{"url": "http://example.com", "regex": "/*.*?*/"}',
-         {"url": "http://example.com", "regex": "/*.*?*/"}),
-    ], ids=["preserves_block_comment_in_string", "preserves_comment_chars_in_string"])
+    @pytest.mark.parametrize(
+        "text,expected",
+        [
+            (
+                '{"url": "http://example.com", "note": "use /* here*/"}',
+                {"url": "http://example.com", "note": "use /* here*/"},
+            ),
+            (
+                '{"url": "http://example.com", "regex": "/*.*?*/"}',
+                {"url": "http://example.com", "regex": "/*.*?*/"},
+            ),
+        ],
+        ids=["preserves_block_comment_in_string", "preserves_comment_chars_in_string"],
+    )
     def test_preserves_strings_with_comment_chars(self, text, expected):
         """Should not strip // or /* inside quoted strings."""
         result = _strip_jsonc(text)
@@ -43,19 +58,23 @@ class TestJSONCParser:
 
     def test_strips_multiline_block_comments(self):
         """Should strip multiline /* */ comments."""
-        text = '''{
+        text = """{
     "key": "value" /* this is
     a multiline
     comment */
-}'''
+}"""
         result = _strip_jsonc(text)
         assert '"key"' in result
-        assert 'this is' not in result
+        assert "this is" not in result
         json.loads(result)  # Must be valid JSON
 
-    @pytest.mark.parametrize("text,expected", [
-        (r'{"key": "value with \"quote\""}', 'value with "quote"'),
-    ], ids=["escaped_quotes"])
+    @pytest.mark.parametrize(
+        "text,expected",
+        [
+            (r'{"key": "value with \"quote\""}', 'value with "quote"'),
+        ],
+        ids=["escaped_quotes"],
+    )
     def test_escaped_quotes_in_strings(self, text, expected):
         """Should preserve escaped quotes inside strings."""
         result = _strip_jsonc(text)
@@ -64,7 +83,7 @@ class TestJSONCParser:
 
     def test_real_world_config(self):
         """Should parse a real-world JSONC config file."""
-        text = '''
+        text = """
 {
   // === Indexing ===
   "use_ai_summaries": true,
@@ -96,7 +115,7 @@ class TestJSONCParser:
     },
   },
 }
-'''
+"""
         result = _strip_jsonc(text)
         parsed = json.loads(result)  # Must be valid JSON
         assert parsed["use_ai_summaries"] is True
@@ -109,49 +128,60 @@ class TestJSONCParser:
 class TestConfigDefaults:
     """Test default config values."""
 
-    @pytest.mark.parametrize("key,expected", [
-        ("max_folder_files", 2000),
-        ("max_index_files", 10000),
-        ("languages", None),
-        ("disabled_tools", ["test_summarizer"]),
-        ("server_output", "adaptive"),
-        ("server_output_threshold", 0.15),
-    ], ids=[
-        "max_folder_files",
-        "max_index_files",
-        "languages_none",
-        "disabled_tools",
-        "server_output",
-        "server_output_threshold",
-    ])
+    @pytest.mark.parametrize(
+        "key,expected",
+        [
+            ("max_folder_files", 2000),
+            ("max_index_files", 10000),
+            ("languages", None),
+            ("disabled_tools", ["test_summarizer"]),
+            ("server_output", "adaptive"),
+            ("server_output_threshold", 0.15),
+        ],
+        ids=[
+            "max_folder_files",
+            "max_index_files",
+            "languages_none",
+            "disabled_tools",
+            "server_output",
+            "server_output_threshold",
+        ],
+    )
     def test_default_values(self, key, expected):
         """Should have correct default values."""
         from src.jcodemunch_mcp.config import DEFAULTS
+
         assert DEFAULTS[key] == expected
 
-    @pytest.mark.parametrize("key,expected_type", [
-        ("strict_timeout_ms", int),
-        ("summarizer_provider", str),
-        ("embed_model", str),
-        ("summarizer_model", str),
-        ("server_output", str),
-        ("server_output_threshold", float),
-    ], ids=[
-        "strict_timeout_ms",
-        "summarizer_provider",
-        "embed_model",
-        "summarizer_model",
-        "server_output",
-        "server_output_threshold",
-    ])
+    @pytest.mark.parametrize(
+        "key,expected_type",
+        [
+            ("strict_timeout_ms", int),
+            ("summarizer_provider", str),
+            ("embed_model", str),
+            ("summarizer_model", str),
+            ("server_output", str),
+            ("server_output_threshold", float),
+        ],
+        ids=[
+            "strict_timeout_ms",
+            "summarizer_provider",
+            "embed_model",
+            "summarizer_model",
+            "server_output",
+            "server_output_threshold",
+        ],
+    )
     def test_default_types(self, key, expected_type):
         """Config types should match expected types."""
         from src.jcodemunch_mcp.config import CONFIG_TYPES
+
         assert CONFIG_TYPES[key] is expected_type
 
     def test_default_use_ai_summaries(self):
         """use_ai_summaries should default to 'auto'."""
-        from src.jcodemunch_mcp.config import DEFAULTS, CONFIG_TYPES
+        from src.jcodemunch_mcp.config import CONFIG_TYPES, DEFAULTS
+
         assert DEFAULTS["use_ai_summaries"] == "auto"
         assert CONFIG_TYPES["use_ai_summaries"] == (bool, str)
 
@@ -161,7 +191,7 @@ class TestConfigLoading:
 
     def test_auto_creates_default_config_if_missing(self, tmp_path):
         """load_config() should create default config.jsonc if it doesn't exist."""
-        from src.jcodemunch_mcp.config import load_config, get, _GLOBAL_CONFIG
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, get, load_config
 
         _GLOBAL_CONFIG.clear()
         storage_path = str(tmp_path)
@@ -185,12 +215,13 @@ class TestConfigLoading:
 
     def test_missing_file_uses_defaults(self, monkeypatch):
         """Should use defaults when config file doesn't exist."""
-        from src.jcodemunch_mcp.config import load_config, get, _GLOBAL_CONFIG
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, get, load_config
 
         # Clear any existing config
         _GLOBAL_CONFIG.clear()
 
         import tempfile
+
         with tempfile.TemporaryDirectory() as tmpdir:
             non_existent = Path(tmpdir) / "nonexistent" / "config.jsonc"
             monkeypatch.setenv("CODE_INDEX_PATH", str(Path(tmpdir) / "nonexistent"))
@@ -202,16 +233,16 @@ class TestConfigLoading:
 
     def test_loads_valid_config(self, monkeypatch):
         """Should load valid JSONC config."""
-        from src.jcodemunch_mcp.config import load_config, get, _GLOBAL_CONFIG
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, get, load_config
 
         _GLOBAL_CONFIG.clear()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.jsonc"
-            config_path.write_text('''{
+            config_path.write_text("""{
                 "max_folder_files": 5000,
                 "use_ai_summaries": false
-            }''')
+            }""")
 
             load_config(tmpdir)
 
@@ -232,7 +263,7 @@ class TestConfigLoading:
     )
     def test_server_output_normalizes_aliases(self, configured, expected):
         """server_output should normalize legacy aliases to user-facing values."""
-        from src.jcodemunch_mcp.config import load_config, get, _GLOBAL_CONFIG
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, get, load_config
 
         _GLOBAL_CONFIG.clear()
 
@@ -242,14 +273,18 @@ class TestConfigLoading:
             load_config(tmpdir)
             assert get("server_output") == expected
 
-    @pytest.mark.parametrize("value,expected", [
-        ('null', None),
-        ('[]', []),
-        ('["timing_ms", "powered_by"]', ["timing_ms", "powered_by"]),
-    ], ids=["null", "empty_list", "partial_list"])
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            ("null", None),
+            ("[]", []),
+            ('["timing_ms", "powered_by"]', ["timing_ms", "powered_by"]),
+        ],
+        ids=["null", "empty_list", "partial_list"],
+    )
     def test_meta_fields_config_values(self, value, expected):
         """meta_fields should handle null, empty list, and partial list values."""
-        from src.jcodemunch_mcp.config import load_config, get, _GLOBAL_CONFIG
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, get, load_config
 
         _GLOBAL_CONFIG.clear()
 
@@ -261,7 +296,7 @@ class TestConfigLoading:
 
     def test_meta_fields_absent_uses_default(self):
         """meta_fields absent from config uses default ([] = no metadata)."""
-        from src.jcodemunch_mcp.config import load_config, get, _GLOBAL_CONFIG
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, get, load_config
 
         _GLOBAL_CONFIG.clear()
 
@@ -276,14 +311,17 @@ class TestConfigLoading:
 
     def test_type_mismatch_logs_warning_and_uses_default(self, monkeypatch, caplog):
         """Should log warning and use default on type mismatch."""
-        from src.jcodemunch_mcp.config import load_config, get, _GLOBAL_CONFIG
         import logging
+
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, get, load_config
 
         _GLOBAL_CONFIG.clear()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.jsonc"
-            config_path.write_text('{ "max_folder_files": "2000" }')  # String instead of int
+            config_path.write_text(
+                '{ "max_folder_files": "2000" }'
+            )  # String instead of int
 
             with caplog.at_level(logging.WARNING):
                 load_config(tmpdir)
@@ -297,7 +335,8 @@ class TestConfigLoading:
     def test_unknown_language_logs_warning(self, monkeypatch, caplog):
         """Unknown language in config should log warning and be filtered."""
         import logging
-        from src.jcodemunch_mcp.config import load_config, get, _GLOBAL_CONFIG
+
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, get, load_config
 
         caplog.set_level(logging.WARNING)
         _GLOBAL_CONFIG.clear()
@@ -321,10 +360,15 @@ class TestProjectConfig:
 
     def test_load_all_project_configs_at_startup(self, tmp_path, monkeypatch):
         """load_all_project_configs() should load .jcodemunch.jsonc for all local repos."""
-        from src.jcodemunch_mcp.config import (
-            load_config, load_all_project_configs, get, _GLOBAL_CONFIG, _PROJECT_CONFIGS
-        )
         import unittest.mock
+
+        from src.jcodemunch_mcp.config import (
+            _GLOBAL_CONFIG,
+            _PROJECT_CONFIGS,
+            get,
+            load_all_project_configs,
+            load_config,
+        )
 
         # Create two project roots with different configs
         project_a = tmp_path / "project_a"
@@ -339,7 +383,10 @@ class TestProjectConfig:
         mock_repos = [
             {"repo": "local/project-a-abc123", "source_root": str(project_a)},
             {"repo": "local/project-b-def456", "source_root": str(project_b)},
-            {"repo": "github/owner/repo", "source_root": ""},  # Remote repo, no source_root
+            {
+                "repo": "github/owner/repo",
+                "source_root": "",
+            },  # Remote repo, no source_root
         ]
 
         _GLOBAL_CONFIG.clear()
@@ -362,8 +409,11 @@ class TestProjectConfig:
     def test_project_config_merges_over_global(self):
         """Should merge project config over global config."""
         from src.jcodemunch_mcp.config import (
-            load_config, load_project_config, get,
-            _GLOBAL_CONFIG, _PROJECT_CONFIGS
+            _GLOBAL_CONFIG,
+            _PROJECT_CONFIGS,
+            get,
+            load_config,
+            load_project_config,
         )
 
         _GLOBAL_CONFIG.clear()
@@ -373,7 +423,9 @@ class TestProjectConfig:
             # Set up global config
             global_config = Path(tmpdir) / "global" / "config.jsonc"
             global_config.parent.mkdir()
-            global_config.write_text('{"max_folder_files": 2000, "use_ai_summaries": true}')
+            global_config.write_text(
+                '{"max_folder_files": 2000, "use_ai_summaries": true}'
+            )
 
             load_config(str(global_config.parent))
 
@@ -389,7 +441,9 @@ class TestProjectConfig:
             repo_key = str(project_root.resolve())
             assert get("max_folder_files", repo=repo_key) == 5000
             # Non-overridden values should come from global
-            assert get("use_ai_summaries", repo=repo_key) is True  # set explicitly in global config
+            assert (
+                get("use_ai_summaries", repo=repo_key) is True
+            )  # set explicitly in global config
 
 
 class TestConfigGetters:
@@ -398,14 +452,18 @@ class TestConfigGetters:
     def test_is_tool_disabled(self):
         """Should return True if tool is in disabled_tools."""
         from src.jcodemunch_mcp.config import (
-            load_config, is_tool_disabled, _GLOBAL_CONFIG
+            _GLOBAL_CONFIG,
+            is_tool_disabled,
+            load_config,
         )
 
         _GLOBAL_CONFIG.clear()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.jsonc"
-            config_path.write_text('{"disabled_tools": ["index_repo", "search_columns"]}')
+            config_path.write_text(
+                '{"disabled_tools": ["index_repo", "search_columns"]}'
+            )
 
             load_config(tmpdir)
 
@@ -416,7 +474,10 @@ class TestConfigGetters:
     def test_is_language_enabled_all_enabled(self):
         """Should return True for all languages when languages is None."""
         from src.jcodemunch_mcp.config import (
-            load_config, is_language_enabled, _GLOBAL_CONFIG, DEFAULTS
+            _GLOBAL_CONFIG,
+            DEFAULTS,
+            is_language_enabled,
+            load_config,
         )
 
         _GLOBAL_CONFIG.clear()
@@ -427,7 +488,11 @@ class TestConfigGetters:
 
     def test_is_language_enabled_filtered(self):
         """Should return False for disabled languages."""
-        from src.jcodemunch_mcp.config import load_config, is_language_enabled, _GLOBAL_CONFIG
+        from src.jcodemunch_mcp.config import (
+            _GLOBAL_CONFIG,
+            is_language_enabled,
+            load_config,
+        )
 
         _GLOBAL_CONFIG.clear()
 
@@ -453,6 +518,7 @@ class TestTemplateGeneration:
 
         # Should be parseable after stripping comments
         from src.jcodemunch_mcp.config import _strip_jsonc
+
         stripped = _strip_jsonc(template)
         parsed = json.loads(stripped)
 
@@ -462,17 +528,19 @@ class TestTemplateGeneration:
 
     def test_template_languages_synced_from_registry(self):
         """Should include all languages from LANGUAGE_REGISTRY as active entries."""
-        from src.jcodemunch_mcp.config import generate_template
-        from src.jcodemunch_mcp.parser.languages import LANGUAGE_REGISTRY
-        from src.jcodemunch_mcp.config import _strip_jsonc
         import json
+
+        from src.jcodemunch_mcp.config import _strip_jsonc, generate_template
+        from src.jcodemunch_mcp.parser.languages import LANGUAGE_REGISTRY
 
         template = generate_template()
         parsed = json.loads(_strip_jsonc(template))
 
         # All registry languages should be present and active (not commented out)
         for lang in LANGUAGE_REGISTRY.keys():
-            assert lang in parsed["languages"], f"Language '{lang}' not found in parsed template"
+            assert lang in parsed["languages"], (
+                f"Language '{lang}' not found in parsed template"
+            )
 
     def test_template_all_tools_matches_canonical(self):
         """all_tools in generate_template must include every canonical tool."""
@@ -498,18 +566,22 @@ class TestGetDescriptions:
 
     def test_returns_descriptions_dict(self):
         """Should return descriptions dict from config."""
-        from src.jcodemunch_mcp.config import load_config, get_descriptions, _GLOBAL_CONFIG
+        from src.jcodemunch_mcp.config import (
+            _GLOBAL_CONFIG,
+            get_descriptions,
+            load_config,
+        )
 
         _GLOBAL_CONFIG.clear()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.jsonc"
-            config_path.write_text('''{
+            config_path.write_text("""{
                 "descriptions": {
                     "search_symbols": {"_tool": "custom"},
                     "_shared": {"repo": "shared desc"}
                 }
-            }''')
+            }""")
 
             load_config(tmpdir)
 
@@ -520,7 +592,12 @@ class TestGetDescriptions:
 
     def test_returns_empty_dict_when_absent(self):
         """Should return empty dict when descriptions key absent."""
-        from src.jcodemunch_mcp.config import load_config, get_descriptions, _GLOBAL_CONFIG, DEFAULTS
+        from src.jcodemunch_mcp.config import (
+            _GLOBAL_CONFIG,
+            DEFAULTS,
+            get_descriptions,
+            load_config,
+        )
 
         _GLOBAL_CONFIG.clear()
         _GLOBAL_CONFIG.update(DEFAULTS)  # descriptions = {}
@@ -534,8 +611,14 @@ class TestEnvVarFallback:
 
     def test_env_var_used_when_config_key_absent(self, monkeypatch, caplog):
         """Should use env var value when config key not set."""
-        from src.jcodemunch_mcp.config import load_config, get, _GLOBAL_CONFIG, _DEPRECATED_ENV_VARS_LOGGED
         import logging
+
+        from src.jcodemunch_mcp.config import (
+            _DEPRECATED_ENV_VARS_LOGGED,
+            _GLOBAL_CONFIG,
+            get,
+            load_config,
+        )
 
         _GLOBAL_CONFIG.clear()
         _DEPRECATED_ENV_VARS_LOGGED.clear()
@@ -556,15 +639,20 @@ class TestEnvVarFallback:
 
     def test_warning_logged_once_per_deprecated_var(self, monkeypatch, caplog):
         """Should log one warning per deprecated env var found."""
-        from src.jcodemunch_mcp.config import load_config, _GLOBAL_CONFIG, _DEPRECATED_ENV_VARS_LOGGED
         import logging
+
+        from src.jcodemunch_mcp.config import (
+            _DEPRECATED_ENV_VARS_LOGGED,
+            _GLOBAL_CONFIG,
+            load_config,
+        )
 
         _GLOBAL_CONFIG.clear()
         _DEPRECATED_ENV_VARS_LOGGED.clear()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.jsonc"
-            config_path.write_text('{}')  # Empty config
+            config_path.write_text("{}")  # Empty config
 
             monkeypatch.setenv("JCODEMUNCH_MAX_FOLDER_FILES", "5000")
             monkeypatch.setenv("JCODEMUNCH_MAX_INDEX_FILES", "15000")
@@ -573,7 +661,9 @@ class TestEnvVarFallback:
                 load_config(tmpdir)
 
             # Should have warnings (one per env var)
-            warning_count = sum(1 for rec in caplog.records if rec.levelname == "WARNING")
+            warning_count = sum(
+                1 for rec in caplog.records if rec.levelname == "WARNING"
+            )
             assert warning_count >= 2
 
             # Each warning should mention v2.0 removal
@@ -583,8 +673,14 @@ class TestEnvVarFallback:
 
     def test_no_warning_when_config_key_present(self, monkeypatch, caplog):
         """Should NOT log warning when config key is present."""
-        from src.jcodemunch_mcp.config import load_config, get, _GLOBAL_CONFIG, _DEPRECATED_ENV_VARS_LOGGED
         import logging
+
+        from src.jcodemunch_mcp.config import (
+            _DEPRECATED_ENV_VARS_LOGGED,
+            _GLOBAL_CONFIG,
+            get,
+            load_config,
+        )
 
         _GLOBAL_CONFIG.clear()
         _DEPRECATED_ENV_VARS_LOGGED.clear()
@@ -609,13 +705,14 @@ class TestEnvVarFallback:
         self, monkeypatch, caplog
     ):
         """Should use trusted_folders env var fallback when config key not set."""
-        from src.jcodemunch_mcp.config import (
-            load_config,
-            get,
-            _GLOBAL_CONFIG,
-            _DEPRECATED_ENV_VARS_LOGGED,
-        )
         import logging
+
+        from src.jcodemunch_mcp.config import (
+            _DEPRECATED_ENV_VARS_LOGGED,
+            _GLOBAL_CONFIG,
+            get,
+            load_config,
+        )
 
         _GLOBAL_CONFIG.clear()
         _DEPRECATED_ENV_VARS_LOGGED.clear()
@@ -633,13 +730,14 @@ class TestEnvVarFallback:
 
     def test_trusted_folders_config_wins_over_env_var(self, monkeypatch, caplog):
         """Explicit trusted_folders config should take precedence over env fallback."""
-        from src.jcodemunch_mcp.config import (
-            load_config,
-            get,
-            _GLOBAL_CONFIG,
-            _DEPRECATED_ENV_VARS_LOGGED,
-        )
         import logging
+
+        from src.jcodemunch_mcp.config import (
+            _DEPRECATED_ENV_VARS_LOGGED,
+            _GLOBAL_CONFIG,
+            get,
+            load_config,
+        )
 
         _GLOBAL_CONFIG.clear()
         _DEPRECATED_ENV_VARS_LOGGED.clear()
@@ -672,8 +770,14 @@ class TestEnvVarFallback:
         self, monkeypatch, caplog, env_key, env_value, expected_key, expected_value
     ):
         """Legacy encoding env vars should map through config fallback."""
-        from src.jcodemunch_mcp.config import load_config, get, _GLOBAL_CONFIG, _DEPRECATED_ENV_VARS_LOGGED
         import logging
+
+        from src.jcodemunch_mcp.config import (
+            _DEPRECATED_ENV_VARS_LOGGED,
+            _GLOBAL_CONFIG,
+            get,
+            load_config,
+        )
 
         _GLOBAL_CONFIG.clear()
         _DEPRECATED_ENV_VARS_LOGGED.clear()
@@ -692,10 +796,20 @@ class TestEnvVarFallback:
 
 
 class TestTrustedFoldersConfig:
-    @pytest.mark.parametrize("text,check", [
-        ('{"trusted_folders": ["work"]}', "trusted_folders entry 'work' must be an absolute path"),
-        ('{"trusted_folders": [123]}', "Config key 'trusted_folders' has invalid type"),
-    ], ids=["relative_entry", "non_string_entry"])
+    @pytest.mark.parametrize(
+        "text,check",
+        [
+            (
+                '{"trusted_folders": ["work"]}',
+                "trusted_folders entry 'work' must be an absolute path",
+            ),
+            (
+                '{"trusted_folders": [123]}',
+                "Config key 'trusted_folders' has invalid type",
+            ),
+        ],
+        ids=["relative_entry", "non_string_entry"],
+    )
     def test_validate_trusted_folders_rejects(self, tmp_path, text, check):
         """validate_config should reject invalid trusted_folders entries."""
         from src.jcodemunch_mcp.config import validate_config
@@ -706,12 +820,16 @@ class TestTrustedFoldersConfig:
         issues = validate_config(str(config_path))
         assert any(check in issue for issue in issues)
 
-    @pytest.mark.parametrize("input_folders,expected_count", [
-        (["/work"], 1),
-    ], ids=["valid_single"])
+    @pytest.mark.parametrize(
+        "input_folders,expected_count",
+        [
+            (["/work"], 1),
+        ],
+        ids=["valid_single"],
+    )
     def test_load_config_trusted_folders(self, tmp_path, input_folders, expected_count):
         """load_config should keep valid trusted_folders."""
-        from src.jcodemunch_mcp.config import load_config, get, _GLOBAL_CONFIG
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, get, load_config
 
         _GLOBAL_CONFIG.clear()
 
@@ -725,20 +843,29 @@ class TestTrustedFoldersConfig:
         assert len(result) == expected_count
         assert _platform_path("/work").expanduser() in result
 
-    @pytest.mark.parametrize("folders_json,expected", [
-        ('["./work"]', lambda root: [(root / "work").resolve()]),
-        ('["./../../outside"]', lambda root: []),  # Escapes project
-        ('["./subdir/../work"]', lambda root: [(root / "work").resolve()]),  # Normalized but stays in project
-    ], ids=["expand_dot_slash", "reject_escape", "allow_normalized"])
-    def test_project_config_dot_slash_resolution(self, tmp_path, folders_json, expected):
+    @pytest.mark.parametrize(
+        "folders_json,expected",
+        [
+            ('["./work"]', lambda root: [(root / "work").resolve()]),
+            ('["./../../outside"]', lambda root: []),  # Escapes project
+            (
+                '["./subdir/../work"]',
+                lambda root: [(root / "work").resolve()],
+            ),  # Normalized but stays in project
+        ],
+        ids=["expand_dot_slash", "reject_escape", "allow_normalized"],
+    )
+    def test_project_config_dot_slash_resolution(
+        self, tmp_path, folders_json, expected
+    ):
         """Project config './' entries should expand from project root with escape detection."""
         from src.jcodemunch_mcp.config import (
+            _GLOBAL_CONFIG,
+            _PROJECT_CONFIG_HASHES,
+            _PROJECT_CONFIGS,
+            get,
             load_config,
             load_project_config,
-            get,
-            _GLOBAL_CONFIG,
-            _PROJECT_CONFIGS,
-            _PROJECT_CONFIG_HASHES,
         )
 
         _GLOBAL_CONFIG.clear()
@@ -761,7 +888,7 @@ class TestTrustedFoldersConfig:
 
     def test_load_config_raises_for_relative_trusted_folders(self, tmp_path):
         """Non-rooted trusted_folders entries should raise during config load."""
-        from src.jcodemunch_mcp.config import load_config, get, _GLOBAL_CONFIG, DEFAULTS
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, DEFAULTS, get, load_config
 
         _GLOBAL_CONFIG.clear()
 
@@ -772,20 +899,24 @@ class TestTrustedFoldersConfig:
 
         assert get("trusted_folders") == DEFAULTS["trusted_folders"]
 
-    @pytest.mark.parametrize("folders_json,expected", [
-        ('["."]', lambda root: [root.resolve()]),
-        ('["work"]', lambda root: [(root / "work").resolve()]),
-        ('["../outside"]', lambda root: []),  # Escapes without ./
-    ], ids=["dot_resolves", "implicit_relative", "implicit_escape"])
+    @pytest.mark.parametrize(
+        "folders_json,expected",
+        [
+            ('["."]', lambda root: [root.resolve()]),
+            ('["work"]', lambda root: [(root / "work").resolve()]),
+            ('["../outside"]', lambda root: []),  # Escapes without ./
+        ],
+        ids=["dot_resolves", "implicit_relative", "implicit_escape"],
+    )
     def test_project_config_path_resolution(self, tmp_path, folders_json, expected):
         """Project config paths should resolve relative to project root."""
         from src.jcodemunch_mcp.config import (
+            _GLOBAL_CONFIG,
+            _PROJECT_CONFIG_HASHES,
+            _PROJECT_CONFIGS,
+            get,
             load_config,
             load_project_config,
-            get,
-            _GLOBAL_CONFIG,
-            _PROJECT_CONFIGS,
-            _PROJECT_CONFIG_HASHES,
         )
 
         _GLOBAL_CONFIG.clear()
@@ -809,12 +940,12 @@ class TestTrustedFoldersConfig:
     def test_project_config_implicit_relative_escape_rejected(self, tmp_path):
         """Project config '../outside' (without ./ prefix) should be rejected."""
         from src.jcodemunch_mcp.config import (
+            _GLOBAL_CONFIG,
+            _PROJECT_CONFIG_HASHES,
+            _PROJECT_CONFIGS,
+            get,
             load_config,
             load_project_config,
-            get,
-            _GLOBAL_CONFIG,
-            _PROJECT_CONFIGS,
-            _PROJECT_CONFIG_HASHES,
         )
 
         _GLOBAL_CONFIG.clear()
@@ -838,12 +969,12 @@ class TestTrustedFoldersConfig:
     def test_project_config_multiple_mixed_entries(self, tmp_path):
         """Project config can have multiple entries of different types."""
         from src.jcodemunch_mcp.config import (
+            _GLOBAL_CONFIG,
+            _PROJECT_CONFIG_HASHES,
+            _PROJECT_CONFIGS,
+            get,
             load_config,
             load_project_config,
-            get,
-            _GLOBAL_CONFIG,
-            _PROJECT_CONFIGS,
-            _PROJECT_CONFIG_HASHES,
         )
 
         _GLOBAL_CONFIG.clear()
@@ -875,12 +1006,12 @@ class TestTrustedFoldersConfig:
     def test_project_config_overrides_global_trusted_folders(self, tmp_path):
         """Project trusted_folders should override global config, not merge."""
         from src.jcodemunch_mcp.config import (
+            _GLOBAL_CONFIG,
+            _PROJECT_CONFIG_HASHES,
+            _PROJECT_CONFIGS,
+            get,
             load_config,
             load_project_config,
-            get,
-            _GLOBAL_CONFIG,
-            _PROJECT_CONFIGS,
-            _PROJECT_CONFIG_HASHES,
         )
 
         _GLOBAL_CONFIG.clear()
@@ -908,12 +1039,12 @@ class TestTrustedFoldersConfig:
     def test_project_config_empty_list_overrides_global(self, tmp_path):
         """Empty project trusted_folders should clear the setting for that project."""
         from src.jcodemunch_mcp.config import (
+            _GLOBAL_CONFIG,
+            _PROJECT_CONFIG_HASHES,
+            _PROJECT_CONFIGS,
+            get,
             load_config,
             load_project_config,
-            get,
-            _GLOBAL_CONFIG,
-            _PROJECT_CONFIGS,
-            _PROJECT_CONFIG_HASHES,
         )
 
         _GLOBAL_CONFIG.clear()
@@ -934,12 +1065,19 @@ class TestTrustedFoldersConfig:
         repo_key = str(project_root.resolve())
         assert get("trusted_folders", repo=repo_key) == []
 
-    @pytest.mark.parametrize("folders_json,expected_count", [
-        (f'["{_platform_path_str("/work")}", "{_platform_path_str("/work")}", "{_platform_path_str("/work")}"]', 1),
-    ], ids=["global_dedup"])
+    @pytest.mark.parametrize(
+        "folders_json,expected_count",
+        [
+            (
+                f'["{_platform_path_str("/work")}", "{_platform_path_str("/work")}", "{_platform_path_str("/work")}"]',
+                1,
+            ),
+        ],
+        ids=["global_dedup"],
+    )
     def test_global_config_deduplicates(self, tmp_path, folders_json, expected_count):
         """Global config should deduplicate identical trusted_folders entries."""
-        from src.jcodemunch_mcp.config import load_config, get, _GLOBAL_CONFIG
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, get, load_config
 
         _GLOBAL_CONFIG.clear()
 
@@ -951,19 +1089,26 @@ class TestTrustedFoldersConfig:
         result = get("trusted_folders")
         assert len(result) == expected_count
 
-    @pytest.mark.parametrize("folders_json,expected_count", [
-        ('[".", "./", "work", "./work"]', 2),
-        (f'["{_platform_path_str("/work")}", "{_platform_path_str("/work")}", "{_platform_path_str("/work")}"]', 1),
-    ], ids=["project_equiv_dedup", "project_absolute_dedup"])
+    @pytest.mark.parametrize(
+        "folders_json,expected_count",
+        [
+            ('[".", "./", "work", "./work"]', 2),
+            (
+                f'["{_platform_path_str("/work")}", "{_platform_path_str("/work")}", "{_platform_path_str("/work")}"]',
+                1,
+            ),
+        ],
+        ids=["project_equiv_dedup", "project_absolute_dedup"],
+    )
     def test_project_config_deduplicates(self, tmp_path, folders_json, expected_count):
         """Project config should deduplicate equivalent and absolute duplicate entries."""
         from src.jcodemunch_mcp.config import (
+            _GLOBAL_CONFIG,
+            _PROJECT_CONFIG_HASHES,
+            _PROJECT_CONFIGS,
+            get,
             load_config,
             load_project_config,
-            get,
-            _GLOBAL_CONFIG,
-            _PROJECT_CONFIGS,
-            _PROJECT_CONFIG_HASHES,
         )
 
         _GLOBAL_CONFIG.clear()
@@ -994,7 +1139,7 @@ class TestConfigValidation:
 
     def test_validate_valid_config_returns_empty(self):
         """Should return no issues for a valid config."""
-        from src.jcodemunch_mcp.config import validate_config, _GLOBAL_CONFIG
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, validate_config
 
         _GLOBAL_CONFIG.clear()
 
@@ -1004,14 +1149,21 @@ class TestConfigValidation:
             issues = validate_config(str(config_path))
             assert issues == []
 
-    @pytest.mark.parametrize("text,check", [
-        ('{"max_folder_files": }', "parse"),
-        ('{"max_folder_files": "not_an_int"}', lambda i: "type" in i.lower() or "invalid" in i.lower()),
-        ('{"max_folder_files": 5000, "unknown_key": true}', "unknown"),
-    ], ids=["invalid_json", "type_mismatch", "unknown_key"])
+    @pytest.mark.parametrize(
+        "text,check",
+        [
+            ('{"max_folder_files": }', "parse"),
+            (
+                '{"max_folder_files": "not_an_int"}',
+                lambda i: "type" in i.lower() or "invalid" in i.lower(),
+            ),
+            ('{"max_folder_files": 5000, "unknown_key": true}', "unknown"),
+        ],
+        ids=["invalid_json", "type_mismatch", "unknown_key"],
+    )
     def test_validate_errors_and_warnings(self, text, check):
         """Should report parse errors, type mismatches, and unknown keys."""
-        from src.jcodemunch_mcp.config import validate_config, _GLOBAL_CONFIG
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, validate_config
 
         _GLOBAL_CONFIG.clear()
 
@@ -1026,7 +1178,7 @@ class TestConfigValidation:
 
     def test_validate_missing_file_returns_error(self):
         """Should report when config file is missing."""
-        from src.jcodemunch_mcp.config import validate_config, _GLOBAL_CONFIG
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, validate_config
 
         _GLOBAL_CONFIG.clear()
 
@@ -1035,12 +1187,28 @@ class TestConfigValidation:
             issues = validate_config(str(missing))
             assert any("not found" in i.lower() for i in issues)
 
-    @pytest.mark.parametrize("value", [
-        "true", "false", '"true"', '"false"', '"auto"', '"AUTO"',
-    ], ids=["bool_true", "bool_false", "str_true", "str_false", "str_auto", "str_auto_upper"])
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "true",
+            "false",
+            '"true"',
+            '"false"',
+            '"auto"',
+            '"AUTO"',
+        ],
+        ids=[
+            "bool_true",
+            "bool_false",
+            "str_true",
+            "str_false",
+            "str_auto",
+            "str_auto_upper",
+        ],
+    )
     def test_validate_use_ai_summaries_valid_values(self, value):
         """Valid use_ai_summaries values should pass validation."""
-        from src.jcodemunch_mcp.config import validate_config, _GLOBAL_CONFIG
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, validate_config
 
         _GLOBAL_CONFIG.clear()
 
@@ -1050,12 +1218,17 @@ class TestConfigValidation:
             issues = validate_config(str(config_path))
             assert issues == []
 
-    @pytest.mark.parametrize("value", [
-        '"maybe"', '"yes"',
-    ], ids=["maybe", "yes"])
+    @pytest.mark.parametrize(
+        "value",
+        [
+            '"maybe"',
+            '"yes"',
+        ],
+        ids=["maybe", "yes"],
+    )
     def test_validate_use_ai_summaries_rejected_values(self, value):
         """Invalid use_ai_summaries values should be rejected."""
-        from src.jcodemunch_mcp.config import validate_config, _GLOBAL_CONFIG
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, validate_config
 
         _GLOBAL_CONFIG.clear()
 
@@ -1067,8 +1240,8 @@ class TestConfigValidation:
             assert "use_ai_summaries" in issues[0]
 
     def test_validate_use_ai_summaries_string_yes_rejected(self):
-        """"yes" should be rejected as invalid use_ai_summaries value."""
-        from src.jcodemunch_mcp.config import validate_config, _GLOBAL_CONFIG
+        """ "yes" should be rejected as invalid use_ai_summaries value."""
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, validate_config
 
         _GLOBAL_CONFIG.clear()
 
@@ -1098,6 +1271,7 @@ class TestServerConfigCheck:
             monkeypatch.setenv("CODE_INDEX_PATH", tmpdir)
 
             from src.jcodemunch_mcp.server import _run_config
+
             with pytest.raises(SystemExit) as exc_info:
                 _run_config(check=True)
             assert exc_info.value.code == 1
@@ -1120,6 +1294,7 @@ class TestServerConfigCheck:
             monkeypatch.setenv("CODE_INDEX_PATH", tmpdir)
 
             from src.jcodemunch_mcp.server import _run_config
+
             with pytest.raises(SystemExit) as exc_info:
                 _run_config(check=True)
             assert exc_info.value.code == 1
@@ -1143,6 +1318,7 @@ class TestServerConfigCheck:
             # Provide a CLAUDE.md that mentions all canonical tools so the
             # drift check passes without flagging the test as an issue.
             from src.jcodemunch_mcp.server import _CANONICAL_TOOL_NAMES
+
             claude_dir = Path(tmpdir) / ".claude"
             claude_dir.mkdir()
             (claude_dir / "CLAUDE.md").write_text(
@@ -1151,6 +1327,7 @@ class TestServerConfigCheck:
             monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path(tmpdir)))
 
             from src.jcodemunch_mcp.server import _run_config
+
             _run_config(check=True)
 
             captured = capsys.readouterr().out
@@ -1171,6 +1348,7 @@ class TestServerConfigCheckStorageProbe:
     def _setup_valid_env(self, tmpdir, monkeypatch):
         """Valid config + isolated home so only the storage probe varies."""
         from src.jcodemunch_mcp.config import _GLOBAL_CONFIG
+
         _GLOBAL_CONFIG.clear()
         config_path = Path(tmpdir) / "config.jsonc"
         config_path.write_text('{"max_folder_files": 5000}')
@@ -1185,6 +1363,7 @@ class TestServerConfigCheckStorageProbe:
             self._setup_valid_env(tmpdir, monkeypatch)
 
             from src.jcodemunch_mcp.server import _run_config
+
             _run_config(check=True)  # no SystemExit
 
             captured = capsys.readouterr().out
@@ -1194,6 +1373,7 @@ class TestServerConfigCheckStorageProbe:
     def test_confirmed_non_writable_storage_still_fails(self, capsys, monkeypatch):
         """A confirmed non-writable path (non-EPERM/EACCES OSError) exits 1."""
         import errno as _errno
+
         with tempfile.TemporaryDirectory() as tmpdir:
             self._setup_valid_env(tmpdir, monkeypatch)
 
@@ -1207,6 +1387,7 @@ class TestServerConfigCheckStorageProbe:
             monkeypatch.setattr(Path, "write_text", fake_write_text)
 
             from src.jcodemunch_mcp.server import _run_config
+
             with pytest.raises(SystemExit) as exc_info:
                 _run_config(check=True)
             assert exc_info.value.code == 1
@@ -1219,6 +1400,7 @@ class TestServerConfigCheckStorageProbe:
         """A mocked PermissionError(EPERM) reports a host-confirmation warning
         rather than a confirmed storage failure, and does NOT exit 1."""
         import errno as _errno
+
         with tempfile.TemporaryDirectory() as tmpdir:
             self._setup_valid_env(tmpdir, monkeypatch)
 
@@ -1232,6 +1414,7 @@ class TestServerConfigCheckStorageProbe:
             monkeypatch.setattr(Path, "write_text", fake_write_text)
 
             from src.jcodemunch_mcp.server import _run_config
+
             _run_config(check=True)  # no SystemExit
 
             captured = capsys.readouterr().out
@@ -1240,10 +1423,13 @@ class TestServerConfigCheckStorageProbe:
             assert "index storage not writable" not in captured.lower()
             assert "issue(s) found" not in captured.lower()
 
-    def test_sandbox_probe_tells_operator_to_rerun_outside_sandbox(self, capsys, monkeypatch):
+    def test_sandbox_probe_tells_operator_to_rerun_outside_sandbox(
+        self, capsys, monkeypatch
+    ):
         """The host-confirmation output instructs rerunning outside a sandbox
         before repairing or reporting storage drift."""
         import errno as _errno
+
         with tempfile.TemporaryDirectory() as tmpdir:
             self._setup_valid_env(tmpdir, monkeypatch)
 
@@ -1257,6 +1443,7 @@ class TestServerConfigCheckStorageProbe:
             monkeypatch.setattr(Path, "write_text", fake_write_text)
 
             from src.jcodemunch_mcp.server import _run_config
+
             _run_config(check=True)
 
             captured = capsys.readouterr().out.lower()
@@ -1273,6 +1460,7 @@ class TestConfigDisplayHonorsProjectOverride:
 
     def test_project_override_visible_in_config_output(self, capsys, monkeypatch):
         from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, _PROJECT_CONFIGS
+
         _GLOBAL_CONFIG.clear()
         _PROJECT_CONFIGS.clear()
 
@@ -1297,6 +1485,7 @@ class TestConfigDisplayHonorsProjectOverride:
             monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: project))
 
             from src.jcodemunch_mcp.server import _run_config
+
             _run_config(check=False)
 
             captured = capsys.readouterr().out
@@ -1305,8 +1494,7 @@ class TestConfigDisplayHonorsProjectOverride:
             # similar numbers (watch_debounce_ms defaults to 2000) so we have
             # to match the specific row.
             mff_lines = [
-                line for line in captured.splitlines()
-                if "max_folder_files" in line
+                line for line in captured.splitlines() if "max_folder_files" in line
             ]
             assert mff_lines, f"max_folder_files row missing; got: {captured}"
             row = mff_lines[0]
@@ -1322,6 +1510,7 @@ class TestConfigDisplayHonorsProjectOverride:
 
     def test_check_section_reports_project_config_loaded(self, capsys, monkeypatch):
         from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, _PROJECT_CONFIGS
+
         _GLOBAL_CONFIG.clear()
         _PROJECT_CONFIGS.clear()
 
@@ -1343,12 +1532,14 @@ class TestConfigDisplayHonorsProjectOverride:
 
             # Skip CLAUDE.md drift check noise by writing the canonical tool list.
             from src.jcodemunch_mcp.server import _CANONICAL_TOOL_NAMES
+
             (tmp / ".claude").mkdir()
             (tmp / ".claude" / "CLAUDE.md").write_text(
                 "\n".join(_CANONICAL_TOOL_NAMES), encoding="utf-8"
             )
 
             from src.jcodemunch_mcp.server import _run_config
+
             _run_config(check=True)
 
             captured = capsys.readouterr().out
@@ -1361,6 +1552,7 @@ class TestConfigDisplayHonorsProjectOverride:
         """When cwd has no .jcodemunch.jsonc, output is unchanged from
         pre-fix behavior — global values, no [project] tags."""
         from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, _PROJECT_CONFIGS
+
         _GLOBAL_CONFIG.clear()
         _PROJECT_CONFIGS.clear()
 
@@ -1381,6 +1573,7 @@ class TestConfigDisplayHonorsProjectOverride:
             monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: project))
 
             from src.jcodemunch_mcp.server import _run_config
+
             _run_config(check=False)
 
             captured = capsys.readouterr().out
@@ -1395,10 +1588,13 @@ class TestConfigReportGrouping:
 
     def test_every_entry_has_group_and_description(self):
         from src.jcodemunch_mcp.config import config_report
+
         report = config_report()
         assert report, "config_report should not be empty"
         for entry in report:
-            assert "group" in entry and isinstance(entry["group"], str) and entry["group"]
+            assert (
+                "group" in entry and isinstance(entry["group"], str) and entry["group"]
+            )
             assert "description" in entry and isinstance(entry["description"], str)
 
     def test_no_key_falls_into_other_or_missing_description(self):
@@ -1412,8 +1608,10 @@ class TestConfigReportGrouping:
         rows. Fails loudly if a future key is added to DEFAULTS without a
         matching template entry."""
         from src.jcodemunch_mcp.config import config_report
+
         offenders = [
-            e["key"] for e in config_report()
+            e["key"]
+            for e in config_report()
             if e["group"] == "Other" or not e["description"]
         ]
         assert not offenders, (
@@ -1423,7 +1621,12 @@ class TestConfigReportGrouping:
         )
 
     def test_known_keys_map_to_expected_sections(self):
-        from src.jcodemunch_mcp.config import config_report, _config_meta, generate_template
+        from src.jcodemunch_mcp.config import (
+            _config_meta,
+            config_report,
+            generate_template,
+        )
+
         groups = {e["key"]: e["group"] for e in config_report()}
         # report groups agree with a direct parse of the template
         meta = _config_meta(generate_template())
@@ -1435,12 +1638,14 @@ class TestConfigReportGrouping:
 
     def test_descriptions_present_where_template_documents_them(self):
         from src.jcodemunch_mcp.config import config_report
+
         descs = {e["key"]: e["description"] for e in config_report()}
         # use_ai_summaries carries an inline comment in the template
         assert "summaries" in descs["use_ai_summaries"].lower()
 
     def test_config_meta_parses_sections_and_comments(self):
         from src.jcodemunch_mcp.config import _config_meta
+
         template = (
             "{\n"
             "  // === Indexing ===\n"
@@ -1461,6 +1666,7 @@ class TestConfigReportGrouping:
         line ends a block, so a subsequent comment is a lead block for the
         next key."""
         from src.jcodemunch_mcp.config import _config_meta
+
         template = (
             "{\n"
             "  // === Section ===\n"
@@ -1486,6 +1692,7 @@ class TestConfigReportGrouping:
         are documented with below-key blocks in the real template and were
         each mis-described with the *next* key's comment."""
         from src.jcodemunch_mcp.config import _config_meta, generate_template
+
         meta = _config_meta(generate_template())
         assert "sentence-transformers" in meta["embed_model"][1].lower()
         assert "remote llm" in meta["allow_remote_summarizer"][1].lower()
@@ -1502,6 +1709,7 @@ class TestSummarizerModelDisplay:
 
     def _setup(self, monkeypatch, tmp, project_config: dict, env_vars: dict):
         from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, _PROJECT_CONFIGS
+
         _GLOBAL_CONFIG.clear()
         _PROJECT_CONFIGS.clear()
 
@@ -1513,6 +1721,7 @@ class TestSummarizerModelDisplay:
         project.mkdir()
         if project_config:
             import json
+
             (project / ".jcodemunch.jsonc").write_text(
                 json.dumps(project_config), encoding="utf-8"
             )
@@ -1520,11 +1729,19 @@ class TestSummarizerModelDisplay:
         monkeypatch.setenv("CODE_INDEX_PATH", str(storage))
         monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp))
         monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: project))
-        for k in ("ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_BASE",
-                  "MINIMAX_API_KEY", "ZHIPUAI_API_KEY", "OPENROUTER_API_KEY",
-                  "OPENAI_MODEL", "ANTHROPIC_MODEL", "GOOGLE_MODEL",
-                  "JCODEMUNCH_SUMMARIZER_PROVIDER",
-                  "JCODEMUNCH_SUMMARIZER_MODEL"):
+        for k in (
+            "ANTHROPIC_API_KEY",
+            "GOOGLE_API_KEY",
+            "OPENAI_API_BASE",
+            "MINIMAX_API_KEY",
+            "ZHIPUAI_API_KEY",
+            "OPENROUTER_API_KEY",
+            "OPENAI_MODEL",
+            "ANTHROPIC_MODEL",
+            "GOOGLE_MODEL",
+            "JCODEMUNCH_SUMMARIZER_PROVIDER",
+            "JCODEMUNCH_SUMMARIZER_MODEL",
+        ):
             monkeypatch.delenv(k, raising=False)
         for k, v in env_vars.items():
             monkeypatch.setenv(k, v)
@@ -1536,11 +1753,13 @@ class TestSummarizerModelDisplay:
             self._setup(monkeypatch, tmp, project_config={}, env_vars={})
             # Set global summarizer_model via the storage config.jsonc.
             import json
+
             (tmp / "storage" / "config.jsonc").write_text(
                 json.dumps({"summarizer_model": "Qwen3.6-Plus"}), encoding="utf-8"
             )
 
             from src.jcodemunch_mcp.server import _run_config
+
             _run_config(check=False)
 
             captured = capsys.readouterr().out
@@ -1562,12 +1781,14 @@ class TestSummarizerModelDisplay:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
             self._setup(
-                monkeypatch, tmp,
+                monkeypatch,
+                tmp,
                 project_config={"summarizer_model": "Qwen3.6-Plus"},
                 env_vars={},
             )
 
             from src.jcodemunch_mcp.server import _run_config
+
             _run_config(check=False)
 
             captured = capsys.readouterr().out
@@ -1592,16 +1813,19 @@ class TestSummarizerModelDisplay:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
             self._setup(
-                monkeypatch, tmp,
+                monkeypatch,
+                tmp,
                 project_config={},
                 env_vars={"OPENAI_API_BASE": "http://localhost:11434/v1"},
             )
             import json
+
             (tmp / "storage" / "config.jsonc").write_text(
                 json.dumps({"summarizer_model": "Qwen3.6-Plus"}), encoding="utf-8"
             )
 
             from src.jcodemunch_mcp.server import _run_config
+
             _run_config(check=False)
 
             captured = capsys.readouterr().out
@@ -1624,6 +1848,7 @@ class TestClaudeMdDriftCheck:
     def _run_check(self, monkeypatch, tmpdir, claude_md_content=None):
         """Helper: set up temp dir and run config --check."""
         from src.jcodemunch_mcp.config import _GLOBAL_CONFIG
+
         _GLOBAL_CONFIG.clear()
 
         config_path = Path(tmpdir) / "config.jsonc"
@@ -1637,14 +1862,17 @@ class TestClaudeMdDriftCheck:
             (claude_dir / "CLAUDE.md").write_text(claude_md_content, encoding="utf-8")
 
         from src.jcodemunch_mcp.server import _run_config
+
         return _run_config
 
     def test_check_passes_when_all_tools_present(self, capsys, monkeypatch):
         """check should pass when CLAUDE.md mentions all canonical tools."""
         from src.jcodemunch_mcp.server import _CANONICAL_TOOL_NAMES
+
         with tempfile.TemporaryDirectory() as tmpdir:
-            fn = self._run_check(monkeypatch, tmpdir,
-                                 claude_md_content="\n".join(_CANONICAL_TOOL_NAMES))
+            fn = self._run_check(
+                monkeypatch, tmpdir, claude_md_content="\n".join(_CANONICAL_TOOL_NAMES)
+            )
             fn(check=True)
             out = capsys.readouterr().out
             assert "All checks passed" in out
@@ -1653,8 +1881,9 @@ class TestClaudeMdDriftCheck:
     def test_check_warns_when_tools_missing(self, capsys, monkeypatch):
         """check should warn and exit 1 when CLAUDE.md is missing tools."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            fn = self._run_check(monkeypatch, tmpdir,
-                                 claude_md_content="list_repos search_symbols")
+            fn = self._run_check(
+                monkeypatch, tmpdir, claude_md_content="list_repos search_symbols"
+            )
             with pytest.raises(SystemExit) as exc:
                 fn(check=True)
             assert exc.value.code == 1
@@ -1662,13 +1891,16 @@ class TestClaudeMdDriftCheck:
             assert "not mentioned in CLAUDE.md" in out
             assert "claude-md --generate" in out
 
-    def test_check_passes_with_one_line_jcodemunch_guide_form(self, capsys, monkeypatch):
+    def test_check_passes_with_one_line_jcodemunch_guide_form(
+        self, capsys, monkeypatch
+    ):
         """check should pass when CLAUDE.md uses the documented one-line form
         ('Call the jcodemunch_guide tool ...') without listing every tool — the
         guide returns the version-pinned policy at runtime. Issue #271."""
         with tempfile.TemporaryDirectory() as tmpdir:
             fn = self._run_check(
-                monkeypatch, tmpdir,
+                monkeypatch,
+                tmpdir,
                 claude_md_content=(
                     "Call the jcodemunch_guide tool and "
                     "strictly follow its instructions.\n"
@@ -1692,7 +1924,9 @@ class TestClaudeMdDriftCheck:
                 out_lines = capsys.readouterr().out.splitlines()
             except SystemExit:
                 out_lines = capsys.readouterr().out.splitlines()
-            assert any("CLAUDE.md not found" in l or "not mentioned" in l for l in out_lines)
+            assert any(
+                "CLAUDE.md not found" in l or "not mentioned" in l for l in out_lines
+            )
 
 
 class TestClaudeMdGenerate:
@@ -1700,7 +1934,8 @@ class TestClaudeMdGenerate:
 
     def test_generate_full_snippet(self, capsys, monkeypatch):
         """--generate outputs all canonical tool names."""
-        from src.jcodemunch_mcp.server import _run_claude_md, _CANONICAL_TOOL_NAMES
+        from src.jcodemunch_mcp.server import _CANONICAL_TOOL_NAMES, _run_claude_md
+
         _run_claude_md(generate=True, fmt="full")
         out = capsys.readouterr().out
         for tool in _CANONICAL_TOOL_NAMES:
@@ -1708,10 +1943,13 @@ class TestClaudeMdGenerate:
 
     def test_generate_append_reports_missing(self, monkeypatch, tmp_path, capsys):
         """--format=append outputs only tools absent from the existing CLAUDE.md."""
-        from src.jcodemunch_mcp.server import _run_claude_md, _CANONICAL_TOOL_NAMES
+        from src.jcodemunch_mcp.server import _CANONICAL_TOOL_NAMES, _run_claude_md
+
         claude_dir = tmp_path / ".claude"
         claude_dir.mkdir()
-        (claude_dir / "CLAUDE.md").write_text("list_repos search_symbols", encoding="utf-8")
+        (claude_dir / "CLAUDE.md").write_text(
+            "list_repos search_symbols", encoding="utf-8"
+        )
         monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
 
         _run_claude_md(generate=True, fmt="append")
@@ -1724,7 +1962,8 @@ class TestClaudeMdGenerate:
 
     def test_generate_append_silent_when_current(self, monkeypatch, tmp_path, capsys):
         """--format=append prints nothing to stdout when CLAUDE.md is up to date."""
-        from src.jcodemunch_mcp.server import _run_claude_md, _CANONICAL_TOOL_NAMES
+        from src.jcodemunch_mcp.server import _CANONICAL_TOOL_NAMES, _run_claude_md
+
         claude_dir = tmp_path / ".claude"
         claude_dir.mkdir()
         (claude_dir / "CLAUDE.md").write_text(
@@ -1746,14 +1985,22 @@ class TestClaudeMdGenerate:
         The reverse (a built tool absent from the canonical list) is the error.
         """
         import src.jcodemunch_mcp.config as cfg_mod
-        monkeypatch.setattr(cfg_mod, "get", lambda key, default=None: (
-            [] if key == "disabled_tools" else
-            "full" if key == "tool_profile" else
-            False if key == "compact_schemas" else
-            None if key in ("languages", "meta_fields", "descriptions") else
-            default
-        ))
+
+        monkeypatch.setattr(
+            cfg_mod,
+            "get",
+            lambda key, default=None: (
+                []
+                if key == "disabled_tools"
+                else False
+                if key == "compact_schemas"
+                else None
+                if key in ("languages", "meta_fields", "descriptions")
+                else default
+            ),
+        )
         from src.jcodemunch_mcp.server import _CANONICAL_TOOL_NAMES, _build_tools_list
+
         built_names = {t.name for t in _build_tools_list()}
         canonical = set(_CANONICAL_TOOL_NAMES)
         missing_from_canonical = built_names - canonical
@@ -1769,7 +2016,9 @@ class TestLoadConfigWiredIntoMain:
     """Test that load_config() is called during server startup."""
 
     @pytest.mark.asyncio
-    async def test_main_calls_load_config_for_serve_command(self, monkeypatch, tmp_path):
+    async def test_main_calls_load_config_for_serve_command(
+        self, monkeypatch, tmp_path
+    ):
         """load_config should be called when serve subcommand starts."""
         from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, DEFAULTS
 
@@ -1786,6 +2035,7 @@ class TestLoadConfigWiredIntoMain:
 
         # Import fresh — need to get the original reference before patching
         import src.jcodemunch_mcp.config as cfg_module
+
         real_load = cfg_module.load_config
 
         def tracked_load(*args, **kwargs):
@@ -1808,11 +2058,14 @@ class TestLoadConfigWiredIntoMain:
 
         # Also patch the MCP server.run to prevent actual startup
         import src.jcodemunch_mcp.server as server_module
+
         async def fake_server_run(*args, **kwargs):
             pass
+
         monkeypatch.setattr(server_module.server, "run", fake_server_run)
 
         from src.jcodemunch_mcp.server import main
+
         main(["serve"])
 
         # After main() runs, config should reflect the file (not just defaults)
@@ -1824,6 +2077,7 @@ class TestLoadConfigWiredIntoMain:
         """After main() starts, config should be loaded and usable by list_tools."""
         # Use the SAME module object that server.py imports
         import src.jcodemunch_mcp.config as cfg_module
+
         cfg_module._GLOBAL_CONFIG.clear()
         cfg_module._GLOBAL_CONFIG.update({"max_folder_files": 2000})  # default
 
@@ -1842,11 +2096,14 @@ class TestLoadConfigWiredIntoMain:
         monkeypatch.setattr("asyncio.run", fake_asyncio_run)
 
         import src.jcodemunch_mcp.server as server_module
+
         async def fake_server_run(*args, **kwargs):
             pass
+
         monkeypatch.setattr(server_module.server, "run", fake_server_run)
 
         from src.jcodemunch_mcp.server import main
+
         main(["serve"])
 
         # After main() runs, config should reflect the file (not just defaults)
@@ -1876,10 +2133,12 @@ class TestLoadConfigWiredIntoMain:
         monkeypatch.setattr("asyncio.run", fake_asyncio_run)
 
         import sys
+
         old_argv = sys.argv
         sys.argv = ["jcodemunch-mcp"]
         try:
             from src.jcodemunch_mcp.server import main
+
             main([])
         finally:
             sys.argv = old_argv
@@ -1942,12 +2201,21 @@ def test_parse_env_value_use_ai_summaries_preserves_string():
 class TestJSONCSyntaxErrors:
     """Test JSONC parser handles malformed syntax gracefully."""
 
-    @pytest.mark.parametrize("text", [
-        '{"key": "unclosed string}',
-        '{"key": "value"',
-        '{"arr": [1, 2, 3',
-        '{"key": "value",',
-    ], ids=["unclosed_string", "missing_closing_brace", "missing_closing_bracket", "trailing_comma_no_brace"])
+    @pytest.mark.parametrize(
+        "text",
+        [
+            '{"key": "unclosed string}',
+            '{"key": "value"',
+            '{"arr": [1, 2, 3',
+            '{"key": "value",',
+        ],
+        ids=[
+            "unclosed_string",
+            "missing_closing_brace",
+            "missing_closing_bracket",
+            "trailing_comma_no_brace",
+        ],
+    )
     def test_invalid_json_raises_decode_error(self, text):
         """Malformed JSON should raise JSONDecodeError."""
         result = _strip_jsonc(text)
@@ -1974,24 +2242,45 @@ class TestJSONCSyntaxErrors:
 class TestJSONCEdgeCases:
     """Test JSONC parser handles edge cases correctly."""
 
-    @pytest.mark.parametrize("text", [
-        "",
-        "// This is just a comment\n/* and a block comment */\n// More comments",
-    ], ids=["empty_file", "only_comments"])
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "",
+            "// This is just a comment\n/* and a block comment */\n// More comments",
+        ],
+        ids=["empty_file", "only_comments"],
+    )
     def test_invalid_json_raises(self, text):
         """Invalid JSON should raise JSONDecodeError."""
         result = _strip_jsonc(text)
         with pytest.raises(json.JSONDecodeError):
             json.loads(result)
 
-    @pytest.mark.parametrize("text,expected", [
-        ('{}', {}),
-        ('{\n    // This is empty\n}', {}),
-        ('{"greeting": "Hello 世界 🌍"}', {"greeting": "Hello 世界 🌍"}),
-        ('{"text": "line1\\nline2\\nline3"}', {"text": "line1\nline2\nline3"}),
-        (r'{"path": "C:\\Users\\test\\file.txt"}', {"path": "C:\\Users\\test\\file.txt"}),
-        ('{"a": {"b": {"c": {"d": {"e": {"f": "deep"}}}}}}', {"a": {"b": {"c": {"d": {"e": {"f": "deep"}}}}}}),
-    ], ids=["empty_object", "empty_object_comments", "unicode", "escaped_newlines", "backslashes", "nested_structure"])
+    @pytest.mark.parametrize(
+        "text,expected",
+        [
+            ("{}", {}),
+            ("{\n    // This is empty\n}", {}),
+            ('{"greeting": "Hello 世界 🌍"}', {"greeting": "Hello 世界 🌍"}),
+            ('{"text": "line1\\nline2\\nline3"}', {"text": "line1\nline2\nline3"}),
+            (
+                r'{"path": "C:\\Users\\test\\file.txt"}',
+                {"path": "C:\\Users\\test\\file.txt"},
+            ),
+            (
+                '{"a": {"b": {"c": {"d": {"e": {"f": "deep"}}}}}}',
+                {"a": {"b": {"c": {"d": {"e": {"f": "deep"}}}}}},
+            ),
+        ],
+        ids=[
+            "empty_object",
+            "empty_object_comments",
+            "unicode",
+            "escaped_newlines",
+            "backslashes",
+            "nested_structure",
+        ],
+    )
     def test_valid_json_parsing(self, text, expected):
         """Valid JSON-like content should parse correctly."""
         result = _strip_jsonc(text)
@@ -2006,11 +2295,15 @@ class TestJSONCEdgeCases:
         parsed = json.loads(result)
         assert len(parsed["arr"]) == 100
 
-    @pytest.mark.parametrize("text,check", [
-        ('{"text": "line1\\tline2"}', lambda p: "\t" in p["text"]),
-        ('{"text": "say \\"hello\\""}', lambda p: '"' in p["text"]),
-        (r'{"path": "C:\\Users\\test"}', lambda p: "\\" in p["path"]),
-    ], ids=["tab_char", "quote_char", "backslash_char"])
+    @pytest.mark.parametrize(
+        "text,check",
+        [
+            ('{"text": "line1\\tline2"}', lambda p: "\t" in p["text"]),
+            ('{"text": "say \\"hello\\""}', lambda p: '"' in p["text"]),
+            (r'{"path": "C:\\Users\\test"}', lambda p: "\\" in p["path"]),
+        ],
+        ids=["tab_char", "quote_char", "backslash_char"],
+    )
     def test_special_characters_in_strings(self, text, check):
         """Special characters in strings should be preserved."""
         result = _strip_jsonc(text)
@@ -2021,26 +2314,34 @@ class TestJSONCEdgeCases:
 class TestConfigTypeValidation:
     """Test config type validation for all config keys."""
 
-    @pytest.mark.parametrize("key,bad_value,expected_default", [
-        ("context_providers", '"true"', True),   # String instead of bool
-        ("max_folder_files", "2000.5", 2000),    # Float instead of int
-        ("disabled_tools", '{"tool": "name"}', ["test_summarizer"]),  # Object instead of list
-        ("extra_extensions", '[".lua"]', {}),     # List instead of dict
-        ("meta_fields", '{"invalid": "dict"}', []),  # Dict instead of list
-        ("server_output", '"banana"', "adaptive"),
-        ("server_output_threshold", '-0.25', 0.15),
-    ], ids=[
-        "bool_string",
-        "int_float",
-        "list_object",
-        "dict_list",
-        "meta_fields_dict",
-        "server_output_invalid",
-        "server_output_threshold_negative",
-    ])
+    @pytest.mark.parametrize(
+        "key,bad_value,expected_default",
+        [
+            ("context_providers", '"true"', True),  # String instead of bool
+            ("max_folder_files", "2000.5", 2000),  # Float instead of int
+            (
+                "disabled_tools",
+                '{"tool": "name"}',
+                ["test_summarizer"],
+            ),  # Object instead of list
+            ("extra_extensions", '[".lua"]', {}),  # List instead of dict
+            ("meta_fields", '{"invalid": "dict"}', []),  # Dict instead of list
+            ("server_output", '"banana"', "adaptive"),
+            ("server_output_threshold", "-0.25", 0.15),
+        ],
+        ids=[
+            "bool_string",
+            "int_float",
+            "list_object",
+            "dict_list",
+            "meta_fields_dict",
+            "server_output_invalid",
+            "server_output_threshold_negative",
+        ],
+    )
     def test_type_mismatch_uses_default(self, key, bad_value, expected_default):
         """Type mismatch should fall back to default."""
-        from src.jcodemunch_mcp.config import load_config, get, _GLOBAL_CONFIG
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, get, load_config
 
         _GLOBAL_CONFIG.clear()
 
@@ -2052,7 +2353,7 @@ class TestConfigTypeValidation:
 
     def test_int_type_mismatch_negative_accepted(self):
         """Negative int should be accepted (no range validation)."""
-        from src.jcodemunch_mcp.config import load_config, get, _GLOBAL_CONFIG
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, get, load_config
 
         _GLOBAL_CONFIG.clear()
 
@@ -2064,13 +2365,17 @@ class TestConfigTypeValidation:
             # Negative is still a valid int (range validation is elsewhere)
             assert get("max_folder_files") == -1
 
-    @pytest.mark.parametrize("key,value,expected", [
-        ("languages", "null", None),
-        ("log_level", '""', ""),
-    ], ids=["languages_null", "empty_string"])
+    @pytest.mark.parametrize(
+        "key,value,expected",
+        [
+            ("languages", "null", None),
+            ("log_level", '""', ""),
+        ],
+        ids=["languages_null", "empty_string"],
+    )
     def test_optional_and_string_types(self, key, value, expected):
         """Null for optional types and empty string for string types should be accepted."""
-        from src.jcodemunch_mcp.config import load_config, get, _GLOBAL_CONFIG
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, get, load_config
 
         _GLOBAL_CONFIG.clear()
 
@@ -2087,8 +2392,11 @@ class TestProjectConfigEdgeCases:
     def test_project_config_invalid_syntax(self):
         """Invalid project config should fall back to global."""
         from src.jcodemunch_mcp.config import (
-            load_config, load_project_config, get,
-            _GLOBAL_CONFIG, _PROJECT_CONFIGS
+            _GLOBAL_CONFIG,
+            _PROJECT_CONFIGS,
+            get,
+            load_config,
+            load_project_config,
         )
 
         _GLOBAL_CONFIG.clear()
@@ -2117,8 +2425,11 @@ class TestProjectConfigEdgeCases:
     def test_project_config_type_mismatch(self):
         """Project config with type mismatch should use global value."""
         from src.jcodemunch_mcp.config import (
-            load_config, load_project_config, get,
-            _GLOBAL_CONFIG, _PROJECT_CONFIGS
+            _GLOBAL_CONFIG,
+            _PROJECT_CONFIGS,
+            get,
+            load_config,
+            load_project_config,
         )
 
         _GLOBAL_CONFIG.clear()
@@ -2147,8 +2458,11 @@ class TestProjectConfigEdgeCases:
     def test_project_config_unknown_key_ignored(self):
         """Project config with unknown key should ignore it."""
         from src.jcodemunch_mcp.config import (
-            load_config, load_project_config, get,
-            _GLOBAL_CONFIG, _PROJECT_CONFIGS
+            _GLOBAL_CONFIG,
+            _PROJECT_CONFIGS,
+            get,
+            load_config,
+            load_project_config,
         )
 
         _GLOBAL_CONFIG.clear()
@@ -2166,7 +2480,9 @@ class TestProjectConfigEdgeCases:
             project_root = Path(tmpdir) / "project"
             project_root.mkdir()
             project_config = project_root / ".jcodemunch.jsonc"
-            project_config.write_text('{"unknown_key": "value", "max_folder_files": 5000}')
+            project_config.write_text(
+                '{"unknown_key": "value", "max_folder_files": 5000}'
+            )
 
             load_project_config(str(project_root))
 
@@ -2181,7 +2497,7 @@ class TestConfigFileEncoding:
 
     def test_utf8_bom_handled(self):
         """UTF-8 BOM should be handled correctly."""
-        from src.jcodemunch_mcp.config import load_config, get, _GLOBAL_CONFIG
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, get, load_config
 
         _GLOBAL_CONFIG.clear()
 
@@ -2195,14 +2511,16 @@ class TestConfigFileEncoding:
 
     def test_utf8_with_bom_and_comments(self):
         """UTF-8 BOM with comments should work."""
-        from src.jcodemunch_mcp.config import load_config, get, _GLOBAL_CONFIG
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, get, load_config
 
         _GLOBAL_CONFIG.clear()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.jsonc"
             # Write UTF-8 BOM + JSONC with comments
-            config_path.write_bytes(b'\xef\xbb\xbf{"max_folder_files": 5000, // comment\n}')
+            config_path.write_bytes(
+                b'\xef\xbb\xbf{"max_folder_files": 5000, // comment\n}'
+            )
 
             load_config(tmpdir)
             assert get("max_folder_files") == 5000
@@ -2211,18 +2529,20 @@ class TestConfigFileEncoding:
 class TestAllConfigKeys:
     """Test that all config keys can be loaded correctly."""
 
-    @pytest.mark.parametrize("key", [
-        "transport", "host", "freshness_mode", "log_level", "server_output"
-    ], ids=[
-        "string_transport",
-        "string_host",
-        "string_freshness_mode",
-        "string_log_level",
-        "string_server_output",
-    ])
+    @pytest.mark.parametrize(
+        "key",
+        ["transport", "host", "freshness_mode", "log_level", "server_output"],
+        ids=[
+            "string_transport",
+            "string_host",
+            "string_freshness_mode",
+            "string_log_level",
+            "string_server_output",
+        ],
+    )
     def test_all_string_keys(self, key):
         """Test all string-typed config keys."""
-        from src.jcodemunch_mcp.config import load_config, get, _GLOBAL_CONFIG
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, get, load_config
 
         _GLOBAL_CONFIG.clear()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2232,15 +2552,34 @@ class TestAllConfigKeys:
             load_config(tmpdir)
             assert get(key) == value, f"Key {key} failed"
 
-    @pytest.mark.parametrize("key", [
-        "max_folder_files", "max_index_files", "staleness_days",
-        "max_results", "port", "rate_limit", "watch_debounce_ms",
-        "stats_file_interval", "summarizer_concurrency"
-    ], ids=["int_max_folder", "int_max_index", "int_staleness", "int_max_results",
-            "int_port", "int_rate_limit", "int_watch_debounce", "int_stats_interval", "int_summarizer_concurrency"])
+    @pytest.mark.parametrize(
+        "key",
+        [
+            "max_folder_files",
+            "max_index_files",
+            "staleness_days",
+            "max_results",
+            "port",
+            "rate_limit",
+            "watch_debounce_ms",
+            "stats_file_interval",
+            "summarizer_concurrency",
+        ],
+        ids=[
+            "int_max_folder",
+            "int_max_index",
+            "int_staleness",
+            "int_max_results",
+            "int_port",
+            "int_rate_limit",
+            "int_watch_debounce",
+            "int_stats_interval",
+            "int_summarizer_concurrency",
+        ],
+    )
     def test_all_int_keys(self, key):
         """Test all int-typed config keys."""
-        from src.jcodemunch_mcp.config import load_config, get, _GLOBAL_CONFIG
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, get, load_config
 
         _GLOBAL_CONFIG.clear()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2249,14 +2588,26 @@ class TestAllConfigKeys:
             load_config(tmpdir)
             assert get(key) == 42, f"Key {key} failed"
 
-    @pytest.mark.parametrize("key", [
-        "context_providers", "redact_source_root",
-        "share_savings", "allow_remote_summarizer", "watch"
-    ], ids=["bool_context_providers", "bool_redact_source_root", "bool_share_savings",
-            "bool_allow_remote_summarizer", "bool_watch"])
+    @pytest.mark.parametrize(
+        "key",
+        [
+            "context_providers",
+            "redact_source_root",
+            "share_savings",
+            "allow_remote_summarizer",
+            "watch",
+        ],
+        ids=[
+            "bool_context_providers",
+            "bool_redact_source_root",
+            "bool_share_savings",
+            "bool_allow_remote_summarizer",
+            "bool_watch",
+        ],
+    )
     def test_all_bool_keys(self, key):
         """Test all bool-typed config keys."""
-        from src.jcodemunch_mcp.config import load_config, get, _GLOBAL_CONFIG
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, get, load_config
 
         _GLOBAL_CONFIG.clear()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2265,12 +2616,14 @@ class TestAllConfigKeys:
             load_config(tmpdir)
             assert get(key) is False, f"Key {key} failed"
 
-    @pytest.mark.parametrize("key", [
-        "disabled_tools", "extra_ignore_patterns", "meta_fields"
-    ], ids=["list_disabled_tools", "list_extra_ignore_patterns", "list_meta_fields"])
+    @pytest.mark.parametrize(
+        "key",
+        ["disabled_tools", "extra_ignore_patterns", "meta_fields"],
+        ids=["list_disabled_tools", "list_extra_ignore_patterns", "list_meta_fields"],
+    )
     def test_all_list_keys(self, key):
         """Test all list-typed config keys."""
-        from src.jcodemunch_mcp.config import load_config, get, _GLOBAL_CONFIG
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, get, load_config
 
         _GLOBAL_CONFIG.clear()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2281,7 +2634,7 @@ class TestAllConfigKeys:
 
     def test_all_list_keys_trusted_folders(self, tmp_path):
         """trusted_folders requires absolute paths and is normalized on load."""
-        from src.jcodemunch_mcp.config import load_config, get, _GLOBAL_CONFIG
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, get, load_config
 
         _GLOBAL_CONFIG.clear()
         trusted1 = tmp_path / "trusted1"
@@ -2300,7 +2653,7 @@ class TestAllConfigKeys:
 
     def test_all_list_keys_languages(self):
         """Test languages list-typed config key with valid language names."""
-        from src.jcodemunch_mcp.config import load_config, get, _GLOBAL_CONFIG
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, get, load_config
 
         _GLOBAL_CONFIG.clear()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2309,12 +2662,14 @@ class TestAllConfigKeys:
             load_config(tmpdir)
             assert get("languages") == ["python", "javascript"], "Key languages failed"
 
-    @pytest.mark.parametrize("key", [
-        "extra_extensions", "descriptions"
-    ], ids=["dict_extra_extensions", "dict_descriptions"])
+    @pytest.mark.parametrize(
+        "key",
+        ["extra_extensions", "descriptions"],
+        ids=["dict_extra_extensions", "dict_descriptions"],
+    )
     def test_all_dict_keys(self, key):
         """Test all dict-typed config keys."""
-        from src.jcodemunch_mcp.config import load_config, get, _GLOBAL_CONFIG
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, get, load_config
 
         _GLOBAL_CONFIG.clear()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2323,13 +2678,17 @@ class TestAllConfigKeys:
             load_config(tmpdir)
             assert get(key) == {"nested": "value"}, f"Key {key} failed"
 
-    @pytest.mark.parametrize("key,value", [
-        ("claude_poll_interval", 1.25),
-        ("server_output_threshold", 0.2),
-    ], ids=["float_claude_poll_interval", "float_server_output_threshold"])
+    @pytest.mark.parametrize(
+        "key,value",
+        [
+            ("claude_poll_interval", 1.25),
+            ("server_output_threshold", 0.2),
+        ],
+        ids=["float_claude_poll_interval", "float_server_output_threshold"],
+    )
     def test_all_float_keys(self, key, value):
         """Test all float-typed config keys."""
-        from src.jcodemunch_mcp.config import load_config, get, _GLOBAL_CONFIG
+        from src.jcodemunch_mcp.config import _GLOBAL_CONFIG, get, load_config
 
         _GLOBAL_CONFIG.clear()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2340,11 +2699,19 @@ class TestAllConfigKeys:
 
     def test_all_nullable_keys(self):
         """Test all nullable config keys accept null."""
-        from src.jcodemunch_mcp.config import load_config, get, _GLOBAL_CONFIG, CONFIG_TYPES
+        from src.jcodemunch_mcp.config import (
+            _GLOBAL_CONFIG,
+            CONFIG_TYPES,
+            get,
+            load_config,
+        )
 
         # Find all keys with tuple types that include None
-        nullable_keys = [k for k, v in CONFIG_TYPES.items()
-                        if isinstance(v, tuple) and type(None) in v]
+        nullable_keys = [
+            k
+            for k, v in CONFIG_TYPES.items()
+            if isinstance(v, tuple) and type(None) in v
+        ]
 
         for key in nullable_keys:
             _GLOBAL_CONFIG.clear()
@@ -2375,6 +2742,7 @@ class TestConfigInit:
 
         content = config_path.read_text()
         from src.jcodemunch_mcp.config import _strip_jsonc
+
         stripped = _strip_jsonc(content)
         parsed = json.loads(stripped)
         assert "languages" in parsed
@@ -2410,7 +2778,9 @@ def test_config_report_shape_and_source_attribution(tmp_path, monkeypatch):
 
     report = cfg.config_report(repo=str(proj))
     assert isinstance(report, list) and report
-    assert all({"key", "type", "value", "default", "source"} <= e.keys() for e in report)
+    assert all(
+        {"key", "type", "value", "default", "source"} <= e.keys() for e in report
+    )
 
     by_key = {e["key"]: e for e in report}
     # Project override is attributed to the project layer with the merged value.

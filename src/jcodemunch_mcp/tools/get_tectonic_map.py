@@ -32,8 +32,8 @@ from collections import defaultdict
 from typing import Optional
 
 from ..storage import IndexStore
+from ._graph_utils import build_adjacency
 from ._utils import resolve_repo
-from .get_dependency_graph import _build_adjacency
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +42,13 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 W_STRUCTURAL = 0.40  # import edges
 W_BEHAVIORAL = 0.30  # shared symbol references
-W_TEMPORAL = 0.30    # git co-churn
+W_TEMPORAL = 0.30  # git co-churn
 
 
 # ---------------------------------------------------------------------------
 # Signal extraction
 # ---------------------------------------------------------------------------
+
 
 def _structural_edges(fwd: dict[str, list[str]]) -> dict[tuple[str, str], float]:
     """Weight = number of import edges between the two files (bidirectional max)."""
@@ -80,7 +81,9 @@ def _behavioral_edges(index) -> dict[tuple[str, str], float]:
             # Also count the specifier stem
             spec = imp.get("specifier", "")
             if spec:
-                stem = os.path.splitext(os.path.basename(spec.replace("\\", "/")))[0].lower()
+                stem = os.path.splitext(os.path.basename(spec.replace("\\", "/")))[
+                    0
+                ].lower()
                 if stem:
                     symbol_importers[stem].add(src_file)
 
@@ -102,7 +105,9 @@ def _behavioral_edges(index) -> dict[tuple[str, str], float]:
     return {k: v / max_val for k, v in pair_counts.items()} if max_val else {}
 
 
-def _temporal_edges(source_root: str, source_files: frozenset, days: int = 90) -> dict[tuple[str, str], float]:
+def _temporal_edges(
+    source_root: str, source_files: frozenset, days: int = 90
+) -> dict[tuple[str, str], float]:
     """Files that change in the same commit are temporally coupled (co-churn).
 
     Uses a single `git log --name-only` pass, then counts co-occurrence
@@ -110,9 +115,18 @@ def _temporal_edges(source_root: str, source_files: frozenset, days: int = 90) -
     """
     try:
         r = subprocess.run(
-            ["git", "log", f"--since={days} days ago", "--name-only", "--format=COMMIT_SEP"],
-            cwd=source_root, capture_output=True, text=True,
-            timeout=60, stdin=subprocess.DEVNULL,
+            [
+                "git",
+                "log",
+                f"--since={days} days ago",
+                "--name-only",
+                "--format=COMMIT_SEP",
+            ],
+            cwd=source_root,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            stdin=subprocess.DEVNULL,
         )
         if r.returncode != 0 or not r.stdout.strip():
             return {}
@@ -147,6 +161,7 @@ def _temporal_edges(source_root: str, source_files: frozenset, days: int = 90) -
 # Signal fusion → weighted graph
 # ---------------------------------------------------------------------------
 
+
 def _fuse_signals(
     structural: dict[tuple[str, str], float],
     behavioral: dict[tuple[str, str], float],
@@ -173,6 +188,7 @@ def _fuse_signals(
 # ---------------------------------------------------------------------------
 # Label propagation (community detection)
 # ---------------------------------------------------------------------------
+
 
 def _label_propagation(
     nodes: list[str],
@@ -238,6 +254,7 @@ def _label_propagation(
 # Plate analysis
 # ---------------------------------------------------------------------------
 
+
 def _majority_directory(files: list[str]) -> str:
     """Return the most common first directory segment among files."""
     dir_counts: dict[str, int] = defaultdict(int)
@@ -295,11 +312,14 @@ def _analyze_plates(
 
         # Cohesion: actual intra-edges / possible edges
         intra_edge_weight = sum(
-            w for (a, b), w in edges.items()
+            w
+            for (a, b), w in edges.items()
             if node_plate.get(a) == pid and node_plate.get(b) == pid
         )
         possible_edges = len(members) * (len(members) - 1) / 2
-        cohesion = round(intra_edge_weight / possible_edges, 4) if possible_edges > 0 else 1.0
+        cohesion = (
+            round(intra_edge_weight / possible_edges, 4) if possible_edges > 0 else 1.0
+        )
 
         # Coupling to other plates
         coupling: dict[int, float] = {}
@@ -355,6 +375,7 @@ def _analyze_plates(
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def get_tectonic_map(
     repo: str,
@@ -428,7 +449,9 @@ def get_tectonic_map(
     signals_used = []
 
     # 1. Structural (always available if imports exist)
-    fwd = _build_adjacency(index.imports, source_files, alias_map, psr4_map)
+    fwd = build_adjacency(
+        index.imports, source_files, alias_map, psr4_map, expand_barrels=True
+    )
     structural = _structural_edges(fwd)
     if structural:
         signals_used.append("structural")
@@ -444,8 +467,11 @@ def get_tectonic_map(
         try:
             r = subprocess.run(
                 ["git", "rev-parse", "--git-dir"],
-                cwd=index.source_root, capture_output=True, text=True,
-                timeout=5, stdin=subprocess.DEVNULL,
+                cwd=index.source_root,
+                capture_output=True,
+                text=True,
+                timeout=5,
+                stdin=subprocess.DEVNULL,
             )
             if r.returncode == 0:
                 temporal = _temporal_edges(index.source_root, source_files, days)
@@ -457,7 +483,7 @@ def get_tectonic_map(
     if not structural and not behavioral:
         return {
             "error": "Insufficient coupling data for tectonic analysis. "
-                     "Ensure the repo has import relationships between files."
+            "Ensure the repo has import relationships between files."
         }
 
     # --- Fuse signals ---
@@ -533,12 +559,14 @@ def get_tectonic_map(
                 current_dir = parts[0]
             else:
                 current_dir = "."
-            drifter_summary.append({
-                "file": drifter,
-                "current_directory": current_dir,
-                "belongs_with": p["majority_directory"],
-                "plate_anchor": p["anchor"],
-            })
+            drifter_summary.append(
+                {
+                    "file": drifter,
+                    "current_directory": current_dir,
+                    "belongs_with": p["majority_directory"],
+                    "plate_anchor": p["anchor"],
+                }
+            )
     # Sort by how far the file drifted (different directory = interesting)
     drifter_summary.sort(key=lambda d: d["file"])
 

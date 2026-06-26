@@ -1,12 +1,52 @@
 """Shared helpers for tool modules."""
 
 import logging
+import subprocess
 import threading
-from typing import Optional
+from pathlib import Path
+from typing import Optional, Union
 
 from ..storage import IndexStore
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Git subprocess helper
+# ---------------------------------------------------------------------------
+
+
+def run_git(
+    args: list[str],
+    cwd: Union[str, Path],
+    timeout: int = 30,
+) -> tuple[int, str, str]:
+    """Run a git command; return (returncode, stdout, stderr).
+
+    *stdout* and *stderr* are stripped of trailing newlines.
+    On error the return code is negative:
+      -1  git not found on PATH (FileNotFoundError)
+      -2  git command timed out (TimeoutExpired)
+      -3  other subprocess error
+    """
+    try:
+        r = subprocess.run(
+            ["git"] + args,
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            stdin=subprocess.DEVNULL,
+        )
+        return r.returncode, r.stdout.strip(), r.stderr.strip()
+    except FileNotFoundError:
+        return -1, "", "git not found on PATH"
+    except subprocess.TimeoutExpired:
+        return -2, "", "git command timed out"
+    except Exception as exc:  # pragma: no cover
+        logger.debug("git subprocess error: %s", exc, exc_info=True)
+        return -3, "", str(exc)
+
 
 # ---------------------------------------------------------------------------
 # Bare-name resolution cache (P5)
@@ -131,11 +171,17 @@ def resolve_fqn(
         err = index_status_to_tool_error(status)
         return None, f"{err['error']} ({err['load_error']}). {err['hint']}"
     if not getattr(index, "source_root", None):
-        return None, "Index has no source_root (remote indexes don't support FQN resolution)"
+        return (
+            None,
+            "Index has no source_root (remote indexes don't support FQN resolution)",
+        )
     psr4 = build_psr4_map(index.source_root)
     if not psr4:
         return None, "No PSR-4 autoload config found in composer.json"
     resolved = fqn_to_symbol(fqn, psr4, frozenset(index.source_files))
     if not resolved:
-        return None, f"FQN '{fqn}' could not be resolved. File not in index or namespace mismatch."
+        return (
+            None,
+            f"FQN '{fqn}' could not be resolved. File not in index or namespace mismatch.",
+        )
     return resolved, None

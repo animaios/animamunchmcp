@@ -28,22 +28,30 @@ from __future__ import annotations
 import fnmatch
 import logging
 import re
-import subprocess
 import time
 from collections import defaultdict
 from typing import Any, Optional
 
-from ..storage import IndexStore, record_savings, estimate_savings, cost_avoided
-from ._utils import resolve_repo
+from ..storage import IndexStore, cost_avoided, estimate_savings, record_savings
+from ._utils import resolve_repo, run_git
 from .pagerank import compute_pagerank
 
 logger = logging.getLogger(__name__)
 
 
-_SUPPORTED_AXES = frozenset({
-    "kind", "language", "name", "file", "complexity",
-    "decorator", "calls", "summary", "churn",
-})
+_SUPPORTED_AXES = frozenset(
+    {
+        "kind",
+        "language",
+        "name",
+        "file",
+        "complexity",
+        "decorator",
+        "calls",
+        "summary",
+        "churn",
+    }
+)
 _NUMERIC_OPS = {">", "<", ">=", "<=", "=="}
 _SET_OPS = {"in", "eq"}
 _REGEX_OPS = {"matches"}
@@ -52,27 +60,11 @@ _CONTAINS_OPS = {"contains"}
 _RANK_AXES = frozenset({"importance", "complexity", "churn", "name"})
 
 
-def _run_git(args: list[str], cwd: str, timeout: int = 30) -> tuple[int, str]:
-    try:
-        r = subprocess.run(
-            ["git"] + args,
-            cwd=cwd, capture_output=True, text=True,
-            timeout=timeout, stdin=subprocess.DEVNULL,
-        )
-        return r.returncode, r.stdout.strip()
-    except FileNotFoundError:
-        return -1, ""
-    except subprocess.TimeoutExpired:
-        return -2, ""
-    except Exception as exc:
-        logger.debug("git subprocess error: %s", exc, exc_info=True)
-        return -3, ""
-
-
 def _get_file_churn(cwd: str, days: int) -> dict[str, int]:
-    rc, out = _run_git(
+    rc, out, _ = run_git(
         ["log", f"--since={days} days ago", "--name-only", "--format="],
-        cwd=cwd, timeout=60,
+        cwd=cwd,
+        timeout=60,
     )
     if rc not in (0, 128) or not out:
         return {}
@@ -96,11 +88,16 @@ def _apply_numeric(op: str, sym_val: Any, threshold: Any) -> bool:
         tv = float(threshold)
     except (TypeError, ValueError):
         return False
-    if op == ">":   return sv > tv
-    if op == "<":   return sv < tv
-    if op == ">=":  return sv >= tv
-    if op == "<=":  return sv <= tv
-    if op == "==":  return sv == tv
+    if op == ">":
+        return sv > tv
+    if op == "<":
+        return sv < tv
+    if op == ">=":
+        return sv >= tv
+    if op == "<=":
+        return sv <= tv
+    if op == "==":
+        return sv == tv
     return False
 
 
@@ -164,7 +161,7 @@ def _match_criterion(
         if op != "contains":
             return False
         needle = str(value).lower()
-        hay = f"{sym.get('summary','')} {sym.get('docstring','')}".lower()
+        hay = f"{sym.get('summary', '')} {sym.get('docstring', '')}".lower()
         return needle in hay
 
     if axis == "churn":
@@ -221,7 +218,9 @@ def winnow_symbols(
     t0 = time.perf_counter()
 
     if rank_by not in _RANK_AXES:
-        return {"error": f"rank_by '{rank_by}' invalid. Must be one of {sorted(_RANK_AXES)}"}
+        return {
+            "error": f"rank_by '{rank_by}' invalid. Must be one of {sorted(_RANK_AXES)}"
+        }
     if order not in ("asc", "desc"):
         return {"error": f"order '{order}' invalid. Must be 'asc' or 'desc'"}
 
@@ -251,7 +250,7 @@ def winnow_symbols(
     git_available = False
     needs_churn = rank_by == "churn" or any(c.get("axis") == "churn" for c in criteria)
     if needs_churn and index.source_root:
-        rc, _ = _run_git(["rev-parse", "--git-dir"], cwd=index.source_root)
+        rc, _, _ = run_git(["rev-parse", "--git-dir"], cwd=index.source_root)
         if rc == 0:
             git_available = True
             raw = _get_file_churn(index.source_root, churn_window)
@@ -264,13 +263,16 @@ def winnow_symbols(
             source_files = [s.get("file", "") for s in index.symbols if s.get("file")]
             source_files = sorted(set(source_files))
             scores, _iters = compute_pagerank(
-                index.imports, source_files,
+                index.imports,
+                source_files,
                 alias_map=getattr(index, "alias_map", None),
                 psr4_map=getattr(index, "psr4_map", None),
             )
             importance_by_file = scores
         except Exception as exc:
-            logger.debug("pagerank failed for %s/%s: %s", owner, name, exc, exc_info=True)
+            logger.debug(
+                "pagerank failed for %s/%s: %s", owner, name, exc, exc_info=True
+            )
 
     survivors: list[dict] = []
     total = 0
@@ -288,21 +290,23 @@ def winnow_symbols(
         churn = file_churn.get(file_norm, 0)
         importance = round(importance_by_file.get(sym.get("file", ""), 0.0), 6)
 
-        survivors.append({
-            "symbol_id": sym.get("id", ""),
-            "name": sym.get("name", ""),
-            "kind": sym.get("kind", ""),
-            "language": sym.get("language", ""),
-            "file": sym.get("file", ""),
-            "line": sym.get("line") or 0,
-            "signature": sym.get("signature", ""),
-            "summary": sym.get("summary", ""),
-            "cyclomatic": sym.get("cyclomatic") or 0,
-            "churn": churn,
-            "importance": importance,
-        })
+        survivors.append(
+            {
+                "symbol_id": sym.get("id", ""),
+                "name": sym.get("name", ""),
+                "kind": sym.get("kind", ""),
+                "language": sym.get("language", ""),
+                "file": sym.get("file", ""),
+                "line": sym.get("line") or 0,
+                "signature": sym.get("signature", ""),
+                "summary": sym.get("summary", ""),
+                "cyclomatic": sym.get("cyclomatic") or 0,
+                "churn": churn,
+                "importance": importance,
+            }
+        )
 
-    reverse = (order == "desc")
+    reverse = order == "desc"
     if rank_by == "importance":
         survivors.sort(key=lambda x: x["importance"], reverse=reverse)
     elif rank_by == "complexity":
@@ -323,7 +327,9 @@ def winnow_symbols(
             for r in results
         )
         tokens_saved = estimate_savings(raw_bytes, response_bytes)
-        total_saved = record_savings(tokens_saved, base_path=storage_path, tool_name="winnow_symbols")
+        total_saved = record_savings(
+            tokens_saved, base_path=storage_path, tool_name="winnow_symbols"
+        )
         cost = cost_avoided(tokens_saved, total_saved)
     except Exception as exc:
         logger.debug("telemetry failed: %s", exc, exc_info=True)

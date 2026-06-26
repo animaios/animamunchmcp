@@ -1,4 +1,4 @@
-"""Capture tools/list schema token counts at each profile x compact combo.
+"""Capture tools/list schema token counts at each compact flag combo.
 
 §0 pre-flight for the v2.0.0 context-optimization work. These numbers become
 the regression guardrails in §7 (see tests/test_schema_budget.py).
@@ -29,8 +29,6 @@ import tiktoken  # noqa: E402
 from jcodemunch_mcp import config as config_module  # noqa: E402
 from jcodemunch_mcp.server import _build_tools_list  # noqa: E402
 
-
-PROFILES = ["core", "standard", "full"]
 COMPACT_FLAGS = [True, False]
 
 
@@ -50,17 +48,15 @@ def capture(out_path: Path) -> dict:
     encoding = tiktoken.get_encoding("cl100k_base")
     results: dict[str, int] = {}
     cfg = config_module._GLOBAL_CONFIG  # type: ignore[attr-defined]
-    original = {k: cfg.get(k) for k in ("tool_profile", "compact_schemas")}
+    original = {k: cfg.get(k) for k in ("compact_schemas",)}
     try:
-        for profile in PROFILES:
-            for compact in COMPACT_FLAGS:
-                cfg["tool_profile"] = profile
-                cfg["compact_schemas"] = compact
-                tools = _build_tools_list()
-                text = _tools_to_serialized(tools)
-                key = f"{profile}_{'compact' if compact else 'full'}"
-                results[key] = _count_tokens(text, encoding)
-                print(f"  {key}: {results[key]} tokens ({len(tools)} tools)")
+        for compact in COMPACT_FLAGS:
+            cfg["compact_schemas"] = compact
+            tools = _build_tools_list()
+            text = _tools_to_serialized(tools)
+            key = f"{'compact' if compact else 'full'}"
+            results[key] = _count_tokens(text, encoding)
+            print(f"  {key}: {results[key]} tokens ({len(tools)} tools)")
     finally:
         for k, v in original.items():
             if v is None:

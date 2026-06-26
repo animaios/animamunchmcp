@@ -15,32 +15,14 @@ from __future__ import annotations
 
 import logging
 import math
-import subprocess
 import time
 from collections import defaultdict
 from typing import Optional
 
 from ..storage import IndexStore
-from ._utils import resolve_repo
+from ._utils import resolve_repo, run_git
 
 logger = logging.getLogger(__name__)
-
-
-def _run_git(args: list[str], cwd: str, timeout: int = 30) -> tuple[int, str, str]:
-    try:
-        r = subprocess.run(
-            ["git"] + args,
-            cwd=cwd, capture_output=True, text=True,
-            timeout=timeout, stdin=subprocess.DEVNULL,
-        )
-        return r.returncode, r.stdout.strip(), r.stderr.strip()
-    except FileNotFoundError:
-        return -1, "", "git not found on PATH"
-    except subprocess.TimeoutExpired:
-        return -2, "", "git command timed out"
-    except Exception as exc:
-        logger.debug("git subprocess error: %s", exc, exc_info=True)
-        return -3, "", str(exc)
 
 
 def _get_file_churn(cwd: str, days: int) -> dict[str, int]:
@@ -48,7 +30,7 @@ def _get_file_churn(cwd: str, days: int) -> dict[str, int]:
 
     Uses a single ``git log --name-only`` pass for efficiency.
     """
-    rc, out, _ = _run_git(
+    rc, out, _ = run_git(
         ["log", f"--since={days} days ago", "--name-only", "--format="],
         cwd=cwd,
         timeout=60,
@@ -109,7 +91,7 @@ def get_hotspots(
     git_available = False
     file_churn: dict[str, int] = {}
     if index.source_root:
-        rc_check, _, _ = _run_git(["rev-parse", "--git-dir"], cwd=index.source_root)
+        rc_check, _, _ = run_git(["rev-parse", "--git-dir"], cwd=index.source_root)
         if rc_check == 0:
             git_available = True
             file_churn = _get_file_churn(index.source_root, days)
@@ -138,22 +120,24 @@ def get_hotspots(
         else:
             assessment = "low"
 
-        candidates.append({
-            "symbol_id": sym.get("id", ""),
-            "name": sym.get("name", ""),
-            "kind": sym.get("kind", ""),
-            "file": file_path,
-            "line": sym.get("line") or 0,
-            "cyclomatic": cyclomatic,
-            "max_nesting": sym.get("max_nesting") or 0,
-            "param_count": sym.get("param_count") or 0,
-            "churn": churn,
-            "hotspot_score": hotspot_score,
-            "assessment": assessment,
-        })
+        candidates.append(
+            {
+                "symbol_id": sym.get("id", ""),
+                "name": sym.get("name", ""),
+                "kind": sym.get("kind", ""),
+                "file": file_path,
+                "line": sym.get("line") or 0,
+                "cyclomatic": cyclomatic,
+                "max_nesting": sym.get("max_nesting") or 0,
+                "param_count": sym.get("param_count") or 0,
+                "churn": churn,
+                "hotspot_score": hotspot_score,
+                "assessment": assessment,
+            }
+        )
 
     candidates.sort(key=lambda x: -x["hotspot_score"])
-    top = candidates[:max(1, top_n)]
+    top = candidates[: max(1, top_n)]
 
     has_complexity_data = any(c.get("cyclomatic", 0) > 0 for c in top)
     note = None

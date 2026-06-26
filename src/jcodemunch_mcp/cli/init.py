@@ -45,7 +45,7 @@ Always use jCodemunch-MCP tools for code navigation. Never fall back to Read, Gr
 **Relationships & impact:**
 - what imports this file → `find_importers`
 - where is this name used → `find_references`
-- is this identifier used anywhere → `check_references`
+- is this identifier used anywhere → `find_references` (with `quick=true`)
 - file dependency graph → `get_dependency_graph`
 - what breaks if I change X → `get_blast_radius`
 - what symbols actually changed since last commit → `get_changed_symbols`
@@ -55,12 +55,7 @@ Always use jCodemunch-MCP tools for code navigation. Never fall back to Read, Gr
 ## Session-Aware Routing
 
 **Opening move for any task:**
-1. `plan_turn { "repo": "...", "query": "your task description", "model": "<your-model-id>" }` — get confidence + recommended files; the `model` parameter narrows the exposed tool list to match your capabilities at zero extra requests.
-2. Obey the confidence level:
-   - `high` → go directly to recommended symbols, max 2 supplementary reads
-   - `medium` → explore recommended files, max 5 supplementary reads
-   - `low` → the feature likely doesn't exist. Report the gap to the user. Do NOT search further hoping to find it.
-3. **One-call shortcut for a concrete task** — `assemble_task_context { "repo": "...", "task": "..." }` returns a single token-budgeted, source-attributed context capsule. It auto-classifies the task (explore / debug / refactor / extend / audit / review), auto-extracts anchor symbols, and runs the intent-appropriate sequence of the tools below end-to-end — so you get the whole context in one request instead of chaining the primitives by hand. Prefer it over a manual chain when the task is well-defined; fall back to step 1's routing when you need to decide *whether* the feature exists first.
+1. `assemble_task_context { "repo": "...", "task": "..." }` returns a single token-budgeted, source-attributed context capsule. It auto-classifies the task (explore / debug / refactor / extend / audit / review), auto-extracts anchor symbols, and runs the intent-appropriate sequence of the tools below end-to-end — so you get the whole context in one request instead of chaining the primitives by hand. Fall back to manual tool-chaining when you need to decide *whether* the feature exists first.
 
 **Interpreting search results:**
 - If `search_symbols` returns `negative_evidence` with `verdict: "no_implementation_found"`:
@@ -80,17 +75,7 @@ Always use jCodemunch-MCP tools for code navigation. Never fall back to Read, Gr
 - If `auto_compacted: true` appears: results were automatically compressed due to turn budget
 - Use `get_session_context` to check what you've already read — avoid re-reading the same files
 
-## Model-Driven Tool Tiering
 
-Your jcodemunch-mcp server narrows the exposed tool list based on the model you are running as. To avoid wasting requests on primitives when a composite would do, always include `model="<your-model-id>"` in your opening `plan_turn` call.
-
-Replace `<your-model-id>` with your active model:
-- Claude Opus variants → `claude-opus-4-7` (or any `claude-opus-*`)
-- Claude Sonnet variants → `claude-sonnet-4-6`
-- Claude Haiku variants → `claude-haiku-4-5`
-- GPT-4o / GPT-5 / o1 / Llama → use the model id as printed by your runner
-
-The `model=` parameter rides on the existing `plan_turn` call — it does **not** add a separate tool invocation.
 """
 
 _MCP_ENTRY = {
@@ -399,25 +384,22 @@ def _has_policy(path: Path) -> bool:
 def _get_active_tools() -> set[str] | None:
     """Return the set of tool names active under current config.
 
-    Applies tool_profile and disabled_tools filtering.
-    Returns ``None`` when the profile is "full" and nothing is disabled
+    Applies disabled_tools filtering.
+    Returns ``None`` when nothing is disabled
     (i.e. no filtering needed).
     """
     try:
         from ..config import get as cfg_get
-        from ..server import _CANONICAL_TOOL_NAMES, _PROFILE_TIERS
+        from ..server import _CANONICAL_TOOL_NAMES
     except Exception:
         return None
 
-    profile = cfg_get("tool_profile", "full")
-    tier = _PROFILE_TIERS.get(profile)
     disabled = set(cfg_get("disabled_tools", []))
 
-    if tier is None and not disabled:
-        return None  # full profile, nothing disabled
+    if not disabled:
+        return None  # nothing disabled
 
-    active = set(_CANONICAL_TOOL_NAMES) if tier is None else set(tier)
-    active -= disabled
+    active = set(_CANONICAL_TOOL_NAMES) - disabled
     return active
 
 
@@ -602,12 +584,12 @@ def install_windsurf_rules(*, dry_run: bool = False, backup: bool = True) -> str
 
 
 def install_agents_md(*, dry_run: bool = False, backup: bool = True) -> str:
-    """Write ./AGENTS.md with the plan_turn(model=...) directive.
+    """Write ./AGENTS.md with the code exploration policy.
 
     OpenCode, Codex, and several other agent runners read AGENTS.md as
     their per-project system-prompt augmentation. Mirrors CLAUDE.md
     policy so agents swapped via those runners observe the same
-    tier-switching convention.
+    conventions.
     """
     target = Path.cwd() / "AGENTS.md"
     policy = _filter_policy_for_tools(_CLAUDE_MD_POLICY, _get_active_tools())

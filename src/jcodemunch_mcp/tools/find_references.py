@@ -1,4 +1,11 @@
-"""Find all files that reference (import) a given identifier."""
+"""Find all files that reference (import) a given identifier.
+
+Supports two modes:
+  - Full (quick=False, default): return the complete reference list.
+  - Quick (quick=True): return a lightweight {is_referenced, import_count,
+    content_count} envelope for fast dead-code checks — the behaviour that
+    was formerly the separate ``check_references`` tool.
+"""
 
 import posixpath
 import time
@@ -6,6 +13,152 @@ from typing import Optional
 
 from ..storage import IndexStore, result_cache_get, result_cache_put
 from ._utils import index_status_to_tool_error, resolve_repo
+
+
+def _quick_check_single(
+    identifier: str,
+    index,
+    search_content: bool,
+    max_content_results: int,
+    owner: str,
+    name: str,
+    store: "IndexStore",
+    start: float,
+) -> dict:
+    """Quick-mode logic for a single identifier: import + content counts only."""
+    ident_lower = identifier.lower()
+
+    # ── Import-level check ──────────────────────────────────────────────────
+    import_references = []
+    if index.imports is not None:
+        for src_file, file_imports in index.imports.items():
+            matches = []
+            for imp in file_imports:
+                named_match = any(
+                    n.lower() == ident_lower for n in imp.get("names", [])
+                )
+                spec = imp["specifier"]
+                spec_stem = posixpath.splitext(posixpath.basename(spec))[0].lower()
+                stem_match = spec_stem == ident_lower
+
+                if named_match or stem_match:
+                    matches.append(
+                        {
+                            "specifier": spec,
+                            "names": imp.get("names", []),
+                            "match_type": "named" if named_match else "specifier_stem",
+                        }
+                    )
+
+            if matches:
+                import_references.append({"file": src_file, "matches": matches})
+
+    import_count = len(import_references)
+
+    # ── Content-level check ─────────────────────────────────────────────────
+    # Find files where this identifier is *defined* (via symbol index)
+    # so we can skip them — finding the name in the defining file is not a "reference".
+    defining_files: set[str] = set()
+    for sym in index.symbols:
+        if sym.get("name", "").lower() == ident_lower:
+            file_path = sym.get("file", "")
+            if file_path:
+                defining_files.add(file_path)
+
+    content_references = []
+
+    if search_content:
+        content_dir = store._content_dir(owner, name)
+        for file_path in index.source_files:
+            if file_path in defining_files:
+                continue
+
+            full_path = store._safe_content_path(content_dir, file_path)
+            if not full_path or not full_path.exists():
+                continue
+
+            try:
+                with open(
+                    full_path, "r", encoding="utf-8", errors="replace", newline=""
+                ) as f:
+                    content = f.read()
+            except OSError:
+                continue
+
+            file_matches = []
+            for line_index, line in enumerate(content.split("\n")):
+                if ident_lower in line.lower():
+                    file_matches.append(
+                        {
+                            "line": line_index + 1,
+                            "text": line.rstrip()[:200],
+                        }
+                    )
+
+            if file_matches:
+                content_references.append({"file": file_path, "matches": file_matches})
+                # Stop after N files, not N lines
+                if len(content_references) >= max_content_results:
+                    break
+
+    content_count = len(content_references)
+
+    elapsed = (time.perf_counter() - start) * 1000
+    is_referenced = import_count > 0 or content_count > 0
+
+    result = {
+        "repo": f"{owner}/{name}",
+        "identifier": identifier,
+        "is_referenced": is_referenced,
+        "import_count": import_count,
+        "import_references": import_references,
+        "content_count": content_count,
+        "_meta": {"timing_ms": round(elapsed, 1)},
+    }
+
+    if search_content:
+        result["content_references"] = content_references
+
+    return result
+
+
+def _quick_check_batch(
+    identifiers: list[str],
+    index,
+    search_content: bool,
+    max_content_results: int,
+    owner: str,
+    name: str,
+    store: "IndexStore",
+    start: float,
+) -> dict:
+    """Batch quick-mode: loop over identifiers, return grouped results array."""
+    results = []
+    for identifier in identifiers:
+        result = _quick_check_single(
+            identifier=identifier,
+            index=index,
+            search_content=search_content,
+            max_content_results=max_content_results,
+            owner=owner,
+            name=name,
+            store=store,
+            start=start,
+        )
+        # Strip envelope fields for consistency with other batch tools
+        result.pop("repo", None)
+        result.pop("_meta", None)
+        results.append(result)
+
+    elapsed = (time.perf_counter() - start) * 1000
+    return {
+        "repo": f"{owner}/{name}",
+        "results": results,
+        "_meta": {
+            "timing_ms": round(elapsed, 1),
+            "identifiers_checked": len(identifiers),
+        },
+    }
 
 
 def _build_import_name_index(index) -> dict[str, list[tuple[str, dict]]]:
@@ -19,7 +172,9 @@ def _build_import_name_index(index) -> dict[str, list[tuple[str, dict]]]:
         for imp in file_imports:
             for n in imp.get("names", []):
                 inv.setdefault(n.lower(), []).append((src_file, imp))
-            spec_stem = posixpath.splitext(posixpath.basename(imp["specifier"]))[0].lower()
+            spec_stem = posixpath.splitext(posixpath.basename(imp["specifier"]))[
+                0
+            ].lower()
             if spec_stem:
                 inv.setdefault(spec_stem, []).append((src_file, imp))
     return inv
@@ -63,7 +218,7 @@ def _calling_symbols_in_file(
     Used to populate the optional ``calling_symbols`` field when
     ``include_call_chain=True``.  Each result is ``{id, name, kind, line}``.
     """
-    from ._call_graph import _word_match, _symbol_body
+    from ._call_graph import _symbol_body, _word_match
 
     # Lazy: build symbols_by_file only once per call_chain enrichment pass.
     # We do it here inline to keep the function self-contained; callers can
@@ -86,12 +241,14 @@ def _calling_symbols_in_file(
         body = _symbol_body(file_lines, sym)
         if body and _word_match(body, identifier):
             seen.add(sid)
-            results.append({
-                "id": sid,
-                "name": sym.get("name", ""),
-                "kind": sym.get("kind", ""),
-                "line": sym.get("line", 0),
-            })
+            results.append(
+                {
+                    "id": sid,
+                    "name": sym.get("name", ""),
+                    "kind": sym.get("kind", ""),
+                    "line": sym.get("line", 0),
+                }
+            )
 
     return results
 
@@ -135,11 +292,13 @@ def _find_references_single(
         stem_match = spec_stem == ident_lower
 
         if named_match or stem_match:
-            file_matches.setdefault(src_file, []).append({
-                "specifier": spec,
-                "names": imp.get("names", []),
-                "match_type": "named" if named_match else "specifier_stem",
-            })
+            file_matches.setdefault(src_file, []).append(
+                {
+                    "specifier": spec,
+                    "names": imp.get("names", []),
+                    "match_type": "named" if named_match else "specifier_stem",
+                }
+            )
 
     results = [{"file": f, "matches": m} for f, m in file_matches.items()]
     results.sort(key=lambda r: r["file"])
@@ -180,7 +339,7 @@ def _find_references_single(
             "timing_ms": round(elapsed, 1),
             "truncated": len(results) > max_results,
             "tip": "Tip: use identifiers=[...] to query multiple identifiers in one call. "
-                   "For usage-site matching beyond imports, also try search_text or check_references.",
+            "For usage-site matching beyond imports, also try search_text or find_references(quick=True).",
         },
     }
 
@@ -221,10 +380,14 @@ def _find_references_batch(
         entries = inv.get(ident_lower, [])
         for src_file, imp in entries:
             if src_file not in ident_map.get(ident_lower, {}):
-                named_match = any(n.lower() == ident_lower for n in imp.get("names", []))
+                named_match = any(
+                    n.lower() == ident_lower for n in imp.get("names", [])
+                )
                 match_type = "named" if named_match else "specifier_stem"
                 ident_map.setdefault(ident_lower, {})[src_file] = {
-                    "file": src_file, "specifier": imp["specifier"], "match_type": match_type,
+                    "file": src_file,
+                    "specifier": imp["specifier"],
+                    "match_type": match_type,
                 }
 
     results = []
@@ -232,11 +395,13 @@ def _find_references_batch(
         ident_lower = identifier.lower()
         file_results = list(ident_map.get(ident_lower, {}).values())
         file_results.sort(key=lambda r: r["file"])
-        results.append({
-            "identifier": identifier,
-            "reference_count": len(file_results),
-            "references": file_results[:max_results],
-        })
+        results.append(
+            {
+                "identifier": identifier,
+                "reference_count": len(file_results),
+                "references": file_results[:max_results],
+            }
+        )
 
     return {
         "repo": f"{owner}/{name}",
@@ -250,6 +415,7 @@ def _attach_runtime_to_response(response: dict, store, owner: str, name: str) ->
     a find_references response (single or batch mode). No-op when no traces.
     """
     from ..runtime.confidence import attach_runtime_confidence_by_file
+
     refs: list[dict] = []
     if "references" in response:
         # Singular mode
@@ -277,6 +443,9 @@ def find_references(
     storage_path: Optional[str] = None,
     identifiers: Optional[list[str]] = None,
     include_call_chain: bool = False,
+    quick: bool = False,
+    search_content: bool = True,
+    max_content_results: int = 20,
 ) -> dict:
     """Find all indexed files that import or reference an identifier.
 
@@ -285,19 +454,34 @@ def find_references(
     - Batch: pass ``identifiers`` (list) to query multiple identifiers at once,
       returning a grouped ``results`` array.
 
+    With ``quick=True``, returns a lightweight envelope per identifier:
+    ``{is_referenced: bool, import_count: int, content_count: int}`` — the
+    behaviour formerly provided by the separate ``check_references`` tool.
+    When ``quick=True``, also searches file content (controlled by
+    ``search_content`` and capped by ``max_content_results``) in addition to
+    the import graph.
+
     Args:
         repo: Repository identifier (owner/repo or display name).
-        identifier: The symbol/module name to look for (singular mode, e.g. 'bulkImport').
-        max_results: Maximum number of results.
+        identifier: The symbol/module name to look for (singular mode).
+        max_results: Maximum number of results (full mode only).
         storage_path: Custom storage path.
         identifiers: List of symbol/module names to look for (batch mode).
-        include_call_chain: When True (singular mode only), each reference entry gains a
-            ``calling_symbols`` list of symbols in that file whose bodies mention the
-            identifier. Gated off by default; batch mode ignores this flag.
+        include_call_chain: When True (singular mode, full mode only), each
+            reference entry gains a ``calling_symbols`` list.
+        quick: When True, return a lightweight ``is_referenced`` envelope with
+            import/content counts instead of the full reference list. This is
+            the merged ``check_references`` behaviour.
+        search_content: Also search file contents, not just imports
+            (quick mode only). Default True.
+        max_content_results: Max files to return per identifier for content
+            search (quick mode only). Default 20.
 
     Returns:
-        Singular mode: dict with flat ``references`` list and _meta envelope.
-        Batch mode: dict with ``results`` array (one entry per input identifier).
+        Full singular: dict with flat ``references`` list and _meta envelope.
+        Full batch: dict with ``results`` array.
+        Quick singular: dict with ``is_referenced``, ``import_count``, ``content_count``.
+        Quick batch: dict with ``results`` array (one entry per input identifier).
 
     Raises:
         ValueError: if neither or both of identifier and identifiers are provided.
@@ -305,11 +489,18 @@ def find_references(
     # Normalize: some MCP clients send identifiers=[] alongside identifier when they mean singular mode
     if identifier is not None and identifiers is not None and len(identifiers) == 0:
         identifiers = None
-    if (identifier is None and identifiers is None) or (identifier is not None and identifiers is not None):
-        raise ValueError("Provide exactly one of 'identifier' or 'identifiers', not both and not neither.")
+    if (identifier is None and identifiers is None) or (
+        identifier is not None and identifiers is not None
+    ):
+        raise ValueError(
+            "Provide exactly one of 'identifier' or 'identifiers', not both and not neither."
+        )
 
     start = time.perf_counter()
-    max_results = max(1, min(max_results, 200))
+    if not quick:
+        max_results = max(1, min(max_results, 200))
+    else:
+        max_content_results = max(1, min(max_content_results, 100))
 
     try:
         owner, name = resolve_repo(repo, storage_path)
@@ -321,8 +512,36 @@ def find_references(
     if not index:
         return index_status_to_tool_error(store.inspect_index(owner, name))
 
+    # ── Quick mode (former check_references) ────────────────────────────
+    if quick:
+        if identifiers is not None:
+            return _quick_check_batch(
+                identifiers,
+                index,
+                search_content,
+                max_content_results,
+                owner,
+                name,
+                store,
+                start,
+            )
+        else:
+            return _quick_check_single(
+                identifier=identifier,  # type: ignore[arg-type]
+                index=index,
+                search_content=search_content,
+                max_content_results=max_content_results,
+                owner=owner,
+                name=name,
+                store=store,
+                start=start,
+            )
+
+    # ── Full mode (original find_references behaviour) ────────────────────
     if identifiers is not None:
-        result = _find_references_batch(identifiers, index, max_results, owner, name, start)
+        result = _find_references_batch(
+            identifiers, index, max_results, owner, name, start
+        )
         return _attach_runtime_to_response(result, store, owner, name)
     else:
         repo_key = f"{owner}/{name}"
@@ -330,12 +549,19 @@ def find_references(
         cached = result_cache_get("find_references", repo_key, specific_key)
         if cached is not None:
             result = dict(cached)
-            result["_meta"] = {**cached["_meta"],
-                               "timing_ms": round((time.perf_counter() - start) * 1000, 1),
-                               "cache_hit": True}
+            result["_meta"] = {
+                **cached["_meta"],
+                "timing_ms": round((time.perf_counter() - start) * 1000, 1),
+                "cache_hit": True,
+            }
             return _attach_runtime_to_response(result, store, owner, name)
         result = _find_references_single(
-            identifier, index, max_results, owner, name, start,
+            identifier,
+            index,
+            max_results,
+            owner,
+            name,
+            start,
             include_call_chain=include_call_chain,
             store=store,
         )

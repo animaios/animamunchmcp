@@ -29,7 +29,7 @@ async def test_server_lists_all_tools():
     try:
         tools = await list_tools()
 
-        assert len(tools) == 70
+        assert len(tools) == 69
 
         names = {t.name for t in tools}
         expected = {
@@ -62,7 +62,6 @@ async def test_server_lists_all_tools():
             "get_class_hierarchy",
             "get_related_symbols",
             "suggest_queries",
-            "get_symbol_importance",
             "get_repo_map",
             "find_similar_symbols",
             "find_dead_code",
@@ -73,7 +72,6 @@ async def test_server_lists_all_tools():
             "get_cross_repo_map",
             "get_group_contracts",
             "get_call_hierarchy",
-            "get_impact_preview",
             "get_dependency_cycles",
             "get_coupling_metrics",
             "get_layer_violations",

@@ -5,64 +5,14 @@ from collections import deque
 from typing import Optional
 
 from ..storage import IndexStore
-from ..parser.imports import (
-    build_re_export_maps,
-    expand_barrel_leaves,
-    resolve_specifier,
-)
+from ._graph_utils import build_adjacency, invert_adjacency
 from ._utils import index_status_to_tool_error, resolve_repo
 from .package_registry import extract_root_package_from_specifier
 
 
-def _build_adjacency(
-    imports: dict, source_files: frozenset, alias_map: Optional[dict] = None,
-    psr4_map: Optional[dict] = None,
-) -> dict[str, list[str]]:
-    """Build forward adjacency {file: [files_it_imports]} from raw import data.
-
-    v1.93.0+: when an import targets a TypeScript/JavaScript barrel file,
-    the importer is also credited with importing the leaf files re-exported
-    through that barrel.
-
-    v1.94.0+: barrel expansion is now per-name. Wildcard re-exports
-    (`export * from`) credit every leaf to anyone importing the barrel.
-    Selective re-exports (`export { Foo } from`) credit only the consumers
-    that actually import `Foo` from the barrel. Mixed barrels work too —
-    names not in the selective table fall back to the wildcard expansion.
-    """
-    wildcard_map, named_map = build_re_export_maps(
-        imports, source_files, alias_map, psr4_map,
-    )
-
-    adj: dict[str, list[str]] = {}
-    for src_file, file_imports in imports.items():
-        resolved: list[str] = []
-        for imp in file_imports:
-            direct = resolve_specifier(imp["specifier"], src_file, source_files, alias_map, psr4_map)
-            if not direct or direct == src_file:
-                continue
-            leaves = expand_barrel_leaves(
-                direct, imp.get("names", []), wildcard_map, named_map,
-            )
-            for leaf in leaves:
-                if leaf != src_file:
-                    resolved.append(leaf)
-        if resolved:
-            adj[src_file] = list(dict.fromkeys(resolved))  # deduplicate, preserve order
-
-    return adj
-
-
-def _invert(adj: dict[str, list[str]]) -> dict[str, list[str]]:
-    """Invert adjacency list: {file: [importers_of_file]}."""
-    inv: dict[str, list[str]] = {}
-    for src, targets in adj.items():
-        for tgt in targets:
-            inv.setdefault(tgt, []).append(src)
-    return inv
-
-
-def _bfs(start: str, adj: dict[str, list[str]], depth: int) -> tuple[list[str], list[list[str]]]:
+def _bfs(
+    start: str, adj: dict[str, list[str]], depth: int
+) -> tuple[list[str], list[list[str]]]:
     """BFS from start up to depth hops. Returns (nodes, edges)."""
     visited: dict[str, int] = {start: 0}  # node -> level
     edges: list[list[str]] = []
@@ -103,7 +53,9 @@ def get_dependency_graph(
         Dict with nodes, edges, per-node neighbor lists, and _meta envelope.
     """
     if direction not in ("imports", "importers", "both"):
-        return {"error": f"Invalid direction '{direction}'. Must be 'imports', 'importers', or 'both'."}
+        return {
+            "error": f"Invalid direction '{direction}'. Must be 'imports', 'importers', or 'both'."
+        }
 
     depth = max(1, min(depth, 3))
     start = time.perf_counter()
@@ -111,6 +63,7 @@ def get_dependency_graph(
     # Resolve cross_repo default from config if not explicitly provided
     if cross_repo is None:
         from .. import config as _cfg
+
         cross_repo = bool(_cfg.get("cross_repo_default", False))
 
     try:
@@ -132,8 +85,14 @@ def get_dependency_graph(
         return {"error": f"File not found in index: {file}"}
 
     source_files = frozenset(index.source_files)
-    fwd = _build_adjacency(index.imports, source_files, index.alias_map, getattr(index, "psr4_map", None))
-    rev = _invert(fwd)
+    fwd = build_adjacency(
+        index.imports,
+        source_files,
+        index.alias_map,
+        getattr(index, "psr4_map", None),
+        expand_barrels=True,
+    )
+    rev = invert_adjacency(fwd)
 
     nodes_out: set[str] = set()
     edges_out: list[list[str]] = []
@@ -175,6 +134,7 @@ def get_dependency_graph(
     if cross_repo and index.imports:
         try:
             from .list_repos import list_repos
+
             all_repos_data = list_repos(storage_path=storage_path).get("repos", [])
             repo_id = f"{owner}/{name}"
             file_imports_for_file = index.imports.get(file, [])
@@ -186,7 +146,11 @@ def get_dependency_graph(
                     continue
                 for repo_entry in all_repos_data:
                     other_repo_id = repo_entry.get("repo", "")
-                    if not other_repo_id or other_repo_id == repo_id or "/" not in other_repo_id:
+                    if (
+                        not other_repo_id
+                        or other_repo_id == repo_id
+                        or "/" not in other_repo_id
+                    ):
                         continue
                     other_owner, other_name = other_repo_id.split("/", 1)
                     other_index = store.load_index(other_owner, other_name)
@@ -194,18 +158,23 @@ def get_dependency_graph(
                         continue
                     other_pkg_names = getattr(other_index, "package_names", []) or []
                     if root_pkg in other_pkg_names:
-                        cross_repo_edges.append({
-                            "from": file,
-                            "to": specifier,
-                            "from_repo": repo_id,
-                            "to_repo": other_repo_id,
-                            "package_name": root_pkg,
-                            "cross_repo": True,
-                        })
+                        cross_repo_edges.append(
+                            {
+                                "from": file,
+                                "to": specifier,
+                                "from_repo": repo_id,
+                                "to_repo": other_repo_id,
+                                "package_name": root_pkg,
+                                "cross_repo": True,
+                            }
+                        )
                         break
         except Exception:
             import logging as _logging
-            _logging.getLogger(__name__).debug("cross_repo dependency graph failed", exc_info=True)
+
+            _logging.getLogger(__name__).debug(
+                "cross_repo dependency graph failed", exc_info=True
+            )
 
     # Top-level convenience aliases for the queried file's depth-1 neighbors.
     # Most consumers asking "what does file X import / who imports it?" want

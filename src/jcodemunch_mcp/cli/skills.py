@@ -108,13 +108,6 @@ def _build_skill_content() -> str:
         "",
         '1. `resolve_repo({"path": "."})` — confirms the repo is indexed '
         "and queryable. If `indexed: false`, run `index_folder`.",
-        '2. `plan_turn({"repo": "...", "query": "...", '
-        '"model": "<your-model-id>"})` — gets a confidence verdict + '
-        "recommended files. Obey the confidence:",
-        "   - `high` → go directly to the recommended symbols.",
-        "   - `medium` → explore the recommended files, cap supplementary reads.",
-        "   - `low` → the capability likely doesn't exist; report the gap, do "
-        "     not keep searching hoping it appears.",
         "",
         "### Reading code",
         "",
@@ -132,7 +125,7 @@ def _build_skill_content() -> str:
         "",
         '- "What imports this file?" → `find_importers`',
         '- "Where is this identifier used?" → `find_references`',
-        '- "Is this identifier used anywhere?" → `check_references` (fast yes/no)',
+        '- "Is this identifier used anywhere?" → `find_references` (quick=true, fast yes/no)',
         '- "What breaks if I change X?" → `get_blast_radius`',
         '- "Who calls this / what does this call?" → `get_call_hierarchy`',
         '- "Is this safe to delete?" → `check_safe` (8 verdict tiers)',
@@ -168,18 +161,6 @@ def _build_skill_content() -> str:
         "  auto-reindexed.",
         '- Otherwise: `register_edit({"paths": [...]})` invalidates caches '
         "  and refreshes the index for those files.",
-        "",
-        "## Tier model",
-        "",
-        "The server narrows the exposed tool list based on the model you "
-        "report via `plan_turn`'s `model` parameter. To get the right tier:",
-        "",
-        "- Claude Opus → `claude-opus-4-7`",
-        "- Claude Sonnet → `claude-sonnet-4-6`",
-        "- Claude Haiku → `claude-haiku-4-5`",
-        "- Other models → the model id as your runner prints it",
-        "",
-        "If `plan_turn` doesn't fit a given task, proceed without.",
         "",
         "## Tool reference",
         "",

@@ -4,8 +4,8 @@ import time
 from typing import Optional
 
 from ..storage import IndexStore
+from ._graph_utils import build_adjacency
 from ._utils import index_status_to_tool_error, resolve_repo
-from .get_dependency_graph import _build_adjacency
 
 
 def _file_to_layer(file_path: str, layers: list[dict]) -> Optional[str]:
@@ -43,6 +43,7 @@ def _resolve_layers(
     # Try project config
     try:
         from .. import config as _cfg
+
         arch = _cfg.get("architecture", {}, repo=repo)
         if isinstance(arch, dict):
             layers = arch.get("layers", [])
@@ -50,7 +51,10 @@ def _resolve_layers(
                 return layers
     except Exception:
         import logging as _logging
-        _logging.getLogger(__name__).debug("Failed to read architecture config", exc_info=True)
+
+        _logging.getLogger(__name__).debug(
+            "Failed to read architecture config", exc_info=True
+        )
 
     return []
 
@@ -139,7 +143,13 @@ def get_layer_violations(
 
     source_files = frozenset(index.source_files)
     alias_map = getattr(index, "alias_map", None)
-    fwd = _build_adjacency(index.imports, source_files, alias_map, getattr(index, "psr4_map", None))
+    fwd = build_adjacency(
+        index.imports,
+        source_files,
+        alias_map,
+        getattr(index, "psr4_map", None),
+        expand_barrels=True,
+    )
 
     violations: list[dict] = []
 
@@ -151,13 +161,15 @@ def get_layer_violations(
         for tgt_file in targets:
             tgt_layer = _file_to_layer(tgt_file, layers)
             if tgt_layer and tgt_layer in disallowed:
-                violations.append({
-                    "file": src_file,
-                    "file_layer": src_layer,
-                    "import_target": tgt_file,
-                    "target_layer": tgt_layer,
-                    "rule_violated": f"{src_layer} may_not_import {tgt_layer}",
-                })
+                violations.append(
+                    {
+                        "file": src_file,
+                        "file_layer": src_layer,
+                        "import_target": tgt_file,
+                        "target_layer": tgt_layer,
+                        "rule_violated": f"{src_layer} may_not_import {tgt_layer}",
+                    }
+                )
 
     elapsed = (time.perf_counter() - start) * 1000
     return {

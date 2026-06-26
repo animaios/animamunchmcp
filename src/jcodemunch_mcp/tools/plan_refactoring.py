@@ -1,4 +1,5 @@
 """plan_refactoring — edit-ready refactoring plans."""
+
 from __future__ import annotations
 
 import logging
@@ -6,16 +7,15 @@ import re
 from pathlib import PurePosixPath
 from typing import Optional, Tuple
 
-from ..storage import IndexStore
+from ..storage import IndexStore, record_savings
+from ._call_graph import _symbol_body
 
 # Reused from existing tools (no duplication)
+from ._graph_utils import build_adjacency
 from .get_blast_radius import (
-    _build_reverse_adjacency,
     _bfs_importers,
     _name_in_content,
 )
-from ._call_graph import _symbol_body
-from ..storage import record_savings
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,9 @@ _IMPORT_PATTERNS = {
     "fortran": re.compile(r"^\s*use\s+\w+", re.IGNORECASE),
     "graphql": re.compile(r"^\s*#\s*import\s+"),  # graphql-import convention
     # -- Tier 2 continued: missing languages --
-    "erlang": re.compile(r"^\s*-(?:import|include|include_lib|behaviour|behaviors?)\s*"),
+    "erlang": re.compile(
+        r"^\s*-(?:import|include|include_lib|behaviour|behaviors?)\s*"
+    ),
     "bash": re.compile(r"^\s*(?:source|\.)\s+"),
     "hcl": re.compile(r'^\s*module\s+"[^"]*"\s+{'),
     "autohotkey": re.compile(r"^\s*#Include", re.IGNORECASE),
@@ -102,88 +104,166 @@ _IMPORT_PATTERNS = {
 _DEF_PATTERNS = {
     # -- Tier 1: languages with import extractors --
     "python": re.compile(r"^\s*(class|def|async\s+def)\s+{name}\b"),
-    "typescript": re.compile(r"^\s*(export\s+)?(class|function|const|let|var|interface|type|enum)\s+{name}\b"),
-    "javascript": re.compile(r"^\s*(export\s+)?(class|function|const|let|var)\s+{name}\b"),
-    "tsx": re.compile(r"^\s*(export\s+)?(class|function|const|let|var|interface|type|enum)\s+{name}\b"),
+    "typescript": re.compile(
+        r"^\s*(export\s+)?(class|function|const|let|var|interface|type|enum)\s+{name}\b"
+    ),
+    "javascript": re.compile(
+        r"^\s*(export\s+)?(class|function|const|let|var)\s+{name}\b"
+    ),
+    "tsx": re.compile(
+        r"^\s*(export\s+)?(class|function|const|let|var|interface|type|enum)\s+{name}\b"
+    ),
     "jsx": re.compile(r"^\s*(export\s+)?(class|function|const|let|var)\s+{name}\b"),
-    "rust": re.compile(r"^\s*(pub(\s*\([^)]*\))?\s+)?(fn|struct|enum|trait|type|const|static|mod)\s+{name}\b"),
+    "rust": re.compile(
+        r"^\s*(pub(\s*\([^)]*\))?\s+)?(fn|struct|enum|trait|type|const|static|mod)\s+{name}\b"
+    ),
     "go": re.compile(r"^\s*(func|type|var|const)\s+{name}\b"),
-    "java": re.compile(r"^\s*(public|private|protected)?\s*(static\s+)?(abstract\s+)?(final\s+)?(class|interface|enum|record|@interface)\s+{name}\b"),
-    "kotlin": re.compile(r"^\s*(public|private|protected|internal)?\s*(data\s+|sealed\s+|abstract\s+|open\s+)?(class|interface|object|enum\s+class|fun)\s+{name}\b"),
-    "csharp": re.compile(r"^\s*(public|private|protected|internal)?\s*(static\s+)?(partial\s+)?(class|struct|interface|enum|record|delegate)\s+{name}\b"),
-    "php": re.compile(r"^\s*(abstract\s+)?(final\s+)?(class|interface|trait|enum|function)\s+{name}\b"),
+    "java": re.compile(
+        r"^\s*(public|private|protected)?\s*(static\s+)?(abstract\s+)?(final\s+)?(class|interface|enum|record|@interface)\s+{name}\b"
+    ),
+    "kotlin": re.compile(
+        r"^\s*(public|private|protected|internal)?\s*(data\s+|sealed\s+|abstract\s+|open\s+)?(class|interface|object|enum\s+class|fun)\s+{name}\b"
+    ),
+    "csharp": re.compile(
+        r"^\s*(public|private|protected|internal)?\s*(static\s+)?(partial\s+)?(class|struct|interface|enum|record|delegate)\s+{name}\b"
+    ),
+    "php": re.compile(
+        r"^\s*(abstract\s+)?(final\s+)?(class|interface|trait|enum|function)\s+{name}\b"
+    ),
     "ruby": re.compile(r"^\s*(class|module|def)\s+{name}\b"),
     "c": re.compile(r"^\s*(struct|enum|union|typedef)\s+{name}\b"),
     "cpp": re.compile(r"^\s*(class|struct|enum|union|namespace|template)\s+{name}\b"),
     "objc": re.compile(r"^\s*@(interface|implementation|protocol)\s+{name}\b"),
-    "arduino": re.compile(r"^\s*(class|struct|enum|union|namespace|template)\s+{name}\b"),
-    "vhdl": re.compile(r"^\s*(entity|architecture|package|component|process|function|procedure|signal|constant|type|subtype)\s+{name}\b", re.IGNORECASE),
-    "verilog": re.compile(r"^\s*(module|interface|class|function|task|package|typedef)\s+{name}\b"),
-    "swift": re.compile(r"^\s*(public\s+|private\s+|internal\s+|open\s+|fileprivate\s+)?(class|struct|enum|protocol|func|extension|typealias|actor)\s+{name}\b"),
-    "scala": re.compile(r"^\s*(private\s+|protected\s+)?(abstract\s+|sealed\s+|case\s+)?(class|object|trait|def|val|var|type|enum)\s+{name}\b"),
+    "arduino": re.compile(
+        r"^\s*(class|struct|enum|union|namespace|template)\s+{name}\b"
+    ),
+    "vhdl": re.compile(
+        r"^\s*(entity|architecture|package|component|process|function|procedure|signal|constant|type|subtype)\s+{name}\b",
+        re.IGNORECASE,
+    ),
+    "verilog": re.compile(
+        r"^\s*(module|interface|class|function|task|package|typedef)\s+{name}\b"
+    ),
+    "swift": re.compile(
+        r"^\s*(public\s+|private\s+|internal\s+|open\s+|fileprivate\s+)?(class|struct|enum|protocol|func|extension|typealias|actor)\s+{name}\b"
+    ),
+    "scala": re.compile(
+        r"^\s*(private\s+|protected\s+)?(abstract\s+|sealed\s+|case\s+)?(class|object|trait|def|val|var|type|enum)\s+{name}\b"
+    ),
     "haskell": re.compile(r"^\s*(data|type|newtype|class)\s+{name}\b"),
-    "dart": re.compile(r"^\s*(abstract\s+)?(class|mixin|enum|extension|typedef)\s+{name}\b"),
+    "dart": re.compile(
+        r"^\s*(abstract\s+)?(class|mixin|enum|extension|typedef)\s+{name}\b"
+    ),
     # -- Tier 2: languages with tree-sitter but no import extractors --
-    "elixir": re.compile(r"^\s*(defmodule|def|defp|defmacro|defmacrop|defstruct|defguard|defdelegate)\s+{name}\b"),
+    "elixir": re.compile(
+        r"^\s*(defmodule|def|defp|defmacro|defmacrop|defstruct|defguard|defdelegate)\s+{name}\b"
+    ),
     "perl": re.compile(r"^\s*(sub|package)\s+{name}\b"),
     "lua": re.compile(r"^\s*(local\s+)?function\s+(\w+[.:])?\s*{name}\b"),
     "luau": re.compile(r"^\s*(local\s+)?function\s+(\w+[.:])?\s*{name}\b"),
-    "groovy": re.compile(r"^\s*(public|private|protected)?\s*(static\s+)?(class|interface|enum|def)\s+{name}\b"),
+    "groovy": re.compile(
+        r"^\s*(public|private|protected)?\s*(static\s+)?(class|interface|enum|def)\s+{name}\b"
+    ),
     "gleam": re.compile(r"^\s*(pub\s+)?(fn|type|const)\s+{name}\b"),
     "fortran": re.compile(r"^\s*(subroutine|function|module|program|type)\s+{name}\b"),
     "erlang": re.compile(r"^{name}\s*\("),  # Erlang: function_name(args) ->
-    "julia": re.compile(r"^\s*(function|struct|abstract\s+type|mutable\s+struct|module|macro)\s+{name}\b"),
+    "julia": re.compile(
+        r"^\s*(function|struct|abstract\s+type|mutable\s+struct|module|macro)\s+{name}\b"
+    ),
     "r": re.compile(r"^\s*{name}\s*(<-|=)\s*function\s*\("),
     "gdscript": re.compile(r"^\s*(func|class|signal|enum)\s+{name}\b"),
     "bash": re.compile(r"^\s*(function\s+{name}|{name}\s*\(\s*\))"),
     "proto": re.compile(r"^\s*(message|service|enum|rpc)\s+{name}\b"),
-    "hcl": re.compile(r"^\s*(resource|data|module|variable|output)\s+\"[^\"]*\"\s+\"{name}\""),
-    "graphql": re.compile(r"^\s*(type|query|mutation|subscription|interface|enum|scalar|union|input|fragment|directive)\s+{name}\b"),
+    "hcl": re.compile(
+        r"^\s*(resource|data|module|variable|output)\s+\"[^\"]*\"\s+\"{name}\""
+    ),
+    "graphql": re.compile(
+        r"^\s*(type|query|mutation|subscription|interface|enum|scalar|union|input|fragment|directive)\s+{name}\b"
+    ),
     "autohotkey": re.compile(r"^\s*(class\s+{name}|{name}\s*\()"),
     # -- Tier 2 continued: missing languages --
-    "solidity": re.compile(r"^\s*(?:contract|interface|library|function|struct|enum|event|modifier)\s+{name}\b"),
+    "solidity": re.compile(
+        r"^\s*(?:contract|interface|library|function|struct|enum|event|modifier)\s+{name}\b"
+    ),
     "zig": re.compile(r"^\s*(?:pub\s+)?(?:fn|const|var|struct|enum|union)\s+{name}\b"),
-    "powershell": re.compile(r"^\s*(?:function|filter|class|enum)\s+{name}\b", re.IGNORECASE),
+    "powershell": re.compile(
+        r"^\s*(?:function|filter|class|enum)\s+{name}\b", re.IGNORECASE
+    ),
     "ocaml": re.compile(r"^\s*(?:let|type|module|class)\s+{name}\b"),
     "fsharp": re.compile(r"^\s*(?:let|type|module|namespace|class)\s+{name}\b"),
     "clojure": re.compile(r"^\s*\(\s*(?:defn|defmacro|def|defrecord)\s+{name}\b"),
     "elisp": re.compile(r"^\s*\(\s*(?:defun|defmacro|defvar|defcustom)\s+{name}\b"),
-    "nim": re.compile(r"^\s*(?:proc|func|method|iterator|macro|template|type)\s+{name}\b"),
+    "nim": re.compile(
+        r"^\s*(?:proc|func|method|iterator|macro|template|type)\s+{name}\b"
+    ),
     "tcl": re.compile(r"^\s*(?:proc|namespace\s+eval)\s+{name}\b"),
-    "dlang": re.compile(r"^\s*(?:class|struct|interface|enum|template|function)\s+{name}\b"),
-    "pascal": re.compile(r"^\s*(?:procedure|function|class|type)\s+{name}\b", re.IGNORECASE),
-    "ada": re.compile(r"^\s*(?:package|procedure|function|task|protected)\s+{name}\b", re.IGNORECASE),
+    "dlang": re.compile(
+        r"^\s*(?:class|struct|interface|enum|template|function)\s+{name}\b"
+    ),
+    "pascal": re.compile(
+        r"^\s*(?:procedure|function|class|type)\s+{name}\b", re.IGNORECASE
+    ),
+    "ada": re.compile(
+        r"^\s*(?:package|procedure|function|task|protected)\s+{name}\b", re.IGNORECASE
+    ),
     "cobol": re.compile(r"^\s*PROGRAM-ID\.\s*{name}\b", re.IGNORECASE),
-    "commonlisp": re.compile(r"^\s*\(\s*(?:defun|defmacro|defclass|defmethod)\s+{name}\b"),
+    "commonlisp": re.compile(
+        r"^\s*\(\s*(?:defun|defmacro|defclass|defmethod)\s+{name}\b"
+    ),
     "matlab": re.compile(r"^\s*function\s+.*{name}\b"),
-    "apex": re.compile(r"^\s*(?:public|private|protected)?\s*(?:class|interface|enum|trigger)\s+{name}\b"),
-    "sql": re.compile(r"^\s*CREATE\s+(?:TABLE|VIEW|FUNCTION|PROCEDURE)\s+{name}\b", re.IGNORECASE),
+    "apex": re.compile(
+        r"^\s*(?:public|private|protected)?\s*(?:class|interface|enum|trigger)\s+{name}\b"
+    ),
+    "sql": re.compile(
+        r"^\s*CREATE\s+(?:TABLE|VIEW|FUNCTION|PROCEDURE)\s+{name}\b", re.IGNORECASE
+    ),
     "css": re.compile(r"^\s*\.{name}\s*\{|^\s*#{name}\s*\{|^\s*{name}\s*\{"),
-    "scss": re.compile(r"^\s*\.{name}\s*\{|^\s*#{name}\s*\{|^\s*{name}\s*\{|^\s*@mixin\s+{name}\b"),
-    "sass": re.compile(r"^\s*\.{name}\s*$|^\s*#{name}\s*$|^\s*{name}\s*$|^\s*=\\s*{name}\b"),
-    "less": re.compile(r"^\s*\.{name}\s*\{|^\s*#{name}\s*\{|^\s*{name}\s*\{|^\s*\.{name}\s*\("),
+    "scss": re.compile(
+        r"^\s*\.{name}\s*\{|^\s*#{name}\s*\{|^\s*{name}\s*\{|^\s*@mixin\s+{name}\b"
+    ),
+    "sass": re.compile(
+        r"^\s*\.{name}\s*$|^\s*#{name}\s*$|^\s*{name}\s*$|^\s*=\\s*{name}\b"
+    ),
+    "less": re.compile(
+        r"^\s*\.{name}\s*\{|^\s*#{name}\s*\{|^\s*{name}\s*\{|^\s*\.{name}\s*\("
+    ),
     "styl": re.compile(r"^\s*\.{name}\s*$|^\s*#{name}\s*$|^\s*{name}\s*$"),
     "razor": re.compile(r"^\s*@\s*(?:functions|code|page|inject)\s+"),
-    "astro": re.compile(r"^\s*(export\s+)?(class|function|const|let|var|interface|type|enum)\s+{name}\b"),
+    "astro": re.compile(
+        r"^\s*(export\s+)?(class|function|const|let|var|interface|type|enum)\s+{name}\b"
+    ),
     "blade": re.compile(r"^\s*@\s*(?:section|component|slot)\s*\(\s*['\"]{name}['\"]"),
     "al": re.compile(r"^\s*(?:page|table|codeunit|report|query|enum)\s+{name}\b"),
     "nix": re.compile(r"^\s*{name}\s*="),
     "ejs": re.compile(r"<%[=-]?\s*(?:function|const\s+{name})"),
     "verse": re.compile(r"^\s*(?:class|function|agent|device)\s+{name}\b"),
     # -- Tier 3: vue and asm (vue uses JS/TS patterns, asm labels) --
-    "vue": re.compile(r"^\s*(export\s+)?(class|function|const|let|var|interface|type|enum)\s+{name}\b"),
+    "vue": re.compile(
+        r"^\s*(export\s+)?(class|function|const|let|var|interface|type|enum)\s+{name}\b"
+    ),
     "asm": re.compile(r"^\s*{name}\s*:"),
 }
 
 # Non-code file extensions for warning scans
-_NON_CODE_EXTENSIONS = {".yaml", ".yml", ".json", ".toml", ".env", ".md", ".txt", ".cfg", ".ini", ".xml"}
+_NON_CODE_EXTENSIONS = {
+    ".yaml",
+    ".yml",
+    ".json",
+    ".toml",
+    ".env",
+    ".md",
+    ".txt",
+    ".cfg",
+    ".ini",
+    ".xml",
+}
 
 # Common TypeScript/JavaScript path aliases (Fix A)
 _PATH_ALIAS_PATTERNS = {
-    "@": re.compile(r"['\"]@/"),       # @/ alias (common in Vue, Next.js)
-    "$lib": re.compile(r"['\"]\$lib/"), # $lib alias (SvelteKit)
-    "~": re.compile(r"['\"]~/"),       # ~ alias (common in webpack configs)
-    "#": re.compile(r"['\"]#/"),       # # alias (some configs)
+    "@": re.compile(r"['\"]@/"),  # @/ alias (common in Vue, Next.js)
+    "$lib": re.compile(r"['\"]\$lib/"),  # $lib alias (SvelteKit)
+    "~": re.compile(r"['\"]~/"),  # ~ alias (common in webpack configs)
+    "#": re.compile(r"['\"]#/"),  # # alias (some configs)
 }
 
 # TypeScript overload signature pattern (Fix D)
@@ -207,7 +287,9 @@ def _file_to_module(file_path: str) -> str:
 
 
 def _capture_multiline_sig(
-    lines: list[str], def_line_idx: int, content: str,
+    lines: list[str],
+    def_line_idx: int,
+    content: str,
 ) -> tuple[list[str], str, int]:
     """Capture a multi-line signature via paren balancing.
 
@@ -281,15 +363,20 @@ def plan_refactoring(
     elif refactor_type == "signature":
         if not new_signature:
             return {"error": "new_signature required for signature"}
-        return _plan_signature_change(index, store, owner, name, sym, new_signature, depth)
+        return _plan_signature_change(
+            index, store, owner, name, sym, new_signature, depth
+        )
 
     else:
-        return {"error": f"Unknown refactor_type: {refactor_type}. Use: rename, move, extract, signature"}
+        return {
+            "error": f"Unknown refactor_type: {refactor_type}. Use: rename, move, extract, signature"
+        }
 
 
 # ---------------------------------------------------------------------------
 # Core helpers
 # ---------------------------------------------------------------------------
+
 
 def _resolve_symbol(index, symbol_id_or_name: str) -> dict:
     """Resolve a symbol name or ID to its dict. Returns {"error": ...} on failure."""
@@ -310,7 +397,13 @@ def _resolve_symbol(index, symbol_id_or_name: str) -> dict:
 def _find_affected_files(index, store, owner, name, sym_file, sym_name, depth):
     """Find files that import sym_file AND reference sym_name."""
     source_files = frozenset(index.source_files)
-    rev = _build_reverse_adjacency(index.imports, source_files, index.alias_map, getattr(index, "psr4_map", None))
+    rev = build_adjacency(
+        index.imports,
+        source_files,
+        index.alias_map,
+        getattr(index, "psr4_map", None),
+        direction="reverse",
+    )
     importer_files, _ = _bfs_importers(sym_file, rev, depth)
 
     confirmed = []
@@ -333,19 +426,21 @@ def _apply_word_replacement(text: str, old_name: str, new_name: str) -> str:
 def _classify_line(line_text: str, old_name: str, language: str) -> str:
     """Classify a matching line as import/definition/usage/string."""
     stripped = line_text.strip()
-    
+
     # Fix E: Check if inside f-string or template literal interpolation FIRST
     if _is_inside_interpolation(line_text, old_name, language):
         return "usage"  # Interpolations are usages, not strings
-    
+
     # Check if symbol appears outside string context - if so, it's a usage/definition/import
     # We need to find all string boundaries and check if old_name appears outside them
     string_boundaries = []  # List of (start, end) positions of string contents
-    
+
     # Find f-strings first (Python) - they can contain nested quotes in interpolations
     # Bug 15: Handle rf/fr/Fr/fR/RF/FR prefixes (raw f-strings)
     if language == "python":
-        fstring_start = re.compile(r"[rR]?[fF]('''|\"\"\"|\"|')|[fF][rR]?('''|\"\"\"|\"|')")
+        fstring_start = re.compile(
+            r"[rR]?[fF]('''|\"\"\"|\"|')|[fF][rR]?('''|\"\"\"|\"|')"
+        )
         start = 0
         while True:
             match = fstring_start.search(stripped, start)
@@ -363,9 +458,9 @@ def _classify_line(line_text: str, old_name: str, language: str) -> str:
                 # Fix 5: For triple quotes, compare the full quote substring; for single quotes, compare char
                 if quote_len == 1:
                     c = stripped[i]
-                    if c == '{':
+                    if c == "{":
                         brace_level += 1
-                    elif c == '}':
+                    elif c == "}":
                         if brace_level > 0:
                             brace_level -= 1
                     elif c == quote and brace_level == 0:
@@ -375,21 +470,21 @@ def _classify_line(line_text: str, old_name: str, language: str) -> str:
                         break
                 else:
                     # Triple quote - compare substring
-                    if stripped[i:i+quote_len] == quote and brace_level == 0:
+                    if stripped[i : i + quote_len] == quote and brace_level == 0:
                         string_boundaries.append((quote_start, i + quote_len))
                         start = i + quote_len
                         break
                     c = stripped[i]
-                    if c == '{':
+                    if c == "{":
                         brace_level += 1
-                    elif c == '}':
+                    elif c == "}":
                         if brace_level > 0:
                             brace_level -= 1
                 i += 1
             else:
                 # No closing quote found - unclosed f-string
                 break
-    
+
     # Find triple-quoted strings first
     for triple_q in ('"""', "'''"):
         start = 0
@@ -408,10 +503,10 @@ def _classify_line(line_text: str, old_name: str, language: str) -> str:
                 start = end_idx + 3
             else:
                 break
-    
+
     # Find single-quoted strings
     # Bug 1: Fix escaped closing quote handling - use inner loop to find non-escaped closing quote
-    for q in ('"', "'", '`'):
+    for q in ('"', "'", "`"):
         start = 0
         while True:
             idx = stripped.find(q, start)
@@ -422,19 +517,19 @@ def _classify_line(line_text: str, old_name: str, language: str) -> str:
             if in_existing:
                 start = idx + 1
                 continue
-            
+
             # Bug 3: Check for escaped opening quotes - count preceding backslashes
             if idx > 0:
                 backslash_count = 0
                 k = idx - 1
-                while k >= 0 and stripped[k] == '\\':
+                while k >= 0 and stripped[k] == "\\":
                     backslash_count += 1
                     k -= 1
                 # If odd number of backslashes, quote is escaped - skip it
                 if backslash_count % 2 == 1:
                     start = idx + 1
                     continue
-            
+
             # Bug 1/B-5: Inner loop to find non-escaped closing quote for the same string
             search_pos = idx + 1
             while True:
@@ -447,7 +542,7 @@ def _classify_line(line_text: str, old_name: str, language: str) -> str:
                 if end_idx > 0:
                     backslash_count = 0
                     k = end_idx - 1
-                    while k >= 0 and stripped[k] == '\\':
+                    while k >= 0 and stripped[k] == "\\":
                         backslash_count += 1
                         k -= 1
                     # If odd number of backslashes, closing quote is escaped - continue searching
@@ -461,7 +556,7 @@ def _classify_line(line_text: str, old_name: str, language: str) -> str:
             else:
                 # Inner loop exhausted without finding closing quote
                 break  # Exit outer loop
-    
+
     # Check if old_name appears outside all string boundaries
     # Use word boundary matching
     pattern = re.compile(r"\b" + re.escape(old_name) + r"\b")
@@ -484,7 +579,7 @@ def _classify_line(line_text: str, old_name: str, language: str) -> str:
                 if concrete.match(stripped):
                     return "definition"
             return "usage"
-    
+
     # Check import/definition patterns before classifying as "string"
     # (Ruby require, Go import, PHP require have identifiers inside quotes)
     pat = _IMPORT_PATTERNS.get(language)
@@ -516,19 +611,29 @@ def _scan_non_code_files(store, owner, name, index, old_name):
             continue
         content, read_error = _get_file_content_safe(store, owner, name, fpath)
         if read_error:
-            warnings.append({"file": fpath, "reason": "file_read_error", "error": read_error})
+            warnings.append(
+                {"file": fpath, "reason": "file_read_error", "error": read_error}
+            )
             continue
         if not content:
             continue
         for i, line in enumerate(content.splitlines()):
             if pattern.search(line):
-                warnings.append({"file": fpath, "line": i + 1, "text": line.rstrip(), "reason": "non-code file"})
+                warnings.append(
+                    {
+                        "file": fpath,
+                        "line": i + 1,
+                        "text": line.rstrip(),
+                        "reason": "non-code file",
+                    }
+                )
     return warnings
 
 
 # ---------------------------------------------------------------------------
 # Fix A: Path alias detection and warning
 # ---------------------------------------------------------------------------
+
 
 def _detect_path_alias(import_line: str) -> Optional[str]:
     """Detect if an import line uses a path alias like @/, $lib/, ~/."""
@@ -540,10 +645,10 @@ def _detect_path_alias(import_line: str) -> Optional[str]:
 
 def _resolve_path_alias(alias: str, import_line: str, old_file: str) -> Optional[str]:
     """Attempt to resolve a path alias to a file path.
-    
+
     Returns the resolved path if resolution is unambiguous, or None if it requires
     tsconfig.json analysis (e.g., @ alias could mean src/, app/, or root/).
-    
+
     Note: This function is conservative - it only returns a resolved path when
     the mapping is standardized across most projects. For @/, which varies by
     project configuration, we return None and let the caller warn about manual rewrite.
@@ -552,40 +657,45 @@ def _resolve_path_alias(alias: str, import_line: str, old_file: str) -> Optional
     match = re.search(r"['\"]([^'\"]+)['\"]", import_line)
     if not match:
         return None
-    
+
     specifier = match.group(1)
-    
+
     # Only resolve aliases with standardized mappings
     # $lib in SvelteKit consistently maps to src/lib
     if alias == "$lib" and specifier.startswith("$lib/"):
         resolved = specifier.replace("$lib/", "src/lib/")
         return resolved
-    
+
     # ~ is ambiguous (could be src/, root/, or project root/) - don't guess
     # @ is highly ambiguous (@ → src/, @ → app/, @ → root/) - don't guess
     # These require tsconfig.json analysis which we don't do
-    
+
     return None
 
 
-def _compute_new_import(old_import_line, old_file, new_file, sym_name, language) -> Tuple[str, Optional[str]]:
+def _compute_new_import(
+    old_import_line, old_file, new_file, sym_name, language
+) -> Tuple[str, Optional[str]]:
     """Rewrite an import line from old_file to new_file.
-    
+
     Returns (new_line, warning) tuple:
     - (new_line, None) if rewrite succeeded
     - (old_import_line, warning_message) if rewrite not possible
-    
+
     Fix A: Detects path aliases and warns when they can't be rewritten.
     """
     warning = None
-    
+
     if language == "python":
         old_module = _file_to_module(old_file)
         new_module = _file_to_module(new_file)
         if old_module in old_import_line:
             return old_import_line.replace(old_module, new_module), None
-        return old_import_line, f"Python module path '{old_module}' not found in import line"
-    
+        return (
+            old_import_line,
+            f"Python module path '{old_module}' not found in import line",
+        )
+
     elif language in ("typescript", "javascript"):
         # Fix A: Check for path aliases first
         alias = _detect_path_alias(old_import_line)
@@ -596,7 +706,12 @@ def _compute_new_import(old_import_line, old_file, new_file, sym_name, language)
                 # Check if resolved path matches old_file (without extension)
                 old_spec = PurePosixPath(old_file).with_suffix("").as_posix()
                 # Handle cases where resolved might or might not include extension
-                resolved_no_ext = resolved.removesuffix(".ts").removesuffix(".js").removesuffix(".tsx").removesuffix(".jsx")
+                resolved_no_ext = (
+                    resolved.removesuffix(".ts")
+                    .removesuffix(".js")
+                    .removesuffix(".tsx")
+                    .removesuffix(".jsx")
+                )
                 if resolved == old_spec or resolved_no_ext == old_spec:
                     # We can rewrite: replace the alias specifier with new path (keeping alias prefix)
                     match = re.search(r"['\"]([^'\"]+)['\"]", old_import_line)
@@ -608,21 +723,25 @@ def _compute_new_import(old_import_line, old_file, new_file, sym_name, language)
                         alias_prefix = f"{alias}/"
                         if old_specifier.startswith(alias_prefix):
                             # Get the path after the alias prefix
-                            alias_path = old_specifier[len(alias_prefix):]
+                            alias_path = old_specifier[len(alias_prefix) :]
                             # Build new specifier: alias_prefix + new_path
                             # The new path should be relative to the alias root (e.g., src/)
-                            new_spec = PurePosixPath(new_file).with_suffix("").as_posix()
+                            new_spec = (
+                                PurePosixPath(new_file).with_suffix("").as_posix()
+                            )
                             # If new file starts with src/, convert to alias path
                             if new_spec.startswith("src/"):
                                 new_alias_path = new_spec[4:]  # Remove src/ prefix
                             else:
                                 new_alias_path = new_spec
                             new_alias_spec = f"{alias_prefix}{new_alias_path}"
-                            return old_import_line.replace(old_specifier, new_alias_spec), None
+                            return old_import_line.replace(
+                                old_specifier, new_alias_spec
+                            ), None
             # Can't resolve alias - return warning
             warning = f"Path alias '{alias}' detected in import. Manual rewrite may be required: '{old_import_line}'"
             return old_import_line, warning
-        
+
         # Standard path rewrite (no alias)
         old_spec = PurePosixPath(old_file).with_suffix("").as_posix()
         new_spec = PurePosixPath(new_file).with_suffix("").as_posix()
@@ -631,7 +750,7 @@ def _compute_new_import(old_import_line, old_file, new_file, sym_name, language)
         # Path didn't match - check for relative imports
         warning = f"Import specifier doesn't match file path '{old_spec}'. May be relative import or alias."
         return old_import_line, warning
-    
+
     elif language == "rust":
         # Rust: use crate::old_mod::Symbol; → use crate::new_mod::Symbol;
         # Path separator is :: — convert file paths to :: notation
@@ -652,7 +771,10 @@ def _compute_new_import(old_import_line, old_file, new_file, sym_name, language)
             prefixed_old = f"{prefix}{old_mod}"
             if prefixed_old in old_import_line:
                 return old_import_line.replace(prefixed_old, f"{prefix}{new_mod}"), None
-        return old_import_line, f"Rust module path '{old_mod}' not found in use statement"
+        return (
+            old_import_line,
+            f"Rust module path '{old_mod}' not found in use statement",
+        )
 
     elif language == "go":
         # Go: import "old/pkg/path" → import "new/pkg/path"
@@ -675,8 +797,8 @@ def _compute_new_import(old_import_line, old_file, new_file, sym_name, language)
             parts = list(p.parts)
             # Strip common source roots: src/main/java/, src/main/kotlin/, src/
             for root in (("src", "main", "java"), ("src", "main", "kotlin"), ("src",)):
-                if tuple(parts[:len(root)]) == root:
-                    parts = parts[len(root):]
+                if tuple(parts[: len(root)]) == root:
+                    parts = parts[len(root) :]
                     break
             return ".".join(parts)
 
@@ -724,7 +846,10 @@ def _compute_new_import(old_import_line, old_file, new_file, sym_name, language)
         new_spec = PurePosixPath(new_file).with_suffix("").as_posix()
         if old_spec in old_import_line:
             return old_import_line.replace(old_spec, new_spec), None
-        return old_import_line, f"Ruby require path '{old_spec}' not found in require statement"
+        return (
+            old_import_line,
+            f"Ruby require path '{old_spec}' not found in require statement",
+        )
 
     elif language in ("c", "cpp", "objc", "arduino"):
         # C/C++/ObjC/Arduino: #include "old/path.h" → #include "new/path.h"
@@ -756,8 +881,8 @@ def _compute_new_import(old_import_line, old_file, new_file, sym_name, language)
             p = PurePosixPath(file_path).with_suffix("")
             parts = list(p.parts)
             for root in (("src", "main", "scala"), ("src",)):
-                if tuple(parts[:len(root)]) == root:
-                    parts = parts[len(root):]
+                if tuple(parts[: len(root)]) == root:
+                    parts = parts[len(root) :]
                     break
             return ".".join(parts)
 
@@ -827,19 +952,31 @@ def _compute_new_import(old_import_line, old_file, new_file, sym_name, language)
         new_spec = PurePosixPath(new_file).with_suffix("").as_posix()
         if language == "elixir":
             # Elixir modules are dot-separated, capitalized
-            old_mod = ".".join(p.capitalize() for p in PurePosixPath(old_file).with_suffix("").parts if p != "lib")
-            new_mod = ".".join(p.capitalize() for p in PurePosixPath(new_file).with_suffix("").parts if p != "lib")
+            old_mod = ".".join(
+                p.capitalize()
+                for p in PurePosixPath(old_file).with_suffix("").parts
+                if p != "lib"
+            )
+            new_mod = ".".join(
+                p.capitalize()
+                for p in PurePosixPath(new_file).with_suffix("").parts
+                if p != "lib"
+            )
         else:
             old_mod = old_spec
             new_mod = new_spec
         if old_mod in old_import_line:
             return old_import_line.replace(old_mod, new_mod), None
-        return old_import_line, f"{language.capitalize()} module '{old_mod}' not found in import"
+        return (
+            old_import_line,
+            f"{language.capitalize()} module '{old_mod}' not found in import",
+        )
 
     elif language in ("perl", "groovy"):
         # Perl: use Old::Module; → use New::Module;  (:: separator)
         # Groovy: import old.pkg.Class → import new.pkg.Class (same as Java)
         sep = "::" if language == "perl" else "."
+
         def _file_to_mod(file_path: str) -> str:
             p = PurePosixPath(file_path).with_suffix("")
             parts = list(p.parts)
@@ -851,7 +988,10 @@ def _compute_new_import(old_import_line, old_file, new_file, sym_name, language)
         new_mod = _file_to_mod(new_file)
         if old_mod in old_import_line:
             return old_import_line.replace(old_mod, new_mod), None
-        return old_import_line, f"{language.capitalize()} module '{old_mod}' not found in import"
+        return (
+            old_import_line,
+            f"{language.capitalize()} module '{old_mod}' not found in import",
+        )
 
     elif language in ("lua", "luau"):
         # Lua: require("old.module") or require 'old/module'
@@ -870,9 +1010,13 @@ def _compute_new_import(old_import_line, old_file, new_file, sym_name, language)
         # Julia: using OldModule.Sub → using NewModule.Sub
         old_mod = ".".join(PurePosixPath(old_file).with_suffix("").parts)
         new_mod = ".".join(PurePosixPath(new_file).with_suffix("").parts)
-        if parts := [p for p in PurePosixPath(old_file).with_suffix("").parts if p != "src"]:
+        if parts := [
+            p for p in PurePosixPath(old_file).with_suffix("").parts if p != "src"
+        ]:
             old_mod = ".".join(parts)
-        if parts := [p for p in PurePosixPath(new_file).with_suffix("").parts if p != "src"]:
+        if parts := [
+            p for p in PurePosixPath(new_file).with_suffix("").parts if p != "src"
+        ]:
             new_mod = ".".join(parts)
         if old_mod in old_import_line:
             return old_import_line.replace(old_mod, new_mod), None
@@ -1044,15 +1188,24 @@ def _compute_new_import(old_import_line, old_file, new_file, sym_name, language)
 
     elif language == "sql":
         # SQL/dbt: {{ ref('model') }} — warn only, can't auto-rewrite
-        return old_import_line, "SQL/dbt ref() cannot be auto-rewritten; manual update required"
+        return (
+            old_import_line,
+            "SQL/dbt ref() cannot be auto-rewritten; manual update required",
+        )
 
     elif language == "graphql":
         # GraphQL: # import 'path' — convention-based, warn only
-        return old_import_line, "GraphQL imports are convention-based; manual update required"
+        return (
+            old_import_line,
+            "GraphQL imports are convention-based; manual update required",
+        )
 
     elif language == "hcl":
         # HCL/Terraform: module "name" { source = "..." } — warn only
-        return old_import_line, "HCL/Terraform module source cannot be auto-rewritten; manual update required"
+        return (
+            old_import_line,
+            "HCL/Terraform module source cannot be auto-rewritten; manual update required",
+        )
 
     elif language in ("razor", "blade", "ejs"):
         # Template engines: mixed syntax, path-based rewrite
@@ -1156,7 +1309,7 @@ def _format_import_line(imp_dict, language):
     elif language == "gdscript":
         return f'preload("{spec}")'
     elif language == "graphql":
-        return f'# import {spec}'
+        return f"# import {spec}"
     elif language in ("css", "scss", "sass", "less", "styl"):
         return f"@import '{spec}';"
     elif language == "solidity":
@@ -1178,7 +1331,7 @@ def _format_import_line(imp_dict, language):
     elif language == "tcl":
         return f"source {spec}"
     elif language == "dlang":
-        return f'import {spec};'
+        return f"import {spec};"
     elif language == "pascal":
         return f"uses {spec};"
     elif language == "ada":
@@ -1208,27 +1361,30 @@ def _format_import_line(imp_dict, language):
 # Fix B: Qualified import detection (check all parts)
 # ---------------------------------------------------------------------------
 
+
 def _check_qualified_import_used(body: str, specifier: str) -> bool:
     """Check if a qualified import specifier is actually used in the body.
-    
+
     Fix B: For qualified imports like 'os.path', we need to verify the qualified
     access pattern is used, not just that one of the parts appears as a word.
     E.g., 'os.path.join' should return True only if the qualified access pattern
     appears in the body, not just if 'path' appears as a word in variable names.
-    
+
     For single-part imports (no dots), we check if that part appears as a word.
     """
     # Check full qualified name first
     if re.search(r"\b" + re.escape(specifier) + r"\b", body):
         return True
-    
+
     # For qualified imports (with dots), check if used in qualified access pattern
     parts = specifier.split(".")
     if len(parts) >= 2:
         # Build regex that checks the first part is used followed by the rest
         # e.g., for os.path: check if 'os.path' or 'os\n.path' (cross-line) appears
         # or if os appears followed by . and then path
-        qualified_pattern = re.escape(parts[0]) + r"(?:\s*\.\s*)" + re.escape(".".join(parts[1:]))
+        qualified_pattern = (
+            re.escape(parts[0]) + r"(?:\s*\.\s*)" + re.escape(".".join(parts[1:]))
+        )
         # Fix 3: Add word boundary at BOTH ends of the full qualified pattern
         if re.search(r"\b" + qualified_pattern + r"\b", body, re.DOTALL):
             return True
@@ -1236,13 +1392,14 @@ def _check_qualified_import_used(body: str, specifier: str) -> bool:
         # Single-part import (e.g., `import os`): check if it appears as a word
         if re.search(r"\b" + re.escape(specifier) + r"\b", body):
             return True
-    
+
     return False
 
 
 # ---------------------------------------------------------------------------
 # Fix C: Smarter unique context expansion (track symbol occurrences)
 # ---------------------------------------------------------------------------
+
 
 def _count_symbol_occurrences(content: str, symbol_name: str) -> int:
     """Count how many times a symbol name appears at word boundaries in content."""
@@ -1251,16 +1408,16 @@ def _count_symbol_occurrences(content: str, symbol_name: str) -> int:
 
 
 def _ensure_unique_context_smart(
-    content: str, 
-    lines: list[str], 
-    match_line_idx: int, 
-    old_text: str, 
+    content: str,
+    lines: list[str],
+    match_line_idx: int,
+    old_text: str,
     new_text: str,
     symbol_name: str,
-    new_name: str
+    new_name: str,
 ) -> Tuple[str, str]:
     """Expand old_text/new_text only when necessary for uniqueness.
-    
+
     Fix C: This is smarter than the original - it tracks symbol occurrences.
     - If symbol name appears only once, no expansion needed (symbol is unique)
     - If old_text is already unique, no expansion needed
@@ -1271,11 +1428,11 @@ def _ensure_unique_context_smart(
     symbol_count = _count_symbol_occurrences(content, symbol_name)
     if symbol_count <= 1:
         return old_text, new_text
-    
+
     # If old_text is already unique, no expansion needed
     if content.count(old_text) == 1:
         return old_text, new_text
-    
+
     # Need to expand - do it smartly by including context that makes it unique
     line_sep = _detect_line_sep(content)
     above, below = 0, 0
@@ -1301,7 +1458,9 @@ def _ensure_unique_context_smart(
         new_lines = list(expanded_lines)
         # The original match line is at index `above` within the expanded slice
         # Apply word replacement to the line containing the symbol
-        new_lines[above] = _apply_word_replacement(expanded_lines[above], symbol_name, new_name)
+        new_lines[above] = _apply_word_replacement(
+            expanded_lines[above], symbol_name, new_name
+        )
         new_text = line_sep.join(new_lines)
 
     return old_text, new_text
@@ -1311,9 +1470,12 @@ def _ensure_unique_context_smart(
 # Fix D: TypeScript method overload signature extraction
 # ---------------------------------------------------------------------------
 
-def _extract_ts_overload_signatures(lines: list[str], def_line_idx: int, sym_name: str, line_sep: str = "\n") -> Tuple[str, int]:
+
+def _extract_ts_overload_signatures(
+    lines: list[str], def_line_idx: int, sym_name: str, line_sep: str = "\n"
+) -> Tuple[str, int]:
     """Extract TypeScript overload signatures (consecutive function signatures).
-    
+
     Fix D: Returns (old_text, end_line_idx) - the combined signatures and the last line index.
     LE-5: Uses line_sep parameter instead of hardcoded "\n".
     """
@@ -1321,20 +1483,22 @@ def _extract_ts_overload_signatures(lines: list[str], def_line_idx: int, sym_nam
     first_line = lines[def_line_idx]
     if not _TS_OVERLOAD_PATTERN.match(first_line.strip()):
         return first_line.rstrip(), def_line_idx
-    
+
     # Collect consecutive overload signatures
     signature_lines = [first_line.rstrip()]
     current_idx = def_line_idx + 1
-    
+
     while current_idx < len(lines):
         next_line = lines[current_idx].strip()
         # Check if next line is also an overload signature for the same function
-        if re.match(r"^\s*(export\s+)?function\s+" + re.escape(sym_name) + r"\s*\(", next_line):
+        if re.match(
+            r"^\s*(export\s+)?function\s+" + re.escape(sym_name) + r"\s*\(", next_line
+        ):
             signature_lines.append(lines[current_idx].rstrip())
             current_idx += 1
         else:
             break
-    
+
     # LE-5: Use line_sep instead of hardcoded "\n"
     return line_sep.join(signature_lines), current_idx - 1
 
@@ -1343,32 +1507,41 @@ def _extract_ts_overload_signatures(lines: list[str], def_line_idx: int, sym_nam
 # Fix E: F-string and template literal detection
 # ---------------------------------------------------------------------------
 
+
 def _is_inside_interpolation(line_text: str, symbol_name: str, language: str) -> bool:
     """Check if symbol name appears inside f-string interpolation or template literal.
-    
-    Fix E: 
+
+    Fix E:
     Python: f"...{symbol_name}..."
     JS/TS: `...${symbol_name}...`
     """
     stripped = line_text.strip()
-    
+
     # Python f-string detection
     if language == "python":
         # Find f-string markers (including triple-quoted f-strings)
         # Bug 15: Handle rf/fr/Fr/fR/RF/FR prefixes (raw f-strings)
-        fstring_pattern = re.compile(r"[rR]?[fF]('''[\s\S]*?'''|\"\"\"[\s\S]*?\"\"\"|\"[\s\S]*?\"|'[\s\S]*?')|[fF][rR]?('''[\s\S]*?'''|\"\"\"[\s\S]*?\"\"\"|\"[\s\S]*?\"|'[\s\S]*?')")
+        fstring_pattern = re.compile(
+            r"[rR]?[fF]('''[\s\S]*?'''|\"\"\"[\s\S]*?\"\"\"|\"[\s\S]*?\"|'[\s\S]*?')|[fF][rR]?('''[\s\S]*?'''|\"\"\"[\s\S]*?\"\"\"|\"[\s\S]*?\"|'[\s\S]*?')"
+        )
         for match in fstring_pattern.finditer(stripped):
             fstring_content = match.group(1) or match.group(2)
             # Bug 6: {{ }} are escaped literal braces in Python, not interpolation
             # Replace {{ and }} with placeholders before checking for interpolation
-            escaped_content = fstring_content.replace("{{", "⟪ESCAPED_OPEN⟫").replace("}}", "⟪ESCAPED_CLOSE⟫")
+            escaped_content = fstring_content.replace("{{", "⟪ESCAPED_OPEN⟫").replace(
+                "}}", "⟪ESCAPED_CLOSE⟫"
+            )
             # Check for {symbol_name} inside the f-string (after removing escaped braces)
-            interp_pattern = re.compile(r"\{[^}]*\b" + re.escape(symbol_name) + r"\b[^}]*\}")
+            interp_pattern = re.compile(
+                r"\{[^}]*\b" + re.escape(symbol_name) + r"\b[^}]*\}"
+            )
             if interp_pattern.search(escaped_content):
                 return True
         # Also check for unclosed f-strings (opening quote found but no closing) - line is still in string
         # This handles the case where we start in an f-string but haven't found the end yet
-        fstring_start = re.compile(r"[rR]?[fF]('''|\"\"\"|\"|')|[fF][rR]?('''|\"\"\"|\"|')")
+        fstring_start = re.compile(
+            r"[rR]?[fF]('''|\"\"\"|\"|')|[fF][rR]?('''|\"\"\"|\"|')"
+        )
         for match in fstring_start.finditer(stripped):
             quote = match.group(1) or match.group(2)
             # Find content after opening quote
@@ -1382,11 +1555,15 @@ def _is_inside_interpolation(line_text: str, symbol_name: str, language: str) ->
                 # Unclosed f-string - check if symbol is after opening
                 content_after = stripped[start:]
                 # Bug 6: Also handle escaped braces in unclosed f-strings
-                escaped_content = content_after.replace("{{", "⟪ESCAPED_OPEN⟫").replace("}}", "⟪ESCAPED_CLOSE⟫")
-                interp_pattern = re.compile(r"\{[^}]*\b" + re.escape(symbol_name) + r"\b[^}]*\}")
+                escaped_content = content_after.replace("{{", "⟪ESCAPED_OPEN⟫").replace(
+                    "}}", "⟪ESCAPED_CLOSE⟫"
+                )
+                interp_pattern = re.compile(
+                    r"\{[^}]*\b" + re.escape(symbol_name) + r"\b[^}]*\}"
+                )
                 if interp_pattern.search(escaped_content):
                     return True
-    
+
     # JS/TS template literal detection
     if language in ("typescript", "javascript"):
         # Find template literal markers (single-line: `...`)
@@ -1396,36 +1573,38 @@ def _is_inside_interpolation(line_text: str, symbol_name: str, language: str) ->
             # Bug 12: Handle nested braces by using brace counting
             if _check_symbol_in_template_interp(template_content, symbol_name):
                 return True
-        
+
         # Also check for ${symbol_name} interpolation directly on the line
         # This catches multiline template literals where the interpolation line
         # has no backticks but is still inside a template literal
         if _check_symbol_in_template_interp(stripped, symbol_name):
             return True
-    
+
     return False
 
 
 def _check_symbol_in_template_interp(content: str, symbol_name: str) -> bool:
     """Check if symbol appears inside ${...} interpolation, handling nested braces.
-    
+
     Bug 12: ${obj.method({key: value})} has nested braces that [^}]* can't handle.
     """
     i = 0
     while i < len(content):
         # Find ${
-        if content[i:i+2] == '${':
+        if content[i : i + 2] == "${":
             start = i + 2
             brace_depth = 1
             j = start
             while j < len(content) and brace_depth > 0:
-                if content[j] == '{':
+                if content[j] == "{":
                     brace_depth += 1
-                elif content[j] == '}':
+                elif content[j] == "}":
                     brace_depth -= 1
                 j += 1
             # Extract interpolation content (from ${ to matching })
-            interp_content = content[start:j-1] if brace_depth == 0 else content[start:]
+            interp_content = (
+                content[start : j - 1] if brace_depth == 0 else content[start:]
+            )
             # Check for symbol name at word boundary
             if re.search(r"\b" + re.escape(symbol_name) + r"\b", interp_content):
                 return True
@@ -1439,9 +1618,12 @@ def _check_symbol_in_template_interp(content: str, symbol_name: str) -> bool:
 # Fix F: Safe file content retrieval with error detection
 # ---------------------------------------------------------------------------
 
-def _get_file_content_safe(store, owner: str, name: str, fpath: str) -> Tuple[str, Optional[str]]:
+
+def _get_file_content_safe(
+    store, owner: str, name: str, fpath: str
+) -> Tuple[str, Optional[str]]:
     """Get file content with error detection.
-    
+
     Fix F: Returns (content, error) tuple:
     - (content, None) if file was read successfully (content may be empty string)
     - ("", error_message) if file could not be read
@@ -1459,6 +1641,7 @@ def _get_file_content_safe(store, owner: str, name: str, fpath: str) -> Tuple[st
 # Rename
 # ---------------------------------------------------------------------------
 
+
 def _plan_rename(index, store, owner, name, sym, new_name, depth):
     """Generate rename edit plan."""
     sym_name = sym["name"]
@@ -1468,7 +1651,9 @@ def _plan_rename(index, store, owner, name, sym, new_name, depth):
     collision = _check_collision(index, new_name, sym_file, store, owner, name, depth)
 
     # Find affected files (importers that reference the name)
-    affected = _find_affected_files(index, store, owner, name, sym_file, sym_name, depth)
+    affected = _find_affected_files(
+        index, store, owner, name, sym_file, sym_name, depth
+    )
 
     # Always include the definition file
     all_files = [sym_file] + [f for f in affected if f != sym_file]
@@ -1478,7 +1663,9 @@ def _plan_rename(index, store, owner, name, sym, new_name, depth):
     for fpath in all_files:
         content, read_error = _get_file_content_safe(store, owner, name, fpath)
         if read_error:
-            file_read_warnings.append({"file": fpath, "reason": "file_read_error", "error": read_error})
+            file_read_warnings.append(
+                {"file": fpath, "reason": "file_read_error", "error": read_error}
+            )
             continue
         if not content:
             continue
@@ -1488,7 +1675,7 @@ def _plan_rename(index, store, owner, name, sym, new_name, depth):
             edits.append({"file": fpath, "blocks": blocks})
 
     warnings = _scan_non_code_files(store, owner, name, index, sym_name)
-    
+
     # Fix F: Combine all warnings
     all_warnings = warnings + file_read_warnings
 
@@ -1498,7 +1685,11 @@ def _plan_rename(index, store, owner, name, sym, new_name, depth):
         "edits": edits,
         "warnings": all_warnings,
         "collision_check": collision,
-        "summary": {"files": len(edits), "edit_blocks": total_blocks, "warnings": len(all_warnings)},
+        "summary": {
+            "files": len(edits),
+            "edit_blocks": total_blocks,
+            "warnings": len(all_warnings),
+        },
     }
 
     # Token savings
@@ -1524,9 +1715,13 @@ def _generate_rename_blocks(content, old_name, new_name, language):
         new_text = new_line.rstrip()
 
         # Fix C: Use smart unique context that tracks symbol occurrences
-        old_text, new_text = _ensure_unique_context_smart(content, lines, i, old_text, new_text, old_name, new_name)
+        old_text, new_text = _ensure_unique_context_smart(
+            content, lines, i, old_text, new_text, old_name, new_name
+        )
 
-        blocks.append({"old_text": old_text, "new_text": new_text, "category": category})
+        blocks.append(
+            {"old_text": old_text, "new_text": new_text, "category": category}
+        )
 
     return blocks
 
@@ -1534,14 +1729,25 @@ def _generate_rename_blocks(content, old_name, new_name, language):
 def _check_collision(index, new_name, sym_file, store, owner, name, depth):
     """Check if new_name collides with existing symbols in affected files."""
     source_files = frozenset(index.source_files)
-    rev = _build_reverse_adjacency(index.imports, source_files, index.alias_map, getattr(index, "psr4_map", None))
+    rev = build_adjacency(
+        index.imports,
+        source_files,
+        index.alias_map,
+        getattr(index, "psr4_map", None),
+        direction="reverse",
+    )
     importer_files, _ = _bfs_importers(sym_file, rev, depth)
     files_to_check = {sym_file} | set(importer_files)
 
     conflicts = []
     for s in index.symbols:
-        if s.get("file") in files_to_check and s.get("name", "").lower() == new_name.lower():
-            conflicts.append({"file": s["file"], "symbol_id": s["id"], "kind": s.get("kind")})
+        if (
+            s.get("file") in files_to_check
+            and s.get("name", "").lower() == new_name.lower()
+        ):
+            conflicts.append(
+                {"file": s["file"], "symbol_id": s["id"], "kind": s.get("kind")}
+            )
 
     return {"safe": len(conflicts) == 0, "conflicts": conflicts}
 
@@ -1549,6 +1755,7 @@ def _check_collision(index, new_name, sym_file, store, owner, name, depth):
 # ---------------------------------------------------------------------------
 # Move
 # ---------------------------------------------------------------------------
+
 
 def _extract_symbol_with_deps(store, owner, name, index, sym):
     """Get symbol source + determine which imports from its file it needs."""
@@ -1590,7 +1797,11 @@ def _plan_move(index, store, owner, name, sym, new_file, depth):
     dest_collision = None
     for s in index.symbols:
         if s.get("file") == new_file and s.get("name", "").lower() == sym_name.lower():
-            dest_collision = {"file": new_file, "symbol_id": s["id"], "kind": s.get("kind")}
+            dest_collision = {
+                "file": new_file,
+                "symbol_id": s["id"],
+                "kind": s.get("kind"),
+            }
             break
 
     # Get symbol source + its import dependencies
@@ -1628,13 +1839,12 @@ def _plan_move(index, store, owner, name, sym, new_file, depth):
     # Bug 1: Add import of moved symbol back to source file (for same-file internal references)
     # Bug 5: Only add import if staying symbols actually reference the moved symbol
     new_module = PurePosixPath(new_file).with_suffix("").as_posix()
-    
+
     # Check if any staying symbol references the moved symbol
     needs_source_import = any(
-        w.get("direction") == "staying_calls_extracted" 
-        for w in dep_warnings
+        w.get("direction") == "staying_calls_extracted" for w in dep_warnings
     )
-    
+
     if lang in ("typescript", "javascript"):
         add_import_line = f"import {{ {sym_name} }} from '{new_module}';"
     elif lang == "rust":
@@ -1645,7 +1855,9 @@ def _plan_move(index, store, owner, name, sym, new_file, depth):
         add_import_line = f"from {new_module.replace('/', '.')} import {sym_name}"
 
     # Import rewrites for all importers
-    affected = _find_affected_files(index, store, owner, name, sym_file, sym_name, depth)
+    affected = _find_affected_files(
+        index, store, owner, name, sym_file, sym_name, depth
+    )
     import_rewrites, rewrite_warnings = _generate_import_rewrites(
         index, store, owner, name, affected, sym_name, sym_file, new_file, lang
     )
@@ -1658,11 +1870,11 @@ def _plan_move(index, store, owner, name, sym, new_file, depth):
         "collision_check": {"safe": dest_collision is None, "conflict": dest_collision},
         "summary": {"importers_rewritten": len(import_rewrites)},
     }
-    
+
     # Bug 5: Only include add_import if staying symbols reference the moved symbol
     if needs_source_import:
         result["add_import"] = {"file": sym_file, "import_line": add_import_line}
-    
+
     # Include warnings for failed rewrites and same-file dependencies
     if rewrite_warnings:
         result["warnings"] = rewrite_warnings
@@ -1674,9 +1886,11 @@ def _plan_move(index, store, owner, name, sym, new_file, depth):
     return result
 
 
-def _generate_import_rewrites(index, store, owner, name, affected_files, sym_name, old_file, new_file, language):
+def _generate_import_rewrites(
+    index, store, owner, name, affected_files, sym_name, old_file, new_file, language
+):
     """Generate import rewrite blocks for each affected file.
-    
+
     Returns list of rewrites and collects warnings for unrewritable imports.
     """
     rewrites = []
@@ -1687,13 +1901,17 @@ def _generate_import_rewrites(index, store, owner, name, affected_files, sym_nam
     for fpath in affected_files:
         content, read_error = _get_file_content_safe(store, owner, name, fpath)
         if read_error:
-            warnings.append({"file": fpath, "reason": "file_read_error", "error": read_error})
+            warnings.append(
+                {"file": fpath, "reason": "file_read_error", "error": read_error}
+            )
             continue
         if not content:
             continue
 
         for i, line in enumerate(content.splitlines()):
-            if not (_IMPORT_PATTERNS.get(language, _DEFAULT_IMPORT_PATTERN)).match(line.strip()):
+            if not (_IMPORT_PATTERNS.get(language, _DEFAULT_IMPORT_PATTERN)).match(
+                line.strip()
+            ):
                 continue
             if not re.search(r"\b" + re.escape(sym_name) + r"\b", line):
                 continue
@@ -1702,21 +1920,42 @@ def _generate_import_rewrites(index, store, owner, name, affected_files, sym_nam
             if language == "python" and "," in line and sym_name in line:
                 new_line = _split_python_import(line, sym_name, old_module, new_module)
                 if new_line != line:
-                    rewrites.append({"file": fpath, "old_text": line.rstrip(), "new_text": new_line.rstrip()})
+                    rewrites.append(
+                        {
+                            "file": fpath,
+                            "old_text": line.rstrip(),
+                            "new_text": new_line.rstrip(),
+                        }
+                    )
             else:
                 # Fix A: Handle tuple return with warning
-                new_line, rewrite_warning = _compute_new_import(line, old_file, new_file, sym_name, language)
+                new_line, rewrite_warning = _compute_new_import(
+                    line, old_file, new_file, sym_name, language
+                )
                 if new_line != line:
-                    rewrites.append({"file": fpath, "old_text": line.rstrip(), "new_text": new_line.rstrip()})
+                    rewrites.append(
+                        {
+                            "file": fpath,
+                            "old_text": line.rstrip(),
+                            "new_text": new_line.rstrip(),
+                        }
+                    )
                 elif rewrite_warning:
-                    warnings.append({"file": fpath, "line": i + 1, "reason": "import_rewrite_failed", "warning": rewrite_warning})
+                    warnings.append(
+                        {
+                            "file": fpath,
+                            "line": i + 1,
+                            "reason": "import_rewrite_failed",
+                            "warning": rewrite_warning,
+                        }
+                    )
 
     return rewrites, warnings
 
 
 def _split_python_import(line, moving_name, old_module, new_module):
     """Handle 'from X import a, b' when only one name is moving.
-    
+
     Bug 4: Handle aliased imports like 'from X import User as U, Admin'
     where 'User as U' should match 'User' (strip alias when comparing).
     """
@@ -1763,6 +2002,7 @@ def _split_python_import(line, moving_name, old_module, new_module):
 # Extract
 # ---------------------------------------------------------------------------
 
+
 def _plan_extract(index, store, owner, name, syms, new_file, depth):
     """Generate extract edit plan for one or more symbols."""
     # All symbols must come from the same file
@@ -1777,8 +2017,16 @@ def _plan_extract(index, store, owner, name, syms, new_file, depth):
     for sym in syms:
         sym_name = sym["name"]
         for s in index.symbols:
-            if s.get("file") == new_file and s.get("name", "").lower() == sym_name.lower():
-                dest_collision = {"file": new_file, "symbol_id": s["id"], "kind": s.get("kind"), "name": sym_name}
+            if (
+                s.get("file") == new_file
+                and s.get("name", "").lower() == sym_name.lower()
+            ):
+                dest_collision = {
+                    "file": new_file,
+                    "symbol_id": s["id"],
+                    "kind": s.get("kind"),
+                    "name": sym_name,
+                }
                 break
         if dest_collision:
             break
@@ -1822,11 +2070,13 @@ def _plan_extract(index, store, owner, name, syms, new_file, depth):
         end = sym.get("end_line", start + 1)
         # LE-3: Use content's line separator instead of hardcoded "\n"
         old_text = line_sep.join(lines[start:end])
-        source_removals.append({
-            "file": source_file,
-            "old_text": old_text,
-            "new_text": "",
-        })
+        source_removals.append(
+            {
+                "file": source_file,
+                "old_text": old_text,
+                "new_text": "",
+            }
+        )
 
     # Add import of extracted symbols to source file
     new_module = PurePosixPath(new_file).with_suffix("").as_posix()
@@ -1837,27 +2087,38 @@ def _plan_extract(index, store, owner, name, syms, new_file, depth):
     elif lang == "go":
         add_import = f'import "{new_module}"'
     else:
-        add_import = f"from {new_module.replace('/', '.')} import {', '.join(sym_names)}"
+        add_import = (
+            f"from {new_module.replace('/', '.')} import {', '.join(sym_names)}"
+        )
 
     # Import rewrites for external importers
     all_affected = set()
     for sym in syms:
-        affected = _find_affected_files(index, store, owner, name, source_file, sym["name"], depth)
+        affected = _find_affected_files(
+            index, store, owner, name, source_file, sym["name"], depth
+        )
         all_affected.update(affected)
 
     import_rewrites = []
     rewrite_warnings = []
     for sn in sym_names:
         rw, warns = _generate_import_rewrites(
-            index, store, owner, name, list(all_affected), sn, source_file, new_file, lang
+            index,
+            store,
+            owner,
+            name,
+            list(all_affected),
+            sn,
+            source_file,
+            new_file,
+            lang,
         )
         import_rewrites.extend(rw)
         rewrite_warnings.extend(warns)
 
     # Only add import to source file if staying symbols reference extracted symbols
     needs_source_import = any(
-        w.get("direction") == "staying_calls_extracted"
-        for w in dep_warnings
+        w.get("direction") == "staying_calls_extracted" for w in dep_warnings
     )
 
     result = {
@@ -1899,7 +2160,7 @@ def _build_new_file_content(bodies, import_lines, language):
 
 def _find_inter_symbol_deps(index, store, owner, name, syms, source_file):
     """Check if extracting these symbols breaks references to symbols staying behind.
-    
+
     Bug 1: Check BOTH directions:
     - Extracted symbol references staying symbol (needs import in new file)
     - Staying symbol references extracted symbol (needs import in source file)
@@ -1921,24 +2182,28 @@ def _find_inter_symbol_deps(index, store, owner, name, syms, source_file):
         body = _symbol_body(lines, sym)
         for stay_sym in staying:
             if re.search(r"\b" + re.escape(stay_sym["name"]) + r"\b", body):
-                warnings.append({
-                    "extracted": sym["name"],
-                    "references": stay_sym["name"],
-                    "direction": "extracted_calls_staying",
-                    "note": f"{sym['name']} calls {stay_sym['name']} which stays in {source_file}. Add import or extract together.",
-                })
+                warnings.append(
+                    {
+                        "extracted": sym["name"],
+                        "references": stay_sym["name"],
+                        "direction": "extracted_calls_staying",
+                        "note": f"{sym['name']} calls {stay_sym['name']} which stays in {source_file}. Add import or extract together.",
+                    }
+                )
 
     # Bug 1: Direction 2: Staying symbol references extracted symbol
     for stay_sym in staying:
         stay_body = _symbol_body(lines, stay_sym)
         for sym in syms:
             if re.search(r"\b" + re.escape(sym["name"]) + r"\b", stay_body):
-                warnings.append({
-                    "extracted": sym["name"],
-                    "references": stay_sym["name"],
-                    "direction": "staying_calls_extracted",
-                    "note": f"{stay_sym['name']} calls {sym['name']} which is being extracted. Add import to {source_file}.",
-                })
+                warnings.append(
+                    {
+                        "extracted": sym["name"],
+                        "references": stay_sym["name"],
+                        "direction": "staying_calls_extracted",
+                        "note": f"{stay_sym['name']} calls {sym['name']} which is being extracted. Add import to {source_file}.",
+                    }
+                )
 
     return warnings
 
@@ -1946,6 +2211,7 @@ def _find_inter_symbol_deps(index, store, owner, name, syms, source_file):
 # ---------------------------------------------------------------------------
 # Signature Change
 # ---------------------------------------------------------------------------
+
 
 def _plan_signature_change(index, store, owner, name, sym, new_signature, depth):
     """Generate signature change plan with call site discovery."""
@@ -1960,11 +2226,13 @@ def _plan_signature_change(index, store, owner, name, sym, new_signature, depth)
     lines = content.splitlines()
     def_line_idx = sym.get("line", 1) - 1
     end_line_idx = def_line_idx  # Default, will be updated for TypeScript overloads
-    
+
     # Fix D: Handle TypeScript method overloads (consecutive signatures)
     if lang == "typescript":
         line_sep = _detect_line_sep(content)
-        old_def, end_line_idx = _extract_ts_overload_signatures(lines, def_line_idx, sym_name, line_sep)
+        old_def, end_line_idx = _extract_ts_overload_signatures(
+            lines, def_line_idx, sym_name, line_sep
+        )
         sig_end_idx = end_line_idx  # Align with the generic skip variable
         # Build new definition for all overload signatures
         indent = re.match(r"^(\s*)", lines[def_line_idx]).group(1)
@@ -1998,14 +2266,18 @@ def _plan_signature_change(index, store, owner, name, sym, new_signature, depth)
             sig_end_idx = def_line_idx + len(sig_lines) - 1
 
         elif lang == "rust":
-            sig_lines, line_sep, sig_end_idx = _capture_multiline_sig(lines, def_line_idx, content)
+            sig_lines, line_sep, sig_end_idx = _capture_multiline_sig(
+                lines, def_line_idx, content
+            )
             old_def = line_sep.join(sig_lines)
             vis_match = re.match(r"^(\s*(?:pub\s*(?:\([^)]*\)\s*)?)?)", first_line)
             vis_prefix = vis_match.group(1) if vis_match else indent
             new_def = f"{vis_prefix}fn {new_signature}"
 
         elif lang == "go":
-            sig_lines, line_sep, sig_end_idx = _capture_multiline_sig(lines, def_line_idx, content)
+            sig_lines, line_sep, sig_end_idx = _capture_multiline_sig(
+                lines, def_line_idx, content
+            )
             old_def = line_sep.join(sig_lines)
             recv_match = re.match(r"^(\s*func\s+\([^)]+\)\s+)", first_line)
             if recv_match:
@@ -2014,7 +2286,9 @@ def _plan_signature_change(index, store, owner, name, sym, new_signature, depth)
                 new_def = f"{indent}func {new_signature}"
 
         elif lang in ("java", "csharp", "kotlin"):
-            sig_lines, line_sep, sig_end_idx = _capture_multiline_sig(lines, def_line_idx, content)
+            sig_lines, line_sep, sig_end_idx = _capture_multiline_sig(
+                lines, def_line_idx, content
+            )
             old_def = line_sep.join(sig_lines)
             mod_match = re.match(
                 r"^(\s*(?:(?:public|private|protected|internal|static|abstract|override|virtual|sealed|final|open|suspend|inline)\s+)*)",
@@ -2027,7 +2301,9 @@ def _plan_signature_change(index, store, owner, name, sym, new_signature, depth)
                 new_def = f"{mod_prefix}{new_signature}"
 
         elif lang == "swift":
-            sig_lines, line_sep, sig_end_idx = _capture_multiline_sig(lines, def_line_idx, content)
+            sig_lines, line_sep, sig_end_idx = _capture_multiline_sig(
+                lines, def_line_idx, content
+            )
             old_def = line_sep.join(sig_lines)
             mod_match = re.match(
                 r"^(\s*(?:(?:public|private|internal|open|fileprivate|static|class|mutating|nonmutating|@\w+)\s+)*)",
@@ -2037,23 +2313,37 @@ def _plan_signature_change(index, store, owner, name, sym, new_signature, depth)
             new_def = f"{mod_prefix}func {new_signature}"
 
         elif lang == "scala":
-            sig_lines, line_sep, sig_end_idx = _capture_multiline_sig(lines, def_line_idx, content)
+            sig_lines, line_sep, sig_end_idx = _capture_multiline_sig(
+                lines, def_line_idx, content
+            )
             old_def = line_sep.join(sig_lines)
-            mod_match = re.match(r"^(\s*(?:(?:private|protected|override|implicit|lazy|final|sealed|abstract)\s+)*)", first_line)
+            mod_match = re.match(
+                r"^(\s*(?:(?:private|protected|override|implicit|lazy|final|sealed|abstract)\s+)*)",
+                first_line,
+            )
             mod_prefix = mod_match.group(1) if mod_match else indent
             new_def = f"{mod_prefix}def {new_signature}"
 
         elif lang == "dart":
-            sig_lines, line_sep, sig_end_idx = _capture_multiline_sig(lines, def_line_idx, content)
+            sig_lines, line_sep, sig_end_idx = _capture_multiline_sig(
+                lines, def_line_idx, content
+            )
             old_def = line_sep.join(sig_lines)
-            mod_match = re.match(r"^(\s*(?:(?:static|abstract|external|factory)\s+)*)", first_line)
+            mod_match = re.match(
+                r"^(\s*(?:(?:static|abstract|external|factory)\s+)*)", first_line
+            )
             mod_prefix = mod_match.group(1) if mod_match else indent
             new_def = f"{mod_prefix}{new_signature}"
 
         elif lang == "php":
-            sig_lines, line_sep, sig_end_idx = _capture_multiline_sig(lines, def_line_idx, content)
+            sig_lines, line_sep, sig_end_idx = _capture_multiline_sig(
+                lines, def_line_idx, content
+            )
             old_def = line_sep.join(sig_lines)
-            mod_match = re.match(r"^(\s*(?:(?:public|private|protected|static|abstract|final)\s+)*)", first_line)
+            mod_match = re.match(
+                r"^(\s*(?:(?:public|private|protected|static|abstract|final)\s+)*)",
+                first_line,
+            )
             mod_prefix = mod_match.group(1) if mod_match else indent
             new_def = f"{mod_prefix}function {new_signature}"
 
@@ -2063,13 +2353,17 @@ def _plan_signature_change(index, store, owner, name, sym, new_signature, depth)
             sig_end_idx = def_line_idx
 
         elif lang == "elixir":
-            sig_lines, line_sep, sig_end_idx = _capture_multiline_sig(lines, def_line_idx, content)
+            sig_lines, line_sep, sig_end_idx = _capture_multiline_sig(
+                lines, def_line_idx, content
+            )
             old_def = line_sep.join(sig_lines)
             keyword = "defp" if first_line.strip().startswith("defp") else "def"
             new_def = f"{indent}{keyword} {new_signature}"
 
         elif lang in ("c", "cpp", "arduino"):
-            sig_lines, line_sep, sig_end_idx = _capture_multiline_sig(lines, def_line_idx, content)
+            sig_lines, line_sep, sig_end_idx = _capture_multiline_sig(
+                lines, def_line_idx, content
+            )
             old_def = line_sep.join(sig_lines)
             new_def = f"{indent}{new_signature}"
 
@@ -2079,7 +2373,9 @@ def _plan_signature_change(index, store, owner, name, sym, new_signature, depth)
             sig_end_idx = def_line_idx
 
         elif lang in ("lua", "luau"):
-            sig_lines, line_sep, sig_end_idx = _capture_multiline_sig(lines, def_line_idx, content)
+            sig_lines, line_sep, sig_end_idx = _capture_multiline_sig(
+                lines, def_line_idx, content
+            )
             old_def = line_sep.join(sig_lines)
             local_prefix = "local " if first_line.strip().startswith("local ") else ""
             new_def = f"{indent}{local_prefix}function {new_signature}"
@@ -2090,12 +2386,16 @@ def _plan_signature_change(index, store, owner, name, sym, new_signature, depth)
             sig_end_idx = def_line_idx
 
         elif lang == "julia":
-            sig_lines, line_sep, sig_end_idx = _capture_multiline_sig(lines, def_line_idx, content)
+            sig_lines, line_sep, sig_end_idx = _capture_multiline_sig(
+                lines, def_line_idx, content
+            )
             old_def = line_sep.join(sig_lines)
             new_def = f"{indent}function {new_signature}"
 
         elif lang == "gleam":
-            sig_lines, line_sep, sig_end_idx = _capture_multiline_sig(lines, def_line_idx, content)
+            sig_lines, line_sep, sig_end_idx = _capture_multiline_sig(
+                lines, def_line_idx, content
+            )
             old_def = line_sep.join(sig_lines)
             pub_prefix = "pub " if first_line.strip().startswith("pub ") else ""
             new_def = f"{indent}{pub_prefix}fn {new_signature}"
@@ -2112,7 +2412,9 @@ def _plan_signature_change(index, store, owner, name, sym, new_signature, depth)
     }
 
     # Find call sites
-    affected = _find_affected_files(index, store, owner, name, sym_file, sym_name, depth)
+    affected = _find_affected_files(
+        index, store, owner, name, sym_file, sym_name, depth
+    )
     # Also scan definition file for internal calls
     all_files = [sym_file] + [f for f in affected if f != sym_file]
 
@@ -2121,7 +2423,9 @@ def _plan_signature_change(index, store, owner, name, sym, new_signature, depth)
     for fpath in all_files:
         file_content, read_error = _get_file_content_safe(store, owner, name, fpath)
         if read_error:
-            file_read_warnings.append({"file": fpath, "reason": "file_read_error", "error": read_error})
+            file_read_warnings.append(
+                {"file": fpath, "reason": "file_read_error", "error": read_error}
+            )
             continue
         if not file_content:
             continue
@@ -2144,12 +2448,14 @@ def _plan_signature_change(index, store, owner, name, sym, new_signature, depth)
             ctx_end = min(len(file_lines), i + 2)
             context = "\n".join(file_lines[ctx_start:ctx_end])
 
-            call_sites.append({
-                "file": fpath,
-                "line": i + 1,
-                "current_call": call_expr,
-                "context": context,
-            })
+            call_sites.append(
+                {
+                    "file": fpath,
+                    "line": i + 1,
+                    "current_call": call_expr,
+                    "context": context,
+                }
+            )
 
     result = {
         "type": "signature",
@@ -2157,7 +2463,7 @@ def _plan_signature_change(index, store, owner, name, sym, new_signature, depth)
         "call_sites": call_sites,
         "summary": {"call_sites_found": len(call_sites)},
     }
-    
+
     # Fix F: Include warnings for file read errors
     if file_read_warnings:
         result["warnings"] = file_read_warnings
@@ -2185,44 +2491,44 @@ def _extract_call_expression(lines, func_name, start_line_idx):
     escape_next = False  # Track if next char is escaped
     in_triple = False  # Track if we're inside a triple-quoted string
     triple_char = None  # The triple-quote character(s): ''' or """
-    
+
     for i in range(start_line_idx, min(start_line_idx + 10, len(lines))):
         line_content = lines[i]
         start_pos = match.start() if i == start_line_idx else 0
         j = start_pos
         while j < len(line_content):
             ch = line_content[j]
-            
+
             if escape_next:
                 escape_next = False
                 j += 1
                 continue
-            
-            if ch == '\\' and in_string and not in_triple:
+
+            if ch == "\\" and in_string and not in_triple:
                 escape_next = True
                 j += 1
                 continue
-            
+
             # B-2: Handle triple-quoted strings - check before single-char toggle
             if not in_string and not in_triple:
                 # Check for triple quotes starting at current position
-                if line_content[j:j+3] in ('"""', "'''"):
+                if line_content[j : j + 3] in ('"""', "'''"):
                     in_triple = True
-                    triple_char = line_content[j:j+3]
+                    triple_char = line_content[j : j + 3]
                     j += 3
                     continue
             elif in_triple:
                 # Inside triple-quoted string - look for closing triple
-                if line_content[j:j+3] == triple_char:
+                if line_content[j : j + 3] == triple_char:
                     in_triple = False
                     triple_char = None
                     j += 3
                     continue
                 j += 1
                 continue
-            
+
             # Handle string boundaries (single-char strings only when not in triple)
-            if ch in ('"', "'", '`') and in_string is None:
+            if ch in ('"', "'", "`") and in_string is None:
                 in_string = ch
                 j += 1
                 continue
@@ -2230,7 +2536,7 @@ def _extract_call_expression(lines, func_name, start_line_idx):
                 in_string = None
                 j += 1
                 continue
-            
+
             # Only count parens outside strings
             if in_string is None and not in_triple:
                 if ch == "(":
@@ -2243,7 +2549,7 @@ def _extract_call_expression(lines, func_name, start_line_idx):
                     j += 1  # Include the closing paren
                     break
             j += 1
-        
+
         result_lines.append(line_content[:j].rstrip())
         if started and depth == 0:
             break
@@ -2254,6 +2560,7 @@ def _extract_call_expression(lines, func_name, start_line_idx):
 # ---------------------------------------------------------------------------
 # Token savings helper
 # ---------------------------------------------------------------------------
+
 
 def _record_savings(num_files: int, result: dict) -> None:
     """Estimate tokens saved and record + attach to result."""

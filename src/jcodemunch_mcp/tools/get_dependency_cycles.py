@@ -4,8 +4,8 @@ import time
 from typing import Optional
 
 from ..storage import IndexStore
+from ._graph_utils import build_adjacency
 from ._utils import index_status_to_tool_error, resolve_repo
-from .get_dependency_graph import _build_adjacency
 
 
 def _find_cycles(adj: dict[str, list[str]]) -> list[list[str]]:
@@ -118,7 +118,13 @@ def get_dependency_cycles(
         }
 
     source_files = frozenset(index.source_files)
-    adj = _build_adjacency(index.imports, source_files, getattr(index, "alias_map", None), getattr(index, "psr4_map", None))
+    adj = build_adjacency(
+        index.imports,
+        source_files,
+        getattr(index, "alias_map", None),
+        getattr(index, "psr4_map", None),
+        expand_barrels=True,
+    )
     cycles = _find_cycles(adj)
 
     elapsed = (time.perf_counter() - start) * 1000

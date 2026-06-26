@@ -50,7 +50,6 @@ _TOOL_MULTIPLIERS: dict[str, float] = {
     # Graph queries — the structurally hardest things to do with grep.
     "find_importers": 25.0,
     "find_references": 25.0,
-    "check_references": 15.0,
     "get_call_hierarchy": 30.0,
     "get_dependency_graph": 25.0,
     "get_dependency_cycles": 25.0,
@@ -72,7 +71,6 @@ _TOOL_MULTIPLIERS: dict[str, float] = {
     "get_dead_code_v2": 35.0,
     "get_tectonic_map": 30.0,
     "get_coupling_metrics": 20.0,
-    "get_symbol_importance": 15.0,
     # Refactoring / maintenance.
     "plan_refactoring": 25.0,
     "get_changed_symbols": 12.0,

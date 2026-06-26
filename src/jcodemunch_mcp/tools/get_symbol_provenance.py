@@ -18,54 +18,62 @@ from __future__ import annotations
 import logging
 import re
 import sqlite3
-import subprocess
 import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from ..storage import IndexStore
-from ._utils import resolve_repo
+from ._utils import resolve_repo, run_git
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Git helpers
-# ---------------------------------------------------------------------------
-
-def _run_git(args: list[str], cwd: str, timeout: int = 30) -> tuple[int, str, str]:
-    try:
-        r = subprocess.run(
-            ["git"] + args,
-            cwd=cwd, capture_output=True, text=True,
-            timeout=timeout, stdin=subprocess.DEVNULL,
-        )
-        return r.returncode, r.stdout.strip(), r.stderr.strip()
-    except FileNotFoundError:
-        return -1, "", "git not found on PATH"
-    except subprocess.TimeoutExpired:
-        return -2, "", "git command timed out"
-    except Exception as exc:
-        logger.debug("git subprocess error: %s", exc, exc_info=True)
-        return -3, "", str(exc)
-
-
-# ---------------------------------------------------------------------------
-# Semantic commit classification
-# ---------------------------------------------------------------------------
 
 # Patterns checked against the first line of a commit message (case-insensitive).
 # Order matters: first match wins.
 _CATEGORY_PATTERNS: list[tuple[str, re.Pattern]] = [
-    ("revert",   re.compile(r"^revert", re.IGNORECASE)),
-    ("rename",   re.compile(r"\brename[ds]?\b|\bmove[ds]?\b", re.IGNORECASE)),
-    ("bugfix",   re.compile(r"\bfix(?:e[ds])?\b|\bbug\b|\bpatch\b|\bhotfix\b|\bcorrect\b|\bresolve[ds]?\b", re.IGNORECASE)),
-    ("perf",     re.compile(r"\bperf(?:ormance)?\b|\boptimiz[e]?\b|\bspeed\b|\bfaster\b|\bcache\b", re.IGNORECASE)),
-    ("refactor", re.compile(r"\brefactor\b|\bclean\s*up\b|\brestructur\b|\bsimplif\b|\bextract\b|\bdecompos\b", re.IGNORECASE)),
-    ("test",     re.compile(r"\btest[s]?\b|\bspec[s]?\b|\bcoverage\b", re.IGNORECASE)),
-    ("docs",     re.compile(r"\bdoc[s]?\b|\breadme\b|\bchangelog\b|\bcomment\b", re.IGNORECASE)),
-    ("config",   re.compile(r"\bconfig\b|\bci\b|\bdocker\b|\byaml\b|\benv\b|\bdeps?\b|\bbump\b|\bupgrade\b", re.IGNORECASE)),
-    ("feature",  re.compile(r"\badd[s]?\b|\bfeat(?:ure)?\b|\bimplement\b|\bintroduc\b|\bnew\b|\bsupport\b|\benable\b", re.IGNORECASE)),
+    ("revert", re.compile(r"^revert", re.IGNORECASE)),
+    ("rename", re.compile(r"\brename[ds]?\b|\bmove[ds]?\b", re.IGNORECASE)),
+    (
+        "bugfix",
+        re.compile(
+            r"\bfix(?:e[ds])?\b|\bbug\b|\bpatch\b|\bhotfix\b|\bcorrect\b|\bresolve[ds]?\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "perf",
+        re.compile(
+            r"\bperf(?:ormance)?\b|\boptimiz[e]?\b|\bspeed\b|\bfaster\b|\bcache\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "refactor",
+        re.compile(
+            r"\brefactor\b|\bclean\s*up\b|\brestructur\b|\bsimplif\b|\bextract\b|\bdecompos\b",
+            re.IGNORECASE,
+        ),
+    ),
+    ("test", re.compile(r"\btest[s]?\b|\bspec[s]?\b|\bcoverage\b", re.IGNORECASE)),
+    (
+        "docs",
+        re.compile(r"\bdoc[s]?\b|\breadme\b|\bchangelog\b|\bcomment\b", re.IGNORECASE),
+    ),
+    (
+        "config",
+        re.compile(
+            r"\bconfig\b|\bci\b|\bdocker\b|\byaml\b|\benv\b|\bdeps?\b|\bbump\b|\bupgrade\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "feature",
+        re.compile(
+            r"\badd[s]?\b|\bfeat(?:ure)?\b|\bimplement\b|\bintroduc\b|\bnew\b|\bsupport\b|\benable\b",
+            re.IGNORECASE,
+        ),
+    ),
 ]
 
 
@@ -93,7 +101,11 @@ def _extract_intent(message: str) -> str:
         if not stripped:
             continue
         # Skip conventional-commit trailers and sign-offs
-        if re.match(r"^(Signed-off-by|Co-authored-by|Reviewed-by|Acked-by|Fixes|Closes|Refs?):", stripped, re.IGNORECASE):
+        if re.match(
+            r"^(Signed-off-by|Co-authored-by|Reviewed-by|Acked-by|Fixes|Closes|Refs?):",
+            stripped,
+            re.IGNORECASE,
+        ):
             continue
         if stripped.startswith("#"):
             continue
@@ -131,16 +143,14 @@ def _load_stack_frequency(
     conn.row_factory = sqlite3.Row
     try:
         try:
-            row = conn.execute(
-                "SELECT 1 FROM runtime_stack_events LIMIT 1"
-            ).fetchone()
+            row = conn.execute("SELECT 1 FROM runtime_stack_events LIMIT 1").fetchone()
         except sqlite3.OperationalError:
             return None
         if row is None:
             return None
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, since_days))).strftime(
-            "%Y-%m-%dT%H:%M:%SZ"
-        )
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(days=max(1, since_days))
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
         rows = conn.execute(
             """
             SELECT severity, SUM(count) AS total, MAX(last_seen) AS last_seen,
@@ -187,6 +197,7 @@ def _load_stack_frequency(
 # ---------------------------------------------------------------------------
 # Main tool
 # ---------------------------------------------------------------------------
+
 
 def get_symbol_provenance(
     repo: str,
@@ -246,7 +257,10 @@ def get_symbol_provenance(
         elif len(by_name) > 1:
             return {
                 "error": f"Ambiguous symbol name '{symbol}': found {len(by_name)} definitions. Use the symbol ID to disambiguate.",
-                "candidates": [{"name": s["name"], "file": s["file"], "id": s["id"]} for s in by_name],
+                "candidates": [
+                    {"name": s["name"], "file": s["file"], "id": s["id"]}
+                    for s in by_name
+                ],
             }
         else:
             return {"error": f"Symbol not found: '{symbol}'. Try search_symbols first."}
@@ -259,7 +273,7 @@ def get_symbol_provenance(
     sym_id: str = sym.get("id", "")
 
     # Verify git availability
-    rc, _, err = _run_git(["rev-parse", "--git-dir"], cwd=cwd)
+    rc, _, err = run_git(["rev-parse", "--git-dir"], cwd=cwd)
     if rc != 0:
         if rc == -1:
             return {"error": "git not found on PATH."}
@@ -294,7 +308,7 @@ def get_symbol_provenance(
             sym_file,
         ]
 
-    rc2, log_out, log_err = _run_git(log_args, cwd=cwd, timeout=30)
+    rc2, log_out, log_err = run_git(log_args, cwd=cwd, timeout=30)
 
     # git log -L may fail on some git versions or binary files; fall back
     if rc2 != 0 and use_line_log:
@@ -307,7 +321,7 @@ def get_symbol_provenance(
             "--",
             sym_file,
         ]
-        rc2, log_out, log_err = _run_git(log_args, cwd=cwd, timeout=30)
+        rc2, log_out, log_err = run_git(log_args, cwd=cwd, timeout=30)
 
     if rc2 != 0:
         return {"error": f"git log failed: {log_err}"}
@@ -330,19 +344,23 @@ def get_symbol_provenance(
 
         sha, author, date, subject = parts[0], parts[1], parts[2], parts[3]
         # Reconstruct full message (body after header line)
-        full_message = subject + "\n" + "\n".join(lines[1:]) if len(lines) > 1 else subject
+        full_message = (
+            subject + "\n" + "\n".join(lines[1:]) if len(lines) > 1 else subject
+        )
 
         category = _classify_commit(subject)
         intent = _extract_intent(full_message)
 
-        lineage.append({
-            "sha": sha[:12],
-            "author": author,
-            "date": date[:10],
-            "subject": subject,
-            "category": category,
-            "intent": intent,
-        })
+        lineage.append(
+            {
+                "sha": sha[:12],
+                "author": author,
+                "date": date[:10],
+                "subject": subject,
+                "category": category,
+                "intent": intent,
+            }
+        )
 
     # If file-level log, filter to commits that likely touched this symbol
     # by checking if the commit's diff mentions the symbol name
@@ -350,9 +368,18 @@ def get_symbol_provenance(
         filtered: list[dict] = []
         for entry in lineage:
             # Check if this commit's diff mentions the symbol
-            rc3, diff_out, _ = _run_git(
-                ["show", "--no-patch", "--format=", "-p", entry["sha"][:12], "--", sym_file],
-                cwd=cwd, timeout=10,
+            rc3, diff_out, _ = run_git(
+                [
+                    "show",
+                    "--no-patch",
+                    "--format=",
+                    "-p",
+                    entry["sha"][:12],
+                    "--",
+                    sym_file,
+                ],
+                cwd=cwd,
+                timeout=10,
             )
             if rc3 == 0 and sym_name in diff_out:
                 filtered.append(entry)
@@ -372,7 +399,9 @@ def get_symbol_provenance(
 
     # Evolution summary
     category_counts = Counter(c["category"] for c in lineage)
-    dominant_category = category_counts.most_common(1)[0][0] if category_counts else "unknown"
+    dominant_category = (
+        category_counts.most_common(1)[0][0] if category_counts else "unknown"
+    )
 
     # Lifespan calculation
     lifespan_days = 0
@@ -380,6 +409,7 @@ def get_symbol_provenance(
     if len(lineage) >= 2:
         try:
             from datetime import datetime
+
             first_date = datetime.fromisoformat(lineage[-1]["date"])
             last_date = datetime.fromisoformat(lineage[0]["date"])
             lifespan_days = (last_date - first_date).days
@@ -392,15 +422,22 @@ def get_symbol_provenance(
     origin = lineage[-1] if lineage else None
 
     # Generate narrative
-    narrative = _build_narrative(sym_name, sym_kind, lineage, authors_ranked, dominant_category, lifespan_days)
+    narrative = _build_narrative(
+        sym_name, sym_kind, lineage, authors_ranked, dominant_category, lifespan_days
+    )
 
     # Phase 5: optional runtime stack-frequency enrichment. Zero-cost when
     # runtime_stack_events is empty (or the table doesn't exist on a
     # pre-v16 DB). Surfaces the "this symbol last appeared in N error
     # stacks over the past D days" signal.
     db_path = store._sqlite._db_path(owner, name)  # type: ignore[attr-defined]
-    stack_freq = _load_stack_frequency(db_path, sym_id, since_days=30) if sym_id else None
-    if stack_freq is not None and stack_freq.get("by_severity", {}).get("error", 0) >= 3:
+    stack_freq = (
+        _load_stack_frequency(db_path, sym_id, since_days=30) if sym_id else None
+    )
+    if (
+        stack_freq is not None
+        and stack_freq.get("by_severity", {}).get("error", 0) >= 3
+    ):
         # Append a sentence to the narrative when the symbol shows up in
         # production error stacks repeatedly — that's a load-bearing signal
         # the static narrative can't otherwise convey.
@@ -437,7 +474,9 @@ def get_symbol_provenance(
         "narrative": narrative,
         "_meta": {
             "timing_ms": round(elapsed, 1),
-            "methodology": "git_log_line_range" if use_line_log else "git_log_file_filtered",
+            "methodology": "git_log_line_range"
+            if use_line_log
+            else "git_log_file_filtered",
             "confidence_level": "high" if use_line_log else "medium",
             "tip": (
                 "lineage = commits from newest to oldest. "
@@ -492,14 +531,16 @@ def _build_narrative(
         # Highlight if it's been heavily bugfixed
         bugfix_count = sum(1 for c in lineage if c["category"] == "bugfix")
         if bugfix_count >= 3:
-            parts.append(f" (with {bugfix_count} bug fixes — consider reviewing for structural issues)")
+            parts.append(
+                f" (with {bugfix_count} bug fixes — consider reviewing for structural issues)"
+            )
         parts.append(".")
 
     # Closing: last change
     if num_commits > 1:
         parts.append(
             f" Last modified by {latest['author']} on {latest['date']}"
-            f" ({latest['category']}: \"{latest['subject'][:80]}\")."
+            f' ({latest["category"]}: "{latest["subject"][:80]}").'
         )
 
     return "".join(parts)

@@ -10,7 +10,7 @@ Supported sources:
   get_signal_chains    → sequenceDiagram (gateway-to-leaf sequential flow)
   get_tectonic_map     → flowchart LR  (subgraph clusters per plate)
   get_dependency_cycles→ flowchart LR  (cycle edges highlighted)
-  get_impact_preview   → flowchart BT  (target at bottom, impact ripples up)
+  get_call_hierarchy (with impact) → flowchart BT  (target at bottom, impact ripples up)
   get_blast_radius     → flowchart TD  (concentric depth-ring subgraphs)
   get_dependency_graph → flowchart LR  (directed import edges)
 """
@@ -22,23 +22,23 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass
 
-
 # ---------------------------------------------------------------------------
 # Theme system
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class Palette:
     """Visual palette for Mermaid classDef / linkStyle generation."""
 
-    depth_fills: tuple[str, ...]       # gradient by depth (0, 1, 2, 3+)
-    edge_confidence: dict[str, str]    # resolution tier → stroke color
-    edge_dash: dict[str, str]          # resolution tier → stroke-dasharray
-    risk_fills: dict[str, str]         # "high"/"medium"/"low" → fill
-    accent: str                        # primary highlight
-    dimmed: str                        # de-emphasized
-    text: str                          # label color
-    bg: str                            # background hint
+    depth_fills: tuple[str, ...]  # gradient by depth (0, 1, 2, 3+)
+    edge_confidence: dict[str, str]  # resolution tier → stroke color
+    edge_dash: dict[str, str]  # resolution tier → stroke-dasharray
+    risk_fills: dict[str, str]  # "high"/"medium"/"low" → fill
+    accent: str  # primary highlight
+    dimmed: str  # de-emphasized
+    text: str  # label color
+    bg: str  # background hint
 
 
 _PALETTE_FLOW = Palette(
@@ -161,6 +161,7 @@ def _disambiguate_basenames(paths: list[str]) -> dict[str, str]:
 # Pruning
 # ---------------------------------------------------------------------------
 
+
 def _prune_graph(
     nodes: list[str],
     edges: list[tuple[str, str]],
@@ -189,10 +190,7 @@ def _prune_graph(
             if b in node_set:
                 degree[b] += 1
 
-        leaves = [
-            n for n in node_set
-            if degree.get(n, 0) <= 1 and n not in preserve
-        ]
+        leaves = [n for n in node_set if degree.get(n, 0) <= 1 and n not in preserve]
         if not leaves:
             break
 
@@ -234,6 +232,7 @@ _SOURCE_SIGNATURES: list[tuple[str, set[str]]] = [
     ("tectonic_map", {"plates", "plate_count"}),
     ("signal_chains_discovery", {"chains", "gateway_count", "orphan_symbols"}),
     ("signal_chains_lookup", {"chains", "on_no_chain"}),
+    ("call_hierarchy_impact", {"symbol", "callers", "callees", "impact"}),
     ("impact_preview", {"affected_symbols", "call_chains"}),
     ("dependency_cycles", {"cycles", "cycle_count"}),
     ("call_hierarchy", {"symbol", "callers", "callees"}),
@@ -263,6 +262,7 @@ def _detect_source(source: dict) -> str:
 # Per-source renderers
 # ---------------------------------------------------------------------------
 
+
 def _render_call_hierarchy(source: dict, pal: Palette, max_nodes: int) -> dict:
     """Flowchart TD — callers above root, callees below, confidence-colored edges."""
     lines: list[str] = ["flowchart TD"]
@@ -278,13 +278,17 @@ def _render_call_hierarchy(source: dict, pal: Palette, max_nodes: int) -> dict:
     nid += 1
 
     # classDefs
-    lines.append(f'  classDef root fill:{pal.accent},stroke:#333,stroke-width:3px,color:{pal.text}')
+    lines.append(
+        f"  classDef root fill:{pal.accent},stroke:#333,stroke-width:3px,color:{pal.text}"
+    )
     for tier, color in pal.edge_confidence.items():
         dash = pal.edge_dash.get(tier, "0")
         if dash == "0":
-            lines.append(f'  classDef edge_{tier} stroke:{color},stroke-width:2px')
+            lines.append(f"  classDef edge_{tier} stroke:{color},stroke-width:2px")
         else:
-            lines.append(f'  classDef edge_{tier} stroke:{color},stroke-dasharray:{dash}')
+            lines.append(
+                f"  classDef edge_{tier} stroke:{color},stroke-dasharray:{dash}"
+            )
 
     # Shapes by kind
     kind_shapes = {
@@ -299,7 +303,7 @@ def _render_call_hierarchy(source: dict, pal: Palette, max_nodes: int) -> dict:
 
     # Root node
     lp, rp = _shape(sym.get("kind", "function"))
-    lines.append(f'  {root_id}{lp}{root_label}{rp}:::root')
+    lines.append(f"  {root_id}{lp}{root_label}{rp}:::root")
 
     # Collect all paths for disambiguation
     all_files: list[str] = []
@@ -355,7 +359,7 @@ def _render_call_hierarchy(source: dict, pal: Palette, max_nodes: int) -> dict:
             node_map[sid] = nid_str
             nid += 1
             lp, rp = _shape(s.get("kind", "function"))
-            lines.append(f'    {nid_str}{lp}{_sanitize_label(s.get("name", "?"))}{rp}')
+            lines.append(f"    {nid_str}{lp}{_sanitize_label(s.get('name', '?'))}{rp}")
         lines.append("  end")
 
     # Render callees
@@ -373,7 +377,7 @@ def _render_call_hierarchy(source: dict, pal: Palette, max_nodes: int) -> dict:
             node_map[sid] = nid_str
             nid += 1
             lp, rp = _shape(s.get("kind", "function"))
-            lines.append(f'    {nid_str}{lp}{_sanitize_label(s.get("name", "?"))}{rp}')
+            lines.append(f"    {nid_str}{lp}{_sanitize_label(s.get('name', '?'))}{rp}")
         lines.append("  end")
 
     # Edges with confidence styling
@@ -401,7 +405,7 @@ def _render_call_hierarchy(source: dict, pal: Palette, max_nodes: int) -> dict:
                     break
         color = pal.edge_confidence.get(resolution, "#999")
         dash = pal.edge_dash.get(resolution, "0")
-        lines.append(f'  {a_nd} --> {b_nd}')
+        lines.append(f"  {a_nd} --> {b_nd}")
         style_parts = [f"stroke:{color}"]
         if dash != "0":
             style_parts.append(f"stroke-dasharray:{dash}")
@@ -531,9 +535,14 @@ def _render_signal_chains(source: dict, pal: Palette, max_nodes: int) -> dict:
         label = chain.get("label", chain.get("gateway_name", ""))
         if len(symbols) < 2:
             continue
-        lines.append(f"  Note over {_UNSAFE_RE.sub('_', symbols[0])}: {_sanitize_label(label)}")
+        lines.append(
+            f"  Note over {_UNSAFE_RE.sub('_', symbols[0])}: {_sanitize_label(label)}"
+        )
         for i in range(len(symbols) - 1):
-            if symbols[i] not in seen_participants or symbols[i + 1] not in seen_participants:
+            if (
+                symbols[i] not in seen_participants
+                or symbols[i + 1] not in seen_participants
+            ):
                 continue
             src = _UNSAFE_RE.sub("_", symbols[i])
             dst = _UNSAFE_RE.sub("_", symbols[i + 1])
@@ -543,7 +552,9 @@ def _render_signal_chains(source: dict, pal: Palette, max_nodes: int) -> dict:
     # Orphan stats as trailing note
     orphan_pct = source.get("orphan_symbol_pct", 0)
     if orphan_pct > 0:
-        lines.append(f"  Note right of {_UNSAFE_RE.sub('_', selected_chains[0].get('gateway_name', 'System'))}: {orphan_pct}% orphan symbols")
+        lines.append(
+            f"  Note right of {_UNSAFE_RE.sub('_', selected_chains[0].get('gateway_name', 'System'))}: {orphan_pct}% orphan symbols"
+        )
 
     legend = (
         "Participants: functions/methods in call order (left to right)\n"
@@ -564,7 +575,9 @@ def _render_signal_chains(source: dict, pal: Palette, max_nodes: int) -> dict:
 def _render_tectonic_map(source: dict, pal: Palette, max_nodes: int) -> dict:
     """Flowchart LR — subgraph clusters per plate with cohesion and coupling."""
     lines: list[str] = ["flowchart LR"]
-    lines.append(f"  classDef anchor fill:{pal.accent},stroke:#333,stroke-width:3px,color:{pal.text}")
+    lines.append(
+        f"  classDef anchor fill:{pal.accent},stroke:#333,stroke-width:3px,color:{pal.text}"
+    )
     lines.append(f"  classDef drifter fill:#FF851B,stroke:#333,color:{pal.text}")
     lines.append("  classDef nexus stroke:#FF4136,stroke-width:4px")
     lines.append(f"  classDef isolated fill:{pal.dimmed},stroke:#999,color:#666")
@@ -576,7 +589,7 @@ def _render_tectonic_map(source: dict, pal: Palette, max_nodes: int) -> dict:
     nid = 0
 
     plate_anchor_nodes: dict[int, str] = {}  # plate_id → node_id of anchor
-    anchor_lookup: dict[str, str] = {}        # anchor file path → node_id
+    anchor_lookup: dict[str, str] = {}  # anchor file path → node_id
 
     for plate in plates:
         pid = plate.get("plate_id", nid)
@@ -594,7 +607,9 @@ def _render_tectonic_map(source: dict, pal: Palette, max_nodes: int) -> dict:
             pruned += len(files) - max_per_plate
 
         nexus_tag = " ⚠ NEXUS" if is_nexus else ""
-        sg_label = _sanitize_label(f"{majority_dir} (cohesion: {cohesion:.2f}){nexus_tag}")
+        sg_label = _sanitize_label(
+            f"{majority_dir} (cohesion: {cohesion:.2f}){nexus_tag}"
+        )
         sg_id = f"plate{pid}"
         lines.append(f'  subgraph {sg_id}["{sg_label}"]')
 
@@ -616,7 +631,9 @@ def _render_tectonic_map(source: dict, pal: Palette, max_nodes: int) -> dict:
             overflow_nd = _node_id(nid)
             nid += 1
             node_count += 1
-            lines.append(f'    {overflow_nd}[/"...+{len(files) - max_per_plate} more"/]:::isolated')
+            lines.append(
+                f'    {overflow_nd}[/"...+{len(files) - max_per_plate} more"/]:::isolated'
+            )
 
         lines.append("  end")
 
@@ -754,7 +771,9 @@ def _render_dependency_cycles(source: dict, pal: Palette, max_nodes: int) -> dic
 def _render_impact_preview(source: dict, pal: Palette, max_nodes: int) -> dict:
     """Flowchart BT — target at bottom, impact ripples upward through call chains."""
     lines: list[str] = ["flowchart BT"]
-    lines.append(f"  classDef target fill:{pal.accent},stroke:#333,stroke-width:4px,color:{pal.text}")
+    lines.append(
+        f"  classDef target fill:{pal.accent},stroke:#333,stroke-width:4px,color:{pal.text}"
+    )
 
     # Depth colors
     depth_colors = list(pal.depth_fills) + [pal.depth_fills[-1]] * 5
@@ -806,7 +825,9 @@ def _render_impact_preview(source: dict, pal: Palette, max_nodes: int) -> dict:
             node_map[s["id"]] = nd
             chain_len = len(s.get("call_chain", []))
             depth_class = f"d{min(chain_len, 5)}" if chain_len > 0 else "d1"
-            lines.append(f'    {nd}["{_sanitize_label(s.get("name", "?"))}"]:::{depth_class}')
+            lines.append(
+                f'    {nd}["{_sanitize_label(s.get("name", "?"))}"]:::{depth_class}'
+            )
         lines.append("  end")
 
     # Edges from call chains
@@ -837,9 +858,13 @@ def _render_impact_preview(source: dict, pal: Palette, max_nodes: int) -> dict:
 def _render_blast_radius(source: dict, pal: Palette, max_nodes: int) -> dict:
     """Flowchart TD — concentric depth-ring subgraphs around target."""
     lines: list[str] = ["flowchart TD"]
-    lines.append(f"  classDef target fill:{pal.accent},stroke:#333,stroke-width:4px,color:{pal.text}")
+    lines.append(
+        f"  classDef target fill:{pal.accent},stroke:#333,stroke-width:4px,color:{pal.text}"
+    )
     lines.append("  classDef confirmed fill:#FFE0E0,stroke:#FF4136")
-    lines.append("  classDef potential fill:#FFF3E0,stroke:#FF851B,stroke-dasharray:5 5")
+    lines.append(
+        "  classDef potential fill:#FFF3E0,stroke:#FF851B,stroke-dasharray:5 5"
+    )
     lines.append("  classDef cross fill:#E0E0FF,stroke:#0074D9,stroke-dasharray:8 4")
 
     sym = source.get("symbol", "")
@@ -872,11 +897,15 @@ def _render_blast_radius(source: dict, pal: Palette, max_nodes: int) -> dict:
                 continue
             shown = depth_files[:remaining]
             pruned += max(0, len(depth_files) - len(shown))
-            sg_label = _sanitize_label(f"Depth {depth_str} — {'Direct' if depth_str == '1' else 'Transitive'}")
+            sg_label = _sanitize_label(
+                f"Depth {depth_str} — {'Direct' if depth_str == '1' else 'Transitive'}"
+            )
             sg_id = f"depth{depth_str}"
             lines.append(f'  subgraph {sg_id}["{sg_label}"]')
             for finfo in shown:
-                fpath = finfo if isinstance(finfo, str) else finfo.get("file", str(finfo))
+                fpath = (
+                    finfo if isinstance(finfo, str) else finfo.get("file", str(finfo))
+                )
                 nd = _node_id(nid)
                 nid += 1
                 node_count += 1
@@ -888,11 +917,13 @@ def _render_blast_radius(source: dict, pal: Palette, max_nodes: int) -> dict:
     else:
         # Flat confirmed list
         if confirmed:
-            shown = confirmed[:max_nodes - 1]
+            shown = confirmed[: max_nodes - 1]
             pruned += max(0, len(confirmed) - len(shown))
             lines.append('  subgraph conf["Direct Impact"]')
             for finfo in shown:
-                fpath = finfo if isinstance(finfo, str) else finfo.get("file", str(finfo))
+                fpath = (
+                    finfo if isinstance(finfo, str) else finfo.get("file", str(finfo))
+                )
                 nd = _node_id(nid)
                 nid += 1
                 node_count += 1
@@ -907,7 +938,7 @@ def _render_blast_radius(source: dict, pal: Palette, max_nodes: int) -> dict:
 
     # Potential files
     if potential:
-        pot_shown = potential[:max(5, max_nodes - node_count)]
+        pot_shown = potential[: max(5, max_nodes - node_count)]
         pruned += max(0, len(potential) - len(pot_shown))
         lines.append('  subgraph pot["Potential Impact"]')
         for finfo in pot_shown:
@@ -949,7 +980,9 @@ def _render_blast_radius(source: dict, pal: Palette, max_nodes: int) -> dict:
 def _render_dependency_graph(source: dict, pal: Palette, max_nodes: int) -> dict:
     """Flowchart LR — directed import edges with focal file highlighted."""
     lines: list[str] = ["flowchart LR"]
-    lines.append(f"  classDef focal fill:{pal.accent},stroke:#333,stroke-width:3px,color:{pal.text}")
+    lines.append(
+        f"  classDef focal fill:{pal.accent},stroke:#333,stroke-width:3px,color:{pal.text}"
+    )
     lines.append("  classDef cross stroke:#0074D9,stroke-dasharray:8 4")
 
     focal_file = source.get("file", "")
@@ -983,7 +1016,9 @@ def _render_dependency_graph(source: dict, pal: Palette, max_nodes: int) -> dict
     root_nd = _node_id(nid)
     nid += 1
     node_map[focal_file] = root_nd
-    lines.append(f'  {root_nd}["{_sanitize_label(display.get(focal_file, _basename(focal_file)))}"]:::focal')
+    lines.append(
+        f'  {root_nd}["{_sanitize_label(display.get(focal_file, _basename(focal_file)))}"]:::focal'
+    )
 
     for fpath in survivors:
         if fpath == focal_file:
@@ -1030,6 +1065,7 @@ def _render_dependency_graph(source: dict, pal: Palette, max_nodes: int) -> dict
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def render_diagram(
     source: dict,
     theme: str = "flow",
@@ -1064,6 +1100,7 @@ def render_diagram(
 
     _RENDERERS = {
         "call_hierarchy": _render_call_hierarchy,
+        "call_hierarchy_impact": _render_impact_preview,
         "signal_chains_discovery": _render_signal_chains,
         "signal_chains_lookup": _render_signal_chains,
         "impact_preview": _render_impact_preview,
@@ -1078,8 +1115,8 @@ def render_diagram(
         return {
             "error": (
                 f"Unrecognised source shape (detected: {detected!r}). "
-                "Pass the raw output from get_call_hierarchy, get_signal_chains, "
-                "get_tectonic_map, get_dependency_cycles, get_impact_preview, "
+                "Pass the raw output from get_call_hierarchy (with include_impact=true), get_signal_chains, "
+                "get_tectonic_map, get_dependency_cycles, "
                 "get_blast_radius, or get_dependency_graph."
             )
         }
@@ -1100,10 +1137,12 @@ def render_diagram(
 
     if open_in_viewer:
         from .. import config as config_module
+
         # Global-only by design (#301): server-level wiring for the local
         # mmd-viewer subprocess; not a per-repo gate.
         if config_module.get("render_diagram_viewer_enabled", False):
             from .mermaid_viewer import open_diagram
+
             viewer_result = open_diagram(result.get("mermaid", ""))
             if not viewer_result.get("opened"):
                 result["viewer_error"] = viewer_result.get("error")

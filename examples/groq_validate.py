@@ -67,7 +67,6 @@ PRESETS = {
         "get_context_bundle",
         "get_changed_symbols",
         "get_blast_radius",
-        "get_impact_preview",
     ],
     "full": None,  # None = no filter, all tools available
 }

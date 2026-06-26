@@ -19,28 +19,45 @@ import time
 from collections import deque
 from typing import Optional
 
-from ..storage import IndexStore
-from ..parser.imports import resolve_specifier
-from ._utils import resolve_repo as _resolve_repo
-from ._call_graph import _word_match, build_symbols_by_file
 from ..parser.context._route_utils import ENTRY_POINT_DECORATOR_RE
-
+from ..storage import IndexStore
+from ._call_graph import _word_match, build_symbols_by_file
+from ._graph_utils import build_adjacency
+from ._utils import resolve_repo as _resolve_repo
 
 # ---------------------------------------------------------------------------
 # Helpers shared with find_dead_code
 # ---------------------------------------------------------------------------
 
-_ENTRY_POINT_FILENAMES = frozenset({
-    "__main__.py", "conftest.py", "manage.py", "wsgi.py", "asgi.py",
-    "setup.py", "app.py", "main.py", "run.py", "cli.py", "celery.py",
-    "Makefile",
-})
+_ENTRY_POINT_FILENAMES = frozenset(
+    {
+        "__main__.py",
+        "conftest.py",
+        "manage.py",
+        "wsgi.py",
+        "asgi.py",
+        "setup.py",
+        "app.py",
+        "main.py",
+        "run.py",
+        "cli.py",
+        "celery.py",
+        "Makefile",
+    }
+)
 
-_BARREL_FILENAMES = frozenset({
-    "__init__.py", "index.ts", "index.js", "index.tsx", "index.jsx",
-    "index.mjs", "index.cjs",
-    "mod.rs",
-})
+_BARREL_FILENAMES = frozenset(
+    {
+        "__init__.py",
+        "index.ts",
+        "index.js",
+        "index.tsx",
+        "index.jsx",
+        "index.mjs",
+        "index.cjs",
+        "mod.rs",
+    }
+)
 
 # CJS re-export: `module.exports = require('./X')` / `exports.foo = require('./X')`
 _CJS_REEXPORT_RE = re.compile(
@@ -51,9 +68,7 @@ _ESM_REEXPORT_STAR_RE = re.compile(
     r"""export\s+\*(?:\s+as\s+\w+)?\s+from\s+['"]([^'"]+)['"]"""
 )
 # ES named re-export: `export { foo, bar } from './X'`
-_ESM_REEXPORT_NAMED_RE = re.compile(
-    r"""export\s*\{[^}]+\}\s*from\s+['"]([^'"]+)['"]"""
-)
+_ESM_REEXPORT_NAMED_RE = re.compile(r"""export\s*\{[^}]+\}\s*from\s+['"]([^'"]+)['"]""")
 
 
 def _filename(path: str) -> str:
@@ -66,33 +81,6 @@ def _is_entry_point(file_path: str) -> bool:
 
 def _is_barrel(file_path: str) -> bool:
     return _filename(file_path) in _BARREL_FILENAMES
-
-
-def _build_reverse_adjacency(imports: dict, source_files: frozenset, alias_map: dict, psr4_map: Optional[dict] = None) -> dict[str, list[str]]:
-    rev: dict[str, list[str]] = {}
-    for src_file, file_imports in imports.items():
-        for imp in file_imports:
-            target = resolve_specifier(imp["specifier"], src_file, source_files, alias_map, psr4_map)
-            if target and target != src_file:
-                rev.setdefault(target, []).append(src_file)
-    return {k: list(dict.fromkeys(v)) for k, v in rev.items()}
-
-
-def _build_forward_adjacency(imports: dict, source_files: frozenset, alias_map: dict, psr4_map: Optional[dict] = None) -> dict[str, list[str]]:
-    """Forward adjacency: ``forward[src_file] = [imported targets]``.
-
-    Required so reachability BFS from entry points actually traverses the
-    dependency graph (the pre-1.80.7 reverse-only walk only found importers
-    of the entry, not files imported by it — which is why every library
-    file was treated as unreachable).
-    """
-    fwd: dict[str, list[str]] = {}
-    for src_file, file_imports in imports.items():
-        for imp in file_imports:
-            target = resolve_specifier(imp["specifier"], src_file, source_files, alias_map, psr4_map)
-            if target and target != src_file and target in source_files:
-                fwd.setdefault(src_file, []).append(target)
-    return {k: list(dict.fromkeys(v)) for k, v in fwd.items()}
 
 
 def _reachable_from_entry_points(
@@ -120,7 +108,7 @@ def _reachable_from_entry_points(
         if _is_entry_point(f) or (extra_entries and f in extra_entries):
             live.add(f)
             queue.append(f)
-    for f in (extra_entries or ()):
+    for f in extra_entries or ():
         if f not in live:
             live.add(f)
             queue.append(f)
@@ -179,8 +167,9 @@ def _barrel_exports(
         for m in _ESM_REEXPORT_NAMED_RE.finditer(content):
             targets.add(m.group(1))
         for spec in targets:
-            resolved = resolve_specifier(spec, file_path, source_files,
-                                         alias_map, psr4_map)
+            resolved = resolve_specifier(
+                spec, file_path, source_files, alias_map, psr4_map
+            )
             if resolved and resolved in source_files:
                 _collect(resolved, depth + 1)
 
@@ -224,12 +213,14 @@ def _package_json_entries(index, store, owner, repo_name) -> set[str]:
         if isinstance(exports, str):
             candidates.append(exports)
         elif isinstance(exports, dict):
+
             def _walk_exports(node):
                 if isinstance(node, str):
                     candidates.append(node)
                 elif isinstance(node, dict):
                     for v in node.values():
                         _walk_exports(v)
+
             _walk_exports(exports)
         # `bin` can be a string or a {name: path} dict.
         bins = pkg.get("bin")
@@ -249,8 +240,19 @@ def _package_json_entries(index, store, owner, repo_name) -> set[str]:
                 entries.add(joined)
                 continue
             # Try common JS/TS extensions if missing.
-            for ext in ("", ".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx",
-                        "/index.js", "/index.ts", "/index.mjs", "/index.cjs"):
+            for ext in (
+                "",
+                ".js",
+                ".ts",
+                ".mjs",
+                ".cjs",
+                ".jsx",
+                ".tsx",
+                "/index.js",
+                "/index.ts",
+                "/index.mjs",
+                "/index.cjs",
+            ):
                 trial = joined + ext
                 if trial in source_files:
                     entries.add(trial)
@@ -261,6 +263,7 @@ def _package_json_entries(index, store, owner, repo_name) -> set[str]:
 # ---------------------------------------------------------------------------
 # Main tool
 # ---------------------------------------------------------------------------
+
 
 def get_dead_code_v2(
     repo: str,
@@ -294,6 +297,7 @@ def get_dead_code_v2(
         ``{id, name, kind, file, line, confidence, signals}``
     """
     import fnmatch
+
     t0 = time.monotonic()
     try:
         owner, name = _resolve_repo(repo, storage_path)
@@ -311,7 +315,10 @@ def get_dead_code_v2(
         # symbols whose names appear nowhere in any indexed function's
         # call_references.
         return _call_graph_only_dead_code(
-            index, owner, name, t0,
+            index,
+            owner,
+            name,
+            t0,
             include_tests=include_tests,
             max_results=max_results,
             file_pattern=file_pattern,
@@ -320,8 +327,12 @@ def get_dead_code_v2(
     source_files = frozenset(index.source_files)
     alias_map = getattr(index, "alias_map", {}) or {}
     psr4_map = getattr(index, "psr4_map", None)
-    rev = _build_reverse_adjacency(index.imports, source_files, alias_map, psr4_map)
-    forward = _build_forward_adjacency(index.imports, source_files, alias_map, psr4_map)
+    rev = build_adjacency(
+        index.imports, source_files, alias_map, psr4_map, direction="reverse"
+    )
+    forward = build_adjacency(
+        index.imports, source_files, alias_map, psr4_map, direction="forward"
+    )
 
     # Pre-compute reachable files from entry points (Signal 1 input).
     # Two heuristics: (a) classic filename match (app.py, main.py, etc.);
@@ -329,7 +340,9 @@ def get_dead_code_v2(
     # ``package.json`` (issue: sverklo bench v1 — Express has no
     # filename-style entry point).
     pkg_entries = _package_json_entries(index, store, owner, name)
-    entry_point_count = sum(1 for f in index.source_files if _is_entry_point(f)) + len(pkg_entries)
+    entry_point_count = sum(1 for f in index.source_files if _is_entry_point(f)) + len(
+        pkg_entries
+    )
     reachable_files = _reachable_from_entry_points(
         list(index.source_files), rev, forward, extra_entries=pkg_entries
     )
@@ -350,7 +363,7 @@ def get_dead_code_v2(
         # Fast path: use pre-computed AST call_references index
         # Any symbol whose name appears as a value in callers_by_name has at least one caller
         called_names_by_file: dict[str, set[str]] = {}
-        for (caller_file, called_name) in callers_by_name:
+        for caller_file, called_name in callers_by_name:
             called_names_by_file.setdefault(caller_file, set()).add(called_name)
         for sym in index.symbols:
             if sym.get("kind") not in ("function", "method"):
@@ -387,7 +400,9 @@ def get_dead_code_v2(
             sym_line = sym.get("line", 0)
             sym_end_line = sym.get("end_line", sym_line)
             if sym_file not in _file_cache:
-                _file_cache[sym_file] = store.get_file_content(owner, name, sym_file) or ""
+                _file_cache[sym_file] = (
+                    store.get_file_content(owner, name, sym_file) or ""
+                )
             own_content = _file_cache[sym_file]
             if own_content and sym_line:
                 lines = own_content.splitlines()
@@ -399,7 +414,9 @@ def get_dead_code_v2(
                     continue
             for importer_file in rev.get(sym_file, []):
                 if importer_file not in _file_cache:
-                    _file_cache[importer_file] = store.get_file_content(owner, name, importer_file) or ""
+                    _file_cache[importer_file] = (
+                        store.get_file_content(owner, name, importer_file) or ""
+                    )
                 content = _file_cache[importer_file]
                 if content and _word_match(content, sym_name):
                     callee_has_caller.add(sym["id"])
@@ -432,7 +449,10 @@ def get_dead_code_v2(
             continue
 
         # Skip symbols with entry-point decorators
-        if any(ENTRY_POINT_DECORATOR_RE.search(str(d)) for d in (sym.get("decorators") or [])):
+        if any(
+            ENTRY_POINT_DECORATOR_RE.search(str(d))
+            for d in (sym.get("decorators") or [])
+        ):
             continue
 
         signals: list[str] = []
@@ -452,15 +472,17 @@ def get_dead_code_v2(
         confidence = len(signals) / 3.0
         if confidence >= min_confidence:
             seen_ids.add(sid)
-            dead_symbols.append({
-                "id": sid,
-                "name": sym_name,
-                "kind": sym.get("kind", ""),
-                "file": sym_file,
-                "line": sym.get("line", 0),
-                "confidence": round(confidence, 2),
-                "signals": signals,
-            })
+            dead_symbols.append(
+                {
+                    "id": sid,
+                    "name": sym_name,
+                    "kind": sym.get("kind", ""),
+                    "file": sym_file,
+                    "line": sym.get("line", 0),
+                    "confidence": round(confidence, 2),
+                    "signals": signals,
+                }
+            )
 
     dead_symbols.sort(key=lambda x: (-x["confidence"], x["file"], x["line"]))
 
@@ -475,8 +497,7 @@ def get_dead_code_v2(
         "repo": f"{owner}/{name}",
         "dead_symbols": dead_symbols,
         "total_analysed": sum(
-            1 for s in index.symbols
-            if s.get("kind") in ("function", "method")
+            1 for s in index.symbols if s.get("kind") in ("function", "method")
         ),
         "min_confidence": min_confidence,
         "_meta": {
@@ -505,8 +526,10 @@ def _is_test_file(file_path: str) -> bool:
     fp = file_path.replace("\\", "/")
     fn = fp.rsplit("/", 1)[-1]
     return (
-        "/tests/" in fp or "/test/" in fp
-        or fn.startswith("test_") or fn.endswith("_test.py")
+        "/tests/" in fp
+        or "/test/" in fp
+        or fn.startswith("test_")
+        or fn.endswith("_test.py")
         or fn == "conftest.py"
     )
 
@@ -576,22 +599,26 @@ def _call_graph_only_dead_code(
         if file_pattern and not fnmatch.fnmatch(sym_file, file_pattern):
             continue
         # Skip entry-point decorated symbols (Flask routes, click commands etc.)
-        if any(ENTRY_POINT_DECORATOR_RE.search(str(d))
-               for d in (sym.get("decorators") or [])):
+        if any(
+            ENTRY_POINT_DECORATOR_RE.search(str(d))
+            for d in (sym.get("decorators") or [])
+        ):
             continue
         total_analysed += 1
         if sym_name in called_names:
             continue
         seen.add(sid)
-        dead_symbols.append({
-            "id": sid,
-            "name": sym_name,
-            "kind": sym.get("kind", ""),
-            "file": sym_file,
-            "line": sym.get("line", 0),
-            "confidence": 0.5,
-            "signals": ["no_callers"],
-        })
+        dead_symbols.append(
+            {
+                "id": sid,
+                "name": sym_name,
+                "kind": sym.get("kind", ""),
+                "file": sym_file,
+                "line": sym.get("line", 0),
+                "confidence": 0.5,
+                "signals": ["no_callers"],
+            }
+        )
 
     dead_symbols.sort(key=lambda x: (x["file"], x["line"]))
 

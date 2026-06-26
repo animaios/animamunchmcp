@@ -32,8 +32,6 @@ DOC_KEYS_SKIPPED = {
     "languages_adaptive",
     "extra_extensions",  # dict default documented inline in a code block
     "descriptions",
-    "tool_tier_bundles",
-    "model_tier_map",
     "disabled_tools",  # default documented in a code block, not a cell
 }
 

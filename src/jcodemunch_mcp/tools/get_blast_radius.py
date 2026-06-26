@@ -5,32 +5,13 @@ import time
 from collections import deque
 from typing import Optional
 
-from ..parser.imports import resolve_specifier
 from ..storage import IndexStore, result_cache_get, result_cache_put
 from ._call_graph import bfs_callers, build_symbols_by_file
+from ._graph_utils import build_adjacency
 from ._utils import index_status_to_tool_error, resolve_fqn, resolve_repo
 from .decision_context import resolve_decision_context
 from .get_dead_code_v2 import _is_test_file
 from .package_registry import extract_root_package_from_specifier
-
-
-def _build_reverse_adjacency(
-    imports: dict,
-    source_files: frozenset,
-    alias_map: Optional[dict] = None,
-    psr4_map: Optional[dict] = None,
-) -> dict[str, list[str]]:
-    """Return {file: [files_that_import_it]} from raw import data."""
-    rev: dict[str, list[str]] = {}
-    for src_file, file_imports in imports.items():
-        for imp in file_imports:
-            target = resolve_specifier(
-                imp["specifier"], src_file, source_files, alias_map, psr4_map
-            )
-            if target and target != src_file:
-                rev.setdefault(target, []).append(src_file)
-    # Deduplicate
-    return {k: list(dict.fromkeys(v)) for k, v in rev.items()}
 
 
 def _bfs_importers(
@@ -250,8 +231,12 @@ def get_blast_radius(
 
     # Build reverse adjacency (importer graph)
     source_files = frozenset(index.source_files)
-    rev = _build_reverse_adjacency(
-        index.imports, source_files, index.alias_map, getattr(index, "psr4_map", None)
+    rev = build_adjacency(
+        index.imports,
+        source_files,
+        index.alias_map,
+        getattr(index, "psr4_map", None),
+        direction="reverse",
     )
 
     # BFS to collect all importing files

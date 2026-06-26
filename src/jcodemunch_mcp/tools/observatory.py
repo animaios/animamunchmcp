@@ -40,11 +40,12 @@ import datetime as _dt
 import json
 import logging
 import shutil
-import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+from ._utils import run_git
 
 logger = logging.getLogger(__name__)
 
@@ -55,8 +56,9 @@ _DEFAULT_HISTORY_CAP = 52  # ~1 year of weekly runs
 @dataclass
 class RepoConfig:
     """One entry in the observatory config file."""
+
     url: str
-    label: str = ""           # display name; defaults to <owner>/<repo>
+    label: str = ""  # display name; defaults to <owner>/<repo>
     branch: Optional[str] = None
     languages: Optional[list[str]] = None  # for filtering languages
     # Optional one-line note shown on the repo's landing page (e.g.
@@ -98,22 +100,9 @@ def repo_slug(url: str) -> str:
     return f"{parts[-2]}--{parts[-1]}"
 
 
-def _run_git(args: list[str], cwd: Path, *, timeout: int = 60) -> tuple[int, str, str]:
-    try:
-        r = subprocess.run(
-            ["git", *args],
-            cwd=str(cwd),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            stdin=subprocess.DEVNULL,
-        )
-        return r.returncode, r.stdout.strip(), r.stderr.strip()
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
-        return -1, "", str(e)
-
-
-def clone_or_update(url: str, dest: Path, branch: Optional[str] = None) -> Optional[str]:
+def clone_or_update(
+    url: str, dest: Path, branch: Optional[str] = None
+) -> Optional[str]:
     """Ensure ``dest`` contains a checkout of ``url``; return current HEAD SHA.
 
     Shallow clone (depth=1) is sufficient for indexing — we don't need
@@ -128,30 +117,34 @@ def clone_or_update(url: str, dest: Path, branch: Optional[str] = None) -> Optio
         if branch:
             clone_args += ["--branch", branch]
         clone_args += [url, str(dest)]
-        rc, _, err = _run_git(clone_args, cwd=dest.parent, timeout=300)
+        rc, _, err = run_git(clone_args, cwd=dest.parent, timeout=300)
         if rc != 0:
             logger.warning("clone %s failed: %s", url, err)
             return None
     else:
         # Fast-forward update.
         ref = branch or "HEAD"
-        rc, _, err = _run_git(["fetch", "--depth=1", "origin", ref], cwd=dest, timeout=120)
+        rc, _, err = run_git(
+            ["fetch", "--depth=1", "origin", ref], cwd=dest, timeout=120
+        )
         if rc != 0:
             logger.warning("fetch %s failed: %s", url, err)
             return None
-        rc, _, err = _run_git(["reset", "--hard", "FETCH_HEAD"], cwd=dest, timeout=30)
+        rc, _, err = run_git(["reset", "--hard", "FETCH_HEAD"], cwd=dest, timeout=30)
         if rc != 0:
             logger.warning("reset %s failed: %s", url, err)
             return None
 
-    rc, sha, _ = _run_git(["rev-parse", "HEAD"], cwd=dest, timeout=10)
+    rc, sha, _ = run_git(["rev-parse", "HEAD"], cwd=dest, timeout=10)
     return sha if rc == 0 else None
 
 
-def index_and_health(repo_path: Path, *, storage_path: Optional[str] = None) -> Optional[dict]:
+def index_and_health(
+    repo_path: Path, *, storage_path: Optional[str] = None
+) -> Optional[dict]:
     """Index ``repo_path`` and return its health response (with radar)."""
-    from .index_folder import index_folder
     from .get_repo_health import get_repo_health
+    from .index_folder import index_folder
 
     # Index quietly; failures bubble up as None.
     try:
@@ -161,7 +154,11 @@ def index_and_health(repo_path: Path, *, storage_path: Optional[str] = None) -> 
             storage_path=storage_path,
         )
         if idx_result.get("error") or not idx_result.get("success"):
-            logger.warning("index failed for %s: %s", repo_path, idx_result.get("error") or idx_result)
+            logger.warning(
+                "index failed for %s: %s",
+                repo_path,
+                idx_result.get("error") or idx_result,
+            )
             return None
     except Exception:
         logger.exception("index_folder crashed on %s", repo_path)
@@ -169,13 +166,19 @@ def index_and_health(repo_path: Path, *, storage_path: Optional[str] = None) -> 
 
     repo_id = idx_result.get("repo")
     if not repo_id or "/" not in repo_id:
-        logger.warning("index_folder returned no repo identifier for %s (got %r)", repo_path, repo_id)
+        logger.warning(
+            "index_folder returned no repo identifier for %s (got %r)",
+            repo_path,
+            repo_id,
+        )
         return None
 
     try:
         health = get_repo_health(repo=repo_id, storage_path=storage_path)
         if health.get("error"):
-            logger.warning("get_repo_health error on %s: %s", repo_path, health["error"])
+            logger.warning(
+                "get_repo_health error on %s: %s", repo_path, health["error"]
+            )
             return None
         return health
     except Exception:
@@ -270,30 +273,49 @@ def run_pipeline(config: ObservatoryConfig) -> dict:
         t0 = time.perf_counter()
         sha = clone_or_update(repo.url, repo_path, branch=repo.branch)
         if not sha:
-            summaries.append({"slug": slug, "label": label, "status": "clone_failed", "url": repo.url})
+            summaries.append(
+                {
+                    "slug": slug,
+                    "label": label,
+                    "status": "clone_failed",
+                    "url": repo.url,
+                }
+            )
             continue
 
         health = index_and_health(repo_path, storage_path=storage_path)
         if not health:
-            summaries.append({"slug": slug, "label": label, "status": "health_failed", "url": repo.url, "sha": sha})
+            summaries.append(
+                {
+                    "slug": slug,
+                    "label": label,
+                    "status": "health_failed",
+                    "url": repo.url,
+                    "sha": sha,
+                }
+            )
             continue
 
-        record = append_run(config.output_dir, slug, sha, health, cap=config.history_cap)
+        record = append_run(
+            config.output_dir, slug, sha, health, cap=config.history_cap
+        )
         history = load_history(config.output_dir, slug)
         render.render_repo_page(config.output_dir, slug, label, repo, history, health)
 
         elapsed_s = round(time.perf_counter() - t0, 1)
-        summaries.append({
-            "slug": slug,
-            "label": label,
-            "status": "ok",
-            "url": repo.url,
-            "sha": sha,
-            "grade": record["grade"],
-            "composite": record["composite"],
-            "runtime_evidence": record.get("runtime_evidence", False),
-            "elapsed_s": elapsed_s,
-        })
+        summaries.append(
+            {
+                "slug": slug,
+                "label": label,
+                "status": "ok",
+                "url": repo.url,
+                "sha": sha,
+                "grade": record["grade"],
+                "composite": record["composite"],
+                "runtime_evidence": record.get("runtime_evidence", False),
+                "elapsed_s": elapsed_s,
+            }
+        )
 
     render.render_index_page(config.output_dir, summaries)
     render.render_index_feed(config.output_dir, summaries)
