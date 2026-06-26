@@ -6909,7 +6909,7 @@ def main(argv: Optional[list[str]] = None):
     # --- delete-index (CLI command for index deletion) ---
     delete_index_parser = subparsers.add_parser(
         "delete-index",
-        "Delete a repository's index and cached data",
+        help="Delete a repository's index and cached data",
     )
     delete_index_parser.add_argument(
         "repo",
