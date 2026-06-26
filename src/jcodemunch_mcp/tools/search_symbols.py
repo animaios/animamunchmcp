@@ -19,7 +19,13 @@ from typing import Any, Optional
 
 from ..parser.imports import resolve_specifier
 from ..storage import IndexStore, cost_avoided, estimate_savings, record_savings
-from ._utils import index_status_to_tool_error, resolve_fqn, resolve_repo, run_git
+from ._utils import (
+    get_file_churn,
+    index_status_to_tool_error,
+    resolve_fqn,
+    resolve_repo,
+    run_git,
+)
 from .get_context_bundle import _count_tokens
 
 BYTES_PER_TOKEN = 4
@@ -1871,22 +1877,6 @@ _CONTAINS_OPS = {"contains"}
 _RANK_AXES = frozenset({"importance", "complexity", "churn", "name"})
 
 
-def _get_file_churn(cwd: str, days: int) -> dict[str, int]:
-    rc, out, _ = run_git(
-        ["log", f"--since={days} days ago", "--name-only", "--format="],
-        cwd=cwd,
-        timeout=60,
-    )
-    if rc not in (0, 128) or not out:
-        return {}
-    counts: dict[str, int] = defaultdict(int)
-    for line in out.splitlines():
-        line = line.strip()
-        if line:
-            counts[line] += 1
-    return dict(counts)
-
-
 def _normalize_list(val: Any) -> list[str]:
     if isinstance(val, list):
         return [str(v) for v in val]
@@ -2002,6 +1992,12 @@ def _validate_criteria(criteria: list) -> Optional[str]:
             return f"criteria[{i}].op '{op}' not recognized"
         if "value" not in c:
             return f"criteria[{i}] missing 'value'"
+        # Validate regex patterns upfront to avoid silent per-symbol failures
+        if op == "matches":
+            try:
+                re.compile(str(c["value"]))
+            except re.error as e:
+                return f"criteria[{i}].value: invalid regex pattern: {e}"
     return None
 
 
@@ -2065,7 +2061,7 @@ def _run_winnow_mode(
         rc, _, _ = run_git(["rev-parse", "--git-dir"], cwd=index.source_root)
         if rc == 0:
             git_available = True
-            raw = _get_file_churn(index.source_root, churn_window)
+            raw = get_file_churn(index.source_root, churn_window)
             file_churn = {k.replace("\\", "/"): v for k, v in raw.items()}
 
     # File-level PageRank → per-symbol importance (file score inherited).

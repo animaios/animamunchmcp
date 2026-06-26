@@ -3,6 +3,7 @@
 import logging
 import subprocess
 import threading
+from collections import defaultdict
 from pathlib import Path
 from typing import Optional, Union
 
@@ -49,6 +50,33 @@ def run_git(
 
 
 # ---------------------------------------------------------------------------
+# Git file-churn helper (shared by search_symbols and get_repo_health)
+# ---------------------------------------------------------------------------
+
+
+def get_file_churn(cwd: str, days: int) -> dict[str, int]:
+    """Return {relative_file_path: commit_count} for the last *days* days.
+
+    Wraps ``git log --since=... --name-only``.  Returns an empty dict when
+    git is unavailable (no repo, git not on PATH, timeout, etc.) so callers
+    can degrade gracefully.
+    """
+    rc, out, _ = run_git(
+        ["log", f"--since={days} days ago", "--name-only", "--format="],
+        cwd=cwd,
+        timeout=60,
+    )
+    if rc not in (0, 128) or not out:
+        return {}
+    counts: dict[str, int] = defaultdict(int)
+    for line in out.splitlines():
+        line = line.strip()
+        if line:
+            counts[line] += 1
+    return dict(counts)
+
+
+# ---------------------------------------------------------------------------
 # Bare-name resolution cache (P5)
 # ---------------------------------------------------------------------------
 # Keyed by storage base_path string.
@@ -60,7 +88,7 @@ _BARE_NAME_LOCK = threading.Lock()
 
 
 def _get_bare_name_map(store: IndexStore) -> dict[str, list[str]]:
-    """Return a cached bare-name → [owner/name] mapping for the store's base_path.
+    """Return a cached bare-name -> [owner/name] mapping for the store's base_path.
 
     Rebuilds when the directory mtime changes (repo indexed or cache invalidated).
     Cost when warm: one stat() call instead of N db reads.
@@ -95,25 +123,32 @@ def _get_bare_name_map(store: IndexStore) -> dict[str, list[str]]:
 
 
 def resolve_repo(repo: str, storage_path: Optional[str] = None) -> tuple[str, str]:
-    """Resolve an indexed repository id or unique bare display/name.
+    """Resolve a repo identifier to (owner, name).
 
-    Raises ValueError if the repo is not found or the bare name is ambiguous.
+    Accepts:
+      - "owner/name" -> (owner, name)
+      - "name"      -> looks up the bare name in the index cache
+        and returns the match if unique.
+      Raises ValueError if the repo is not found or the bare name is ambiguous.
     """
+    if not repo:
+        return "", ""
     if "/" in repo:
-        return repo.split("/", 1)
+        owner, name = repo.split("/", 1)
+        return owner, name
 
+    # Bare name: look it up in the index cache
     store = IndexStore(base_path=storage_path)
-    mapping = _get_bare_name_map(store)
-    candidates = mapping.get(repo, [])
-
-    if not candidates:
+    bare_map = _get_bare_name_map(store)
+    matches = bare_map.get(repo, [])
+    if not matches:
         raise ValueError(f"Repository not found: {repo}")
-    if len(candidates) > 1:
+    if len(matches) > 1:
         raise ValueError(
-            f"Ambiguous repository name: {repo}. Use one of: {', '.join(candidates)}"
+            f"Ambiguous repository name: {repo}. Use one of: {', '.join(matches)}"
         )
-
-    return candidates[0].split("/", 1)
+    owner, name = matches[0].split("/", 1)
+    return owner, name
 
 
 def index_status_to_tool_error(status) -> dict:

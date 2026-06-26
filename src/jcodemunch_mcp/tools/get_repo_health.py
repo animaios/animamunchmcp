@@ -30,10 +30,19 @@ from typing import Optional
 
 from ..storage import IndexStore
 from ._graph_utils import build_adjacency
-from ._utils import index_status_to_tool_error, resolve_repo, run_git
+from ._utils import get_file_churn, index_status_to_tool_error, resolve_repo, run_git
 from .get_dead_code_v2 import get_dead_code_v2
 
 logger = logging.getLogger(__name__)
+
+
+# Internal time budget for detailed mode (leave 15s buffer for 60s MCP timeout)
+_DETAIL_TIME_BUDGET_SECONDS = 45.0
+
+
+def _check_time_budget(t0: float) -> bool:
+    """Return True if we've exceeded the detailed-mode time budget."""
+    return (time.perf_counter() - t0) > _DETAIL_TIME_BUDGET_SECONDS
 
 
 # ---------------------------------------------------------------------------
@@ -205,23 +214,6 @@ def _find_cycles(adj: dict[str, list[str]]) -> list[list[str]]:
 # ---------------------------------------------------------------------------
 
 
-def _get_file_churn(cwd: str, days: int) -> dict[str, int]:
-    """Return {relative_file_path: commit_count} for all files changed in the window."""
-    rc, out, _ = run_git(
-        ["log", f"--since={days} days ago", "--name-only", "--format="],
-        cwd=cwd,
-        timeout=60,
-    )
-    if rc not in (0, 128) or not out:
-        return {}
-    counts: dict[str, int] = defaultdict(int)
-    for line in out.splitlines():
-        line = line.strip()
-        if line:
-            counts[line] += 1
-    return dict(counts)
-
-
 def _get_hotspots(
     index,
     owner: str,
@@ -239,7 +231,7 @@ def _get_hotspots(
         rc_check, _, _ = run_git(["rev-parse", "--git-dir"], cwd=index.source_root)
         if rc_check == 0:
             git_available = True
-            file_churn = _get_file_churn(index.source_root, days)
+            file_churn = get_file_churn(index.source_root, days)
 
     file_churn_norm = {k.replace("\\", "/"): v for k, v in file_churn.items()}
 
@@ -1103,6 +1095,26 @@ def get_repo_health(
                 details.setdefault("extractions", {"error": str(exc)})
                 detail_errors.append({"sub_tool": "extractions", "error": str(exc)})
 
+            # Time budget check after extractions
+            if _check_time_budget(t0):
+                details["_timeout"] = True
+                details["_errors"] = detail_errors + [
+                    {
+                        "sub_tool": "timeout",
+                        "error": "Time budget exceeded, aborting remaining detailed checks",
+                    }
+                ]
+                result["details"] = details
+                elapsed = (time.perf_counter() - t0) * 1000
+                result["_meta"] = {
+                    "timing_ms": round(elapsed, 1),
+                    "days": days,
+                    "detailed": detailed,
+                    "methodology": "aggregate",
+                    "confidence_level": "medium",
+                }
+                return result
+
             # Churn rate for file_path
             try:
                 details["churn"] = _churn_rate(
@@ -1111,6 +1123,26 @@ def get_repo_health(
             except Exception as exc:
                 details.setdefault("churn", {"error": str(exc)})
                 detail_errors.append({"sub_tool": "churn", "error": str(exc)})
+
+            # Time budget check after churn rate
+            if _check_time_budget(t0):
+                details["_timeout"] = True
+                details["_errors"] = detail_errors + [
+                    {
+                        "sub_tool": "timeout",
+                        "error": "Time budget exceeded, aborting remaining detailed checks",
+                    }
+                ]
+                result["details"] = details
+                elapsed = (time.perf_counter() - t0) * 1000
+                result["_meta"] = {
+                    "timing_ms": round(elapsed, 1),
+                    "days": days,
+                    "detailed": detailed,
+                    "methodology": "aggregate",
+                    "confidence_level": "medium",
+                }
+                return result
         else:
             details["coupling"] = None
             details["extractions"] = None
@@ -1125,6 +1157,26 @@ def get_repo_health(
             details["layer_violations"] = {"error": str(exc)}
             detail_errors.append({"sub_tool": "layer_violations", "error": str(exc)})
 
+        # Time budget check after layer violations
+        if _check_time_budget(t0):
+            details["_timeout"] = True
+            details["_errors"] = detail_errors + [
+                {
+                    "sub_tool": "timeout",
+                    "error": "Time budget exceeded, aborting remaining detailed checks",
+                }
+            ]
+            result["details"] = details
+            elapsed = (time.perf_counter() - t0) * 1000
+            result["_meta"] = {
+                "timing_ms": round(elapsed, 1),
+                "days": days,
+                "detailed": detailed,
+                "methodology": "aggregate",
+                "confidence_level": "medium",
+            }
+            return result
+
         # Full untested symbols
         try:
             details["untested_symbols"] = _get_untested_symbols(
@@ -1138,6 +1190,24 @@ def get_repo_health(
         except Exception as exc:
             details["untested_symbols"] = {"error": str(exc)}
             detail_errors.append({"sub_tool": "untested_symbols", "error": str(exc)})
+
+        # Time budget check after untested symbols
+        if _check_time_budget(t0):
+            details["_timeout"] = True
+            details["_errors"] = detail_errors + [{
+                "sub_tool": "timeout",
+                "error": "Time budget exceeded, aborting remaining detailed checks"
+            }]
+            result["details"] = details
+            elapsed = (time.perf_counter() - t0) * 1000
+            result["_meta"] = {
+                "timing_ms": round(elapsed, 1),
+                "days": days,
+                "detailed": detailed,
+                "methodology": "aggregate",
+                "confidence_level": "medium"
+            }
+            return result
 
         if detail_errors:
             details["_errors"] = detail_errors
