@@ -37,6 +37,22 @@ _IMPORTERS_SCALARS = ("repo", "file_path", "importer_count", "note")
 _IMPORTERS_META = ("timing_ms", "truncated", "tokens_saved", "total_tokens_saved")
 _IMPORTERS_JSON = ("results",)
 
+# ─── Related mode ──────────────────────────────────────────────────────
+_RELATED_KEY = "__related__"
+
+_RELATED_TABLES = [
+    sd.TableSpec(
+        key=_RELATED_KEY,
+        tag="l",
+        cols=["id", "name", "kind", "file", "line", "signature", "relatedness_score"],
+        intern=["file", "id"],
+        types={"line": "int", "relatedness_score": "float"},
+    ),
+]
+_RELATED_SCALARS = ("repo", "related_count")
+_RELATED_META = ("timing_ms",)
+_RELATED_NESTED = {"symbol": ["id", "name", "kind", "file", "line"]}
+
 
 # ─── Back-compat: old encoding_id fi2 for importers payloads ─────────
 LEGACY_ENCODING_IDS = ("fi2",)
@@ -132,7 +148,62 @@ def _unflatten_importers(decoded: dict) -> dict:
     return decoded
 
 
+def _flatten_related(response: dict) -> dict:
+    """Replace nested related[] with flat rows."""
+    out = {k: v for k, v in response.items() if k != "related"}
+    rows = []
+    for r in response.get("related") or []:
+        if not isinstance(r, dict):
+            continue
+        rows.append(
+            {
+                "id": r.get("id", ""),
+                "name": r.get("name", ""),
+                "kind": r.get("kind", ""),
+                "file": r.get("file", ""),
+                "line": r.get("line", 0),
+                "signature": r.get("signature", ""),
+                "relatedness_score": r.get("relatedness_score", 0.0),
+            }
+        )
+    out[_RELATED_KEY] = rows
+    return out
+
+
+def _unflatten_related(decoded: dict) -> dict:
+    """Inverse of _flatten_related: rebuild related list."""
+    rows = decoded.pop(_RELATED_KEY, None) or []
+    decoded["related"] = [
+        {
+            "id": r.get("id", ""),
+            "name": r.get("name", ""),
+            "kind": r.get("kind", ""),
+            "file": r.get("file", ""),
+            "line": r.get("line", 0),
+            "signature": r.get("signature", ""),
+            "relatedness_score": r.get("relatedness_score", 0.0),
+        }
+        for r in rows
+    ]
+    return decoded
+
+
 def encode(tool: str, response: dict) -> tuple[str, str]:
+    # Related mode (former get_related_symbols)
+    if (
+        "related" in response
+        and "references" not in response
+        and "importers" not in response
+    ):
+        return sd.encode(
+            tool,
+            _flatten_related(response),
+            ENCODING_ID,
+            _RELATED_TABLES,
+            _RELATED_SCALARS,
+            meta_keys=_RELATED_META,
+            nested_dicts=_RELATED_NESTED,
+        )
     # Importers mode (former find_importers)
     if "importers" in response and "references" not in response:
         return sd.encode(
@@ -169,10 +240,13 @@ def encode(tool: str, response: dict) -> tuple[str, str]:
 
 def decode(payload: str) -> dict:
     # Decode with combined tables so both refs and importers rows are recovered
-    combined_tables = _REFS_TABLES + _IMPORTERS_TABLES
-    combined_scalars = tuple(dict.fromkeys(_REFS_SCALARS + _IMPORTERS_SCALARS))
-    combined_meta = tuple(dict.fromkeys(_REFS_META + _IMPORTERS_META))
+    combined_tables = _REFS_TABLES + _IMPORTERS_TABLES + _RELATED_TABLES
+    combined_scalars = tuple(
+        dict.fromkeys(_REFS_SCALARS + _IMPORTERS_SCALARS + _RELATED_SCALARS)
+    )
+    combined_meta = tuple(dict.fromkeys(_REFS_META + _IMPORTERS_META + _RELATED_META))
     combined_json = tuple(dict.fromkeys(_REFS_JSON + _IMPORTERS_JSON))
+    combined_nested = {**_RELATED_NESTED}
 
     decoded = sd.decode(
         payload,
@@ -180,9 +254,12 @@ def decode(payload: str) -> dict:
         combined_scalars,
         meta_keys=combined_meta,
         json_blobs=combined_json,
+        nested_dicts=combined_nested or None,
     )
     if _IMPORTERS_KEY in decoded and decoded[_IMPORTERS_KEY]:
         return _unflatten_importers(decoded)
+    elif _RELATED_KEY in decoded and decoded[_RELATED_KEY]:
+        return _unflatten_related(decoded)
     elif _ROWS_KEY in decoded:
         return _regroup(decoded)
     return decoded

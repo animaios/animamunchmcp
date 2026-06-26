@@ -810,7 +810,13 @@ def assemble_task_context(
 
             out = get_repo_health(repo_id, detailed=True, storage_path=storage_path)
             if isinstance(out, dict) and "error" not in out:
-                untested = out.get("details", {}).get("untested_symbols", [])
+                untested = out.get("details", {}).get("untested_symbols", {})
+                # _get_untested_symbols returns a dict with "symbols" key, not a list
+                if isinstance(untested, dict) and "symbols" in untested:
+                    untested = untested["symbols"]
+                elif isinstance(untested, dict) and "error" in untested:
+                    untested = []  # sub-tool errored, try fallback
+                # else: untested is already a list (shouldn't happen, but cope)
                 if not untested:
                     # Fallback: use dead_code_v2 which is the modern replacement
                     from .get_dead_code_v2 import get_dead_code_v2  # noqa: PLC0415

@@ -176,6 +176,49 @@ def test_find_importers_batch_round_trip():
     assert out["results"][0]["importers"][0]["has_importers"] is True
 
 
+def test_find_references_related_round_trip():
+    """find_references(mode='related') round-trip through compact encoder."""
+    resp = {
+        "repo": "acme/app",
+        "symbol": {
+            "id": "src/models/user.py::User",
+            "name": "User",
+            "kind": "class",
+            "file": "src/models/user.py",
+            "line": 10,
+        },
+        "related_count": 2,
+        "related": [
+            {
+                "id": "src/models/user.py::get_user",
+                "name": "get_user",
+                "kind": "function",
+                "file": "src/models/user.py",
+                "line": 25,
+                "signature": "def get_user(id)",
+                "relatedness_score": 3.5,
+            },
+            {
+                "id": "src/api/auth.py::AuthUser",
+                "name": "AuthUser",
+                "kind": "class",
+                "file": "src/api/auth.py",
+                "line": 5,
+                "signature": "class AuthUser",
+                "relatedness_score": 1.5,
+            },
+        ],
+        "_meta": {"timing_ms": 2.1},
+    }
+    out = _rt("find_references", resp)
+    assert out["related_count"] == 2
+    assert len(out["related"]) == 2
+    assert out["related"][0]["id"] == "src/models/user.py::get_user"
+    assert out["related"][0]["relatedness_score"] == 3.5
+    assert out["related"][1]["relatedness_score"] == 1.5
+    assert out["symbol"]["name"] == "User"
+
+
 def test_get_call_hierarchy_round_trip():
     resp = {
         "repo": "acme/app",
