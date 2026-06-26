@@ -7,11 +7,11 @@ import logging
 import time
 from typing import Optional
 
-from ..storage import IndexStore
 from ..parser.imports import resolve_specifier
-from ._utils import index_status_to_tool_error, resolve_repo
+from ..storage import IndexStore
 from ._call_graph import _word_match
-from .find_dead_code import _is_test_file
+from ._utils import index_status_to_tool_error, resolve_repo
+from .get_dead_code_v2 import _is_test_file
 
 logger = logging.getLogger(__name__)
 
@@ -20,15 +20,20 @@ logger = logging.getLogger(__name__)
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _build_reverse_adjacency(
-    imports: dict, source_files: frozenset, alias_map: Optional[dict] = None,
+    imports: dict,
+    source_files: frozenset,
+    alias_map: Optional[dict] = None,
     psr4_map: Optional[dict] = None,
 ) -> dict[str, list[str]]:
     """Return {file: [files_that_import_it]} from raw import data."""
     rev: dict[str, list[str]] = {}
     for src_file, file_imports in imports.items():
         for imp in file_imports:
-            target = resolve_specifier(imp["specifier"], src_file, source_files, alias_map, psr4_map)
+            target = resolve_specifier(
+                imp["specifier"], src_file, source_files, alias_map, psr4_map
+            )
             if target and target != src_file:
                 rev.setdefault(target, []).append(src_file)
     return {k: list(dict.fromkeys(v)) for k, v in rev.items()}
@@ -83,6 +88,7 @@ def _symbol_reached_by_tests(
 # Public tool function
 # ---------------------------------------------------------------------------
 
+
 def get_untested_symbols(
     repo: str,
     file_pattern: Optional[str] = None,
@@ -129,7 +135,9 @@ def get_untested_symbols(
 
     source_files = frozenset(index.source_files)
     rev = _build_reverse_adjacency(
-        index.imports, source_files, index.alias_map,
+        index.imports,
+        source_files,
+        index.alias_map,
         getattr(index, "psr4_map", None),
     )
 
@@ -154,8 +162,10 @@ def get_untested_symbols(
         # Apply optional file_pattern filter
         if file_pattern:
             fp_fwd = sym_file.replace("\\", "/")
-            if not (fnmatch.fnmatch(fp_fwd, file_pattern)
-                    or fnmatch.fnmatch(fp_fwd.rsplit("/", 1)[-1], file_pattern)):
+            if not (
+                fnmatch.fnmatch(fp_fwd, file_pattern)
+                or fnmatch.fnmatch(fp_fwd.rsplit("/", 1)[-1], file_pattern)
+            ):
                 continue
 
         total_non_test += 1
@@ -166,7 +176,12 @@ def get_untested_symbols(
         test_importers = test_importers_cache[sym_file]
 
         reached, confidence, reason = _symbol_reached_by_tests(
-            sym, test_importers, index, store, owner, name,
+            sym,
+            test_importers,
+            index,
+            store,
+            owner,
+            name,
         )
 
         if reached:
@@ -175,15 +190,17 @@ def get_untested_symbols(
         if confidence < min_confidence:
             continue
 
-        symbols.append({
-            "symbol_id": sym.get("id", ""),
-            "name": sym.get("name", ""),
-            "kind": kind,
-            "file": sym_file,
-            "line": sym.get("line", 0),
-            "confidence": confidence,
-            "reason": reason,
-        })
+        symbols.append(
+            {
+                "symbol_id": sym.get("id", ""),
+                "name": sym.get("name", ""),
+                "kind": kind,
+                "file": sym_file,
+                "line": sym.get("line", 0),
+                "confidence": confidence,
+                "reason": reason,
+            }
+        )
 
     # Sort by file, then line
     symbols.sort(key=lambda s: (s["file"], s["line"]))
@@ -195,7 +212,8 @@ def get_untested_symbols(
     untested_count = len(symbols)
     reached_pct = round(
         ((total_non_test - untested_count) / total_non_test * 100)
-        if total_non_test > 0 else 100.0,
+        if total_non_test > 0
+        else 100.0,
         1,
     )
 

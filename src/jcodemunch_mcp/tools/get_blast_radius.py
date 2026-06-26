@@ -5,24 +5,28 @@ import time
 from collections import deque
 from typing import Optional
 
-from ..storage import IndexStore, result_cache_get, result_cache_put
 from ..parser.imports import resolve_specifier
-from ._utils import index_status_to_tool_error, resolve_repo, resolve_fqn
-from .package_registry import extract_root_package_from_specifier
-from ._call_graph import build_symbols_by_file, bfs_callers
-from .find_dead_code import _is_test_file
+from ..storage import IndexStore, result_cache_get, result_cache_put
+from ._call_graph import bfs_callers, build_symbols_by_file
+from ._utils import index_status_to_tool_error, resolve_fqn, resolve_repo
 from .decision_context import resolve_decision_context
+from .get_dead_code_v2 import _is_test_file
+from .package_registry import extract_root_package_from_specifier
 
 
 def _build_reverse_adjacency(
-    imports: dict, source_files: frozenset, alias_map: Optional[dict] = None,
+    imports: dict,
+    source_files: frozenset,
+    alias_map: Optional[dict] = None,
     psr4_map: Optional[dict] = None,
 ) -> dict[str, list[str]]:
     """Return {file: [files_that_import_it]} from raw import data."""
     rev: dict[str, list[str]] = {}
     for src_file, file_imports in imports.items():
         for imp in file_imports:
-            target = resolve_specifier(imp["specifier"], src_file, source_files, alias_map, psr4_map)
+            target = resolve_specifier(
+                imp["specifier"], src_file, source_files, alias_map, psr4_map
+            )
             if target and target != src_file:
                 rev.setdefault(target, []).append(src_file)
     # Deduplicate
@@ -105,12 +109,14 @@ def _get_symbols_near_references(
                 sid = sym.get("id", sym.get("name"))
                 if sid not in seen:
                     seen.add(sid)
-                    result.append({
-                        "name": sym.get("name", ""),
-                        "kind": sym.get("kind", ""),
-                        "line": sym_start,
-                        "signature": sym.get("signature", ""),
-                    })
+                    result.append(
+                        {
+                            "name": sym.get("name", ""),
+                            "kind": sym.get("kind", ""),
+                            "line": sym_start,
+                            "signature": sym.get("signature", ""),
+                        }
+                    )
                 break
     return result
 
@@ -177,6 +183,7 @@ def get_blast_radius(
     # Resolve cross_repo default from config if not explicitly provided
     if cross_repo is None:
         from .. import config as _cfg
+
         cross_repo = bool(_cfg.get("cross_repo_default", False))
 
     try:
@@ -186,13 +193,25 @@ def get_blast_radius(
 
     # Check session cache before the expensive BFS + content scans
     repo_key = f"{owner}/{name}"
-    specific_key = (symbol, depth, call_depth, bool(cross_repo), include_depth_scores, decorator_filter, include_source, source_budget, include_decisions)
+    specific_key = (
+        symbol,
+        depth,
+        call_depth,
+        bool(cross_repo),
+        include_depth_scores,
+        decorator_filter,
+        include_source,
+        source_budget,
+        include_decisions,
+    )
     cached = result_cache_get("get_blast_radius", repo_key, specific_key)
     if cached is not None:
         result = dict(cached)
-        result["_meta"] = {**cached["_meta"],
-                           "timing_ms": round((time.perf_counter() - start) * 1000, 1),
-                           "cache_hit": True}
+        result["_meta"] = {
+            **cached["_meta"],
+            "timing_ms": round((time.perf_counter() - start) * 1000, 1),
+            "cache_hit": True,
+        }
         return result
 
     store = IndexStore(base_path=storage_path)
@@ -214,7 +233,9 @@ def get_blast_radius(
         return {"error": f"Symbol not found: '{symbol}'. Try search_symbols first."}
     if len(matches) > 1:
         # Multiple definitions (e.g. overloads in different files) — report all
-        ambiguous = [{"name": s["name"], "file": s["file"], "id": s["id"]} for s in matches]
+        ambiguous = [
+            {"name": s["name"], "file": s["file"], "id": s["id"]} for s in matches
+        ]
         return {
             "error": (
                 f"Ambiguous symbol '{symbol}': found {len(matches)} definitions. "
@@ -229,7 +250,9 @@ def get_blast_radius(
 
     # Build reverse adjacency (importer graph)
     source_files = frozenset(index.source_files)
-    rev = _build_reverse_adjacency(index.imports, source_files, index.alias_map, getattr(index, "psr4_map", None))
+    rev = _build_reverse_adjacency(
+        index.imports, source_files, index.alias_map, getattr(index, "psr4_map", None)
+    )
 
     # BFS to collect all importing files
     importer_files, files_by_depth = _bfs_importers(sym_file, rev, depth)
@@ -251,13 +274,20 @@ def get_blast_radius(
             count = len(re.findall(r"\b" + re.escape(sym_name) + r"\b", content))
             confirmed.append({"file": imp_file, "references": count})
         else:
-            potential.append({"file": imp_file, "reason": "symbol name not found (may use namespace/wildcard import)"})
+            potential.append(
+                {
+                    "file": imp_file,
+                    "reason": "symbol name not found (may use namespace/wildcard import)",
+                }
+            )
 
     confirmed.sort(key=lambda x: x["file"])
     potential.sort(key=lambda x: x["file"])
 
     # Build symbols-by-file once if needed by decorator_filter or include_source
-    _need_syms_by_file = bool(decorator_filter) or (include_source and confirmed and source_budget > 0)
+    _need_syms_by_file = bool(decorator_filter) or (
+        include_source and confirmed and source_budget > 0
+    )
     syms_by_file = build_symbols_by_file(index) if _need_syms_by_file else {}
 
     # Post-filter by decorator: keep only confirmed files that contain a symbol with the matching decorator
@@ -267,7 +297,10 @@ def get_blast_radius(
             imp_file = entry["file"]
             file_symbols = syms_by_file.get(imp_file, [])
             if any(
-                any(decorator_filter.lower() in d.lower() for d in (s.get("decorators") or []))
+                any(
+                    decorator_filter.lower() in d.lower()
+                    for d in (s.get("decorators") or [])
+                )
                 for s in file_symbols
             ):
                 filtered_confirmed.append(entry)
@@ -325,7 +358,9 @@ def get_blast_radius(
         # Any test file reference the affected symbol by name?
         reached = False
         for tf in test_importers:
-            tf_content = content_cache.get(tf) or store.get_file_content(owner, name, tf)
+            tf_content = content_cache.get(tf) or store.get_file_content(
+                owner, name, tf
+            )
             if tf_content and _name_in_content(tf_content, sym_name):
                 reached = True
                 break
@@ -336,12 +371,17 @@ def get_blast_radius(
     if cross_repo:
         try:
             from .list_repos import list_repos
+
             all_repos_data = list_repos(storage_path=storage_path).get("repos", [])
             pkg_names = getattr(index, "package_names", []) or []
             if pkg_names:
                 for repo_entry in all_repos_data:
                     other_repo_id = repo_entry.get("repo", "")
-                    if not other_repo_id or other_repo_id == f"{owner}/{name}" or "/" not in other_repo_id:
+                    if (
+                        not other_repo_id
+                        or other_repo_id == f"{owner}/{name}"
+                        or "/" not in other_repo_id
+                    ):
                         continue
                     other_owner, other_name = other_repo_id.split("/", 1)
                     other_index = store.load_index(other_owner, other_name)
@@ -351,27 +391,34 @@ def get_blast_radius(
                         for imp in file_imports:
                             specifier = imp.get("specifier", "")
                             lang = other_index.file_languages.get(src_file, "")
-                            root_pkg = extract_root_package_from_specifier(specifier, lang)
+                            root_pkg = extract_root_package_from_specifier(
+                                specifier, lang
+                            )
                             if root_pkg and root_pkg in pkg_names:
-                                cross_repo_confirmed.append({
-                                    "file": src_file,
-                                    "cross_repo": True,
-                                    "source_repo": other_repo_id,
-                                    "references": 1,
-                                })
+                                cross_repo_confirmed.append(
+                                    {
+                                        "file": src_file,
+                                        "cross_repo": True,
+                                        "source_repo": other_repo_id,
+                                        "references": 1,
+                                    }
+                                )
                                 break
         except Exception:
             import logging as _logging
-            _logging.getLogger(__name__).debug("cross_repo blast radius failed", exc_info=True)
+
+            _logging.getLogger(__name__).debug(
+                "cross_repo blast radius failed", exc_info=True
+            )
 
     # Risk scoring (always computed, cheap)
     total = len(importer_files)
     direct_count = len(files_by_depth.get(1, []))
     if total > 0:
-        overall_risk = sum(
-            (1.0 / (d ** 0.7)) * len(files)
-            for d, files in files_by_depth.items()
-        ) / total
+        overall_risk = (
+            sum((1.0 / (d**0.7)) * len(files) for d, files in files_by_depth.items())
+            / total
+        )
     else:
         overall_risk = 0.0
 
@@ -421,7 +468,7 @@ def get_blast_radius(
             {
                 "depth": d,
                 "files": sorted(files_by_depth[d]),
-                "risk_score": round(1.0 / (d ** 0.7), 4),
+                "risk_score": round(1.0 / (d**0.7), 4),
             }
             for d in sorted(files_by_depth)
         ]
@@ -433,18 +480,25 @@ def get_blast_radius(
     #   3. `result["callers"][i]._runtime_confidence` — per-symbol when call_depth > 0
     from ..runtime.confidence import (
         attach_runtime_confidence as _attach_runtime,
+    )
+    from ..runtime.confidence import (
         attach_runtime_confidence_by_file as _attach_runtime_files,
     )
+
     _db_path_str = str(store._sqlite._db_path(owner, name))
     # Focal symbol — wrap so the helper can stamp _runtime_confidence in-place
     _focal_list = [result["symbol"]]
     _focal_summary = _attach_runtime(_focal_list, _db_path_str, id_field="id")
     # File-level on confirmed importers
-    _file_summary = _attach_runtime_files(result["confirmed"], _db_path_str, file_field="file")
+    _file_summary = _attach_runtime_files(
+        result["confirmed"], _db_path_str, file_field="file"
+    )
     # Symbol-level on callers (when present)
     _caller_summary: dict = {}
     if "callers" in result and result["callers"]:
-        _caller_summary = _attach_runtime(result["callers"], _db_path_str, id_field="id")
+        _caller_summary = _attach_runtime(
+            result["callers"], _db_path_str, id_field="id"
+        )
     if _focal_summary or _file_summary or _caller_summary:
         # Merge sources + take the freshest last_seen across the surfaces
         _all_sources: set[str] = set()
@@ -461,8 +515,14 @@ def get_blast_radius(
             + (len(result.get("callers", [])) if "callers" in result else 0)
         )
         _confirmed_count = sum(
-            1 for items in (_focal_list, result.get("confirmed", []), result.get("callers", []) if "callers" in result else [])
-            for e in items if isinstance(e, dict) and e.get("_runtime_confidence") == "confirmed"
+            1
+            for items in (
+                _focal_list,
+                result.get("confirmed", []),
+                result.get("callers", []) if "callers" in result else [],
+            )
+            for e in items
+            if isinstance(e, dict) and e.get("_runtime_confidence") == "confirmed"
         )
         result["_meta"]["runtime_freshness"] = {
             "sources": sorted(_all_sources),
@@ -476,7 +536,8 @@ def get_blast_radius(
     if include_decisions:
         decision_files = [sym_file] + [c["file"] for c in confirmed]
         result["decisions"] = resolve_decision_context(
-            getattr(index, "source_root", None), decision_files,
+            getattr(index, "source_root", None),
+            decision_files,
         )
 
     result_cache_put("get_blast_radius", repo_key, specific_key, result)

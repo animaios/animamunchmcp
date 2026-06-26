@@ -19,11 +19,11 @@ always-on policy; skill is on-demand procedural expertise. Users who
 prefer one over the other can disable either via flags on
 ``jcm install``.
 """
+
 from __future__ import annotations
 
 import shutil
 from pathlib import Path
-
 
 # Marker is on the first non-frontmatter heading line so we can detect an
 # existing jcodemunch skill (vs. a user-authored one in the same directory)
@@ -106,10 +106,10 @@ def _build_skill_content() -> str:
         "",
         "Before any code exploration:",
         "",
-        "1. `resolve_repo({\"path\": \".\"})` — confirms the repo is indexed "
+        '1. `resolve_repo({"path": "."})` — confirms the repo is indexed '
         "and queryable. If `indexed: false`, run `index_folder`.",
-        "2. `plan_turn({\"repo\": \"...\", \"query\": \"...\", "
-        "\"model\": \"<your-model-id>\"})` — gets a confidence verdict + "
+        '2. `plan_turn({"repo": "...", "query": "...", '
+        '"model": "<your-model-id>"})` — gets a confidence verdict + '
         "recommended files. Obey the confidence:",
         "   - `high` → go directly to the recommended symbols.",
         "   - `medium` → explore the recommended files, cap supplementary reads.",
@@ -130,20 +130,20 @@ def _build_skill_content() -> str:
         "",
         "Each does something distinct; pick by question:",
         "",
-        "- \"What imports this file?\" → `find_importers`",
-        "- \"Where is this identifier used?\" → `find_references`",
-        "- \"Is this identifier used anywhere?\" → `check_references` (fast yes/no)",
-        "- \"What breaks if I change X?\" → `get_blast_radius`",
-        "- \"Who calls this / what does this call?\" → `get_call_hierarchy`",
-        "- \"Is this safe to rename?\" → `check_rename_safe`",
-        "- \"Is this safe to delete?\" → `check_delete_safe` (8 verdict tiers)",
-        "- \"What's similar to this in the codebase?\" → `find_similar_symbols`",
+        '- "What imports this file?" → `find_importers`',
+        '- "Where is this identifier used?" → `find_references`',
+        '- "Is this identifier used anywhere?" → `check_references` (fast yes/no)',
+        '- "What breaks if I change X?" → `get_blast_radius`',
+        '- "Who calls this / what does this call?" → `get_call_hierarchy`',
+        '- "Is this safe to rename?" → `check_rename_safe`',
+        '- "Is this safe to delete?" → `check_safe` (8 verdict tiers)',
+        '- "What\'s similar to this in the codebase?" → `find_similar_symbols`',
         "",
         "### Task orchestration",
         "",
         "When a task spans multiple tools, prefer the orchestrator:",
         "",
-        "- `assemble_task_context({\"task\": \"natural-language task\"})` "
+        '- `assemble_task_context({"task": "natural-language task"})` '
         "  auto-classifies into one of six intents (explore / debug / refactor "
         "  / extend / audit / review) and packs a token-budgeted, "
         "  source-attributed capsule. Each entry carries `stage` + `source_tool` "
@@ -156,7 +156,7 @@ def _build_skill_content() -> str:
         "- `Read`-then-`Grep`-then-`Glob` chains on indexed repos. The index "
         "  already knows the answer; the chain wastes tokens.",
         "- Searching with different keywords after `negative_evidence: "
-        "  \"no_implementation_found\"`. The capability likely doesn't exist — "
+        '  "no_implementation_found"`. The capability likely doesn\'t exist — '
         "  report the gap.",
         "- Reading full files when `get_file_outline` would do.",
         "- Calling primitives (`find_references` + `get_symbol_source` + ...) "
@@ -167,7 +167,7 @@ def _build_skill_content() -> str:
         "",
         "- If PostToolUse hooks are installed (Claude Code), edits are "
         "  auto-reindexed.",
-        "- Otherwise: `register_edit({\"paths\": [...]})` invalidates caches "
+        '- Otherwise: `register_edit({"paths": [...]})` invalidates caches '
         "  and refreshes the index for those files.",
         "",
         "## Multi-process awareness (v1.106.0)",
@@ -187,8 +187,7 @@ def _build_skill_content() -> str:
         "- Claude Haiku → `claude-haiku-4-5`",
         "- Other models → the model id as your runner prints it",
         "",
-        "If `plan_turn` doesn't fit a given task, call "
-        "`announce_model({\"model\": \"...\"})` once and proceed.",
+        "If `plan_turn` doesn't fit a given task, proceed without.",
         "",
         "## Tool reference",
         "",

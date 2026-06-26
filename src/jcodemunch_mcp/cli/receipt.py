@@ -47,7 +47,6 @@ _TOOL_MULTIPLIERS: dict[str, float] = {
     "get_file_tree": 4.0,
     "get_project_intel": 12.0,
     "get_session_context": 6.0,
-    "get_session_snapshot": 6.0,
     # Graph queries — the structurally hardest things to do with grep.
     "find_importers": 25.0,
     "find_references": 25.0,
@@ -71,7 +70,6 @@ _TOOL_MULTIPLIERS: dict[str, float] = {
     "get_churn_rate": 6.0,
     "get_symbol_provenance": 15.0,
     "get_untested_symbols": 30.0,
-    "find_dead_code": 35.0,
     "get_dead_code_v2": 35.0,
     "get_tectonic_map": 30.0,
     "get_coupling_metrics": 20.0,
@@ -101,9 +99,9 @@ _DEFAULT_MULTIPLIER = 8.0
 # cached). Opus is the default — most jcodemunch users are running an
 # Opus-grade model where savings actually move a budget needle.
 _MODEL_PRICES_USD_PER_MTOK: dict[str, float] = {
-    "sonnet": 3.0,    # Claude Sonnet 4.x
-    "opus":   15.0,   # Claude Opus 4.x
-    "haiku":  0.80,   # Claude Haiku 4.x
+    "sonnet": 3.0,  # Claude Sonnet 4.x
+    "opus": 15.0,  # Claude Opus 4.x
+    "haiku": 0.80,  # Claude Haiku 4.x
 }
 
 _DEFAULT_MODEL = "opus"
@@ -250,7 +248,12 @@ def _iter_calls_in_file(
 def aggregate(calls: Iterable[dict]) -> dict:
     """Aggregate per-tool savings from a stream of call records."""
     per_tool: dict[str, dict] = collections.defaultdict(
-        lambda: {"calls": 0, "actual_tokens": 0, "baseline_tokens": 0, "savings_tokens": 0}
+        lambda: {
+            "calls": 0,
+            "actual_tokens": 0,
+            "baseline_tokens": 0,
+            "savings_tokens": 0,
+        }
     )
     total_calls = 0
     for call in calls:
@@ -301,11 +304,17 @@ def render_text(agg: dict, *, days: int, model: str, primary_only: bool = False)
     out.write(f"  Tokens delivered (actual):     {totals['actual_tokens']:>12,}\n")
     out.write(f"  Tokens you would have spent:   {totals['baseline_tokens']:>12,}\n")
     out.write(f"                                 {'-' * 12}\n")
-    out.write(f"  Net savings:                   {totals['savings_tokens']:>12,} tokens\n\n")
+    out.write(
+        f"  Net savings:                   {totals['savings_tokens']:>12,} tokens\n\n"
+    )
 
-    rate = _MODEL_PRICES_USD_PER_MTOK.get(model.lower(), _MODEL_PRICES_USD_PER_MTOK[_DEFAULT_MODEL])
+    rate = _MODEL_PRICES_USD_PER_MTOK.get(
+        model.lower(), _MODEL_PRICES_USD_PER_MTOK[_DEFAULT_MODEL]
+    )
     primary_dollars = dollar_savings(totals["savings_tokens"], model)
-    out.write(f"  Saved at {model.title()} pricing (${rate:.2f}/MTok input):  ${primary_dollars:,.2f}\n")
+    out.write(
+        f"  Saved at {model.title()} pricing (${rate:.2f}/MTok input):  ${primary_dollars:,.2f}\n"
+    )
 
     if not primary_only:
         for other in ("sonnet", "opus", "haiku"):
@@ -313,7 +322,9 @@ def render_text(agg: dict, *, days: int, model: str, primary_only: bool = False)
                 continue
             other_rate = _MODEL_PRICES_USD_PER_MTOK[other]
             other_dollars = dollar_savings(totals["savings_tokens"], other)
-            out.write(f"     ... at {other.title()} pricing (${other_rate:.2f}/MTok):                 ${other_dollars:,.2f}\n")
+            out.write(
+                f"     ... at {other.title()} pricing (${other_rate:.2f}/MTok):                 ${other_dollars:,.2f}\n"
+            )
     out.write("\n")
 
     if per_tool:
@@ -365,7 +376,15 @@ def render_csv(agg: dict) -> str:
     w = csv.writer(out)
     w.writerow(["tool", "calls", "actual_tokens", "baseline_tokens", "savings_tokens"])
     for tool, b in sorted(agg["per_tool"].items()):
-        w.writerow([tool, b["calls"], b["actual_tokens"], b["baseline_tokens"], b["savings_tokens"]])
+        w.writerow(
+            [
+                tool,
+                b["calls"],
+                b["actual_tokens"],
+                b["baseline_tokens"],
+                b["savings_tokens"],
+            ]
+        )
     return out.getvalue()
 
 

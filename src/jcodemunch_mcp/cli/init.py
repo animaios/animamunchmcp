@@ -49,7 +49,7 @@ Always use jCodemunch-MCP tools for code navigation. Never fall back to Read, Gr
 - file dependency graph → `get_dependency_graph`
 - what breaks if I change X → `get_blast_radius`
 - what symbols actually changed since last commit → `get_changed_symbols`
-- find unreachable/dead code → `find_dead_code`
+- find unreachable/dead code → `get_dead_code_v2`
 - class hierarchy → `get_class_hierarchy`
 
 ## Session-Aware Routing
@@ -90,13 +90,14 @@ Replace `<your-model-id>` with your active model:
 - Claude Haiku variants → `claude-haiku-4-5`
 - GPT-4o / GPT-5 / o1 / Llama → use the model id as printed by your runner
 
-The `model=` parameter rides on the existing `plan_turn` call — it does **not** add a separate tool invocation. If `plan_turn` is not appropriate for a non-code task, call `announce_model(model="...")` once instead.
+The `model=` parameter rides on the existing `plan_turn` call — it does **not** add a separate tool invocation.
 """
 
 _MCP_ENTRY = {
     "command": "uvx",
     "args": ["jcodemunch-mcp"],
 }
+
 
 def _hook_invocation() -> str:
     """Return the executable path used in hook command strings.
@@ -131,52 +132,70 @@ def _hook_invocation() -> str:
 def _worktree_hooks() -> dict[str, Any]:
     exe = _hook_invocation()
     return {
-        "WorktreeCreate": [{
-            "matcher": "",
-            "hooks": [{"type": "command", "command": f"{exe} hook-event create"}],
-        }],
-        "WorktreeRemove": [{
-            "matcher": "",
-            "hooks": [{"type": "command", "command": f"{exe} hook-event remove"}],
-        }],
+        "WorktreeCreate": [
+            {
+                "matcher": "",
+                "hooks": [{"type": "command", "command": f"{exe} hook-event create"}],
+            }
+        ],
+        "WorktreeRemove": [
+            {
+                "matcher": "",
+                "hooks": [{"type": "command", "command": f"{exe} hook-event remove"}],
+            }
+        ],
     }
 
 
 def _enforcement_hooks() -> dict[str, Any]:
     exe = _hook_invocation()
     return {
-        "PreToolUse": [{
-            "matcher": "Read|Grep",
-            "hooks": [{"type": "command", "command": f"{exe} hook-pretooluse"}],
-        }],
-        "PostToolUse": [{
-            "matcher": "Edit|Write",
-            "hooks": [{"type": "command", "command": f"{exe} hook-posttooluse"}],
-        }],
-        "PreCompact": [{
-            "matcher": "",
-            "hooks": [{"type": "command", "command": f"{exe} hook-precompact"}],
-        }],
-        "TaskCompleted": [{
-            "matcher": "",
-            "hooks": [{"type": "command", "command": f"{exe} hook-taskcomplete"}],
-        }],
-        "SubagentStart": [{
-            "matcher": "",
-            "hooks": [{"type": "command", "command": f"{exe} hook-subagent-start"}],
-        }],
+        "PreToolUse": [
+            {
+                "matcher": "Read|Grep",
+                "hooks": [{"type": "command", "command": f"{exe} hook-pretooluse"}],
+            }
+        ],
+        "PostToolUse": [
+            {
+                "matcher": "Edit|Write",
+                "hooks": [{"type": "command", "command": f"{exe} hook-posttooluse"}],
+            }
+        ],
+        "PreCompact": [
+            {
+                "matcher": "",
+                "hooks": [{"type": "command", "command": f"{exe} hook-precompact"}],
+            }
+        ],
+        "TaskCompleted": [
+            {
+                "matcher": "",
+                "hooks": [{"type": "command", "command": f"{exe} hook-taskcomplete"}],
+            }
+        ],
+        "SubagentStart": [
+            {
+                "matcher": "",
+                "hooks": [{"type": "command", "command": f"{exe} hook-subagent-start"}],
+            }
+        ],
     }
+
 
 # Cursor rules use MDC format (frontmatter + markdown).
 # alwaysApply: true ensures the rule is in context for every agent turn,
 # including subagents — which is the main reliability complaint.
-_CURSOR_RULES_CONTENT = """\
+_CURSOR_RULES_CONTENT = (
+    """\
 ---
 description: Use jCodemunch MCP tools for all code navigation instead of built-in search
 alwaysApply: true
 ---
 
-""" + _CLAUDE_MD_POLICY
+"""
+    + _CLAUDE_MD_POLICY
+)
 
 # Windsurf uses a plain-text .windsurfrules file in the project root.
 _WINDSURF_RULES_CONTENT = _CLAUDE_MD_POLICY
@@ -185,6 +204,7 @@ _WINDSURF_RULES_CONTENT = _CLAUDE_MD_POLICY
 # ---------------------------------------------------------------------------
 # Client detection
 # ---------------------------------------------------------------------------
+
 
 class MCPClient:
     """Represents a detected MCP client and how to configure it."""
@@ -223,7 +243,13 @@ def _detect_clients() -> list[MCPClient]:
 
     # Claude Desktop
     if platform.system() == "Darwin":
-        p = Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
+        p = (
+            Path.home()
+            / "Library"
+            / "Application Support"
+            / "Claude"
+            / "claude_desktop_config.json"
+        )
     elif platform.system() == "Windows":
         p = _expand_appdata("Claude", "claude_desktop_config.json")
     else:
@@ -245,7 +271,9 @@ def _detect_clients() -> list[MCPClient]:
     # Continue
     continue_dir = Path.home() / ".continue"
     if continue_dir.exists():
-        clients.append(MCPClient("Continue", continue_dir / "config.json", "json_patch"))
+        clients.append(
+            MCPClient("Continue", continue_dir / "config.json", "json_patch")
+        )
 
     return clients
 
@@ -253,6 +281,7 @@ def _detect_clients() -> list[MCPClient]:
 # ---------------------------------------------------------------------------
 # Config patching
 # ---------------------------------------------------------------------------
+
 
 def _read_json(path: Path) -> dict[str, Any]:
     """Read a JSON file, returning {} if it doesn't exist."""
@@ -320,7 +349,9 @@ def _configure_claude_code(*, dry_run: bool = False) -> str:
     try:
         result = subprocess.run(
             [claude, "mcp", "add", "jcodemunch", "uvx", "jcodemunch-mcp"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         if result.returncode == 0:
             return "  ran: claude mcp add jcodemunch uvx jcodemunch-mcp"
@@ -335,7 +366,9 @@ def _configure_claude_code(*, dry_run: bool = False) -> str:
         return "  claude mcp add timed out"
 
 
-def configure_client(client: MCPClient, *, backup: bool = True, dry_run: bool = False) -> str:
+def configure_client(
+    client: MCPClient, *, backup: bool = True, dry_run: bool = False
+) -> str:
     """Configure a single MCP client. Returns a status message."""
     if client.method == "cli":
         return _configure_claude_code(dry_run=dry_run)
@@ -347,6 +380,7 @@ def configure_client(client: MCPClient, *, backup: bool = True, dry_run: bool = 
 # ---------------------------------------------------------------------------
 # CLAUDE.md injection
 # ---------------------------------------------------------------------------
+
 
 def _claude_md_path(scope: str) -> Path:
     """Return the CLAUDE.md path for the given scope."""
@@ -371,7 +405,7 @@ def _get_active_tools() -> set[str] | None:
     """
     try:
         from ..config import get as cfg_get
-        from ..server import _PROFILE_TIERS, _CANONICAL_TOOL_NAMES
+        from ..server import _CANONICAL_TOOL_NAMES, _PROFILE_TIERS
     except Exception:
         return None
 
@@ -408,6 +442,7 @@ def _filter_policy_for_tools(policy: str, active_tools: set[str] | None) -> str:
     # Build the set of all known tool names for reference-detection.
     try:
         from ..server import _CANONICAL_TOOL_NAMES
+
         all_tools = set(_CANONICAL_TOOL_NAMES)
     except Exception:
         return policy
@@ -448,9 +483,8 @@ def _filter_policy_for_tools(policy: str, active_tools: set[str] | None) -> str:
                 break  # trailing empty label — drop
             next_s = kept[j].strip()
             next_is_boundary = (
-                (next_s.startswith("**") and next_s.endswith(":**"))
-                or next_s.startswith("## ")
-            )
+                next_s.startswith("**") and next_s.endswith(":**")
+            ) or next_s.startswith("## ")
             if next_is_boundary:
                 i = j  # skip empty bold-label section
                 continue
@@ -461,7 +495,9 @@ def _filter_policy_for_tools(policy: str, active_tools: set[str] | None) -> str:
     return "".join(result)
 
 
-def install_claude_md(scope: str = "global", *, dry_run: bool = False, backup: bool = True) -> str:
+def install_claude_md(
+    scope: str = "global", *, dry_run: bool = False, backup: bool = True
+) -> str:
     """Append the Code Exploration Policy to CLAUDE.md.
 
     scope: "global" or "project"
@@ -490,6 +526,7 @@ def install_claude_md(scope: str = "global", *, dry_run: bool = False, backup: b
 # ---------------------------------------------------------------------------
 # Cursor rules injection
 # ---------------------------------------------------------------------------
+
 
 def _cursor_rules_path() -> Path:
     """Return the project-level Cursor rules path for jcodemunch."""
@@ -530,6 +567,7 @@ def install_cursor_rules(*, dry_run: bool = False, backup: bool = True) -> str:
 # Windsurf rules injection
 # ---------------------------------------------------------------------------
 
+
 def _windsurf_rules_path() -> Path:
     """Return the project-level .windsurfrules path."""
     return Path.cwd() / ".windsurfrules"
@@ -562,6 +600,7 @@ def install_windsurf_rules(*, dry_run: bool = False, backup: bool = True) -> str
 # AGENTS.md (OpenCode, Codex, etc.)
 # ---------------------------------------------------------------------------
 
+
 def install_agents_md(*, dry_run: bool = False, backup: bool = True) -> str:
     """Write ./AGENTS.md with the plan_turn(model=...) directive.
 
@@ -593,10 +632,15 @@ def install_agents_md(*, dry_run: bool = False, backup: bool = True) -> str:
 # Hooks injection
 # ---------------------------------------------------------------------------
 
+
 def _settings_json_path() -> Path:
     """Return the Claude Code settings.json path."""
     if platform.system() == "Windows":
-        return Path(os.environ.get("USERPROFILE", str(Path.home()))) / ".claude" / "settings.json"
+        return (
+            Path(os.environ.get("USERPROFILE", str(Path.home())))
+            / ".claude"
+            / "settings.json"
+        )
     return Path.home() / ".claude" / "settings.json"
 
 
@@ -717,6 +761,7 @@ def _stamp_install_version() -> None:
     may be stale).
     """
     from .. import __version__
+
     path = _install_version_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(__version__.strip(), encoding="utf-8")
@@ -785,7 +830,10 @@ def install_copilot_hooks(*, dry_run: bool = False, backup: bool = True) -> str:
 
 
 def install_enforcement_hooks(
-    *, dry_run: bool = False, backup: bool = True, strict: bool = False,
+    *,
+    dry_run: bool = False,
+    backup: bool = True,
+    strict: bool = False,
 ) -> str:
     """Merge PreToolUse/PostToolUse enforcement hooks into ~/.claude/settings.json.
 
@@ -803,7 +851,9 @@ def install_enforcement_hooks(
     """
     path = _settings_json_path()
     data = _read_json(path)
-    added = _merge_hooks(data, _enforcement_hooks(), "jcodemunch-mcp hook-p")  # matches hook-pretooluse & hook-posttooluse & hook-precompact
+    added = _merge_hooks(
+        data, _enforcement_hooks(), "jcodemunch-mcp hook-p"
+    )  # matches hook-pretooluse & hook-posttooluse & hook-precompact
 
     # Persist (or revert) the strict-enforce env flag the hook reads at runtime.
     env_changed = False
@@ -815,7 +865,10 @@ def install_enforcement_hooks(
             env_changed, desired = True, "strict"
     else:
         env = data.get("env")
-        if isinstance(env, dict) and env.get("JCODEMUNCH_ENFORCE") not in (None, "advisory"):
+        if isinstance(env, dict) and env.get("JCODEMUNCH_ENFORCE") not in (
+            None,
+            "advisory",
+        ):
             env["JCODEMUNCH_ENFORCE"] = "advisory"  # revert a prior --strict
             env_changed, desired = True, "advisory"
 
@@ -842,6 +895,7 @@ def install_enforcement_hooks(
 # Index current directory
 # ---------------------------------------------------------------------------
 
+
 def run_index(*, dry_run: bool = False) -> str:
     """Index the current working directory using index_folder."""
     cwd = os.getcwd()
@@ -850,6 +904,7 @@ def run_index(*, dry_run: bool = False) -> str:
 
     try:
         from ..tools.index_folder import index_folder
+
         result = index_folder(path=cwd)
         files = result.get("files_indexed", "?")
         symbols = result.get("symbols_indexed", "?")
@@ -862,13 +917,17 @@ def run_index(*, dry_run: bool = False) -> str:
 # Audit agent config
 # ---------------------------------------------------------------------------
 
-def run_audit(*, project_path: Optional[str] = None, dry_run: bool = False) -> list[str]:
+
+def run_audit(
+    *, project_path: Optional[str] = None, dry_run: bool = False
+) -> list[str]:
     """Run audit_agent_config and return formatted output lines."""
     if dry_run:
         return ["  would audit agent config files for token waste"]
 
     try:
         from ..tools.audit_agent_config import audit_agent_config
+
         result = audit_agent_config(project_path=project_path or os.getcwd())
     except Exception as e:
         return [f"  audit failed: {e}"]
@@ -886,7 +945,9 @@ def run_audit(*, project_path: Optional[str] = None, dry_run: bool = False) -> l
     # Token breakdown (compact)
     for entry in result.get("token_breakdown", []):
         scope_tag = " (global)" if entry["scope"] == "global" else ""
-        lines.append(f"    {entry['tokens']:>5,} tokens  {entry['description']}{scope_tag}")
+        lines.append(
+            f"    {entry['tokens']:>5,} tokens  {entry['description']}{scope_tag}"
+        )
 
     # Findings
     findings = result.get("findings", [])
@@ -908,6 +969,7 @@ def run_audit(*, project_path: Optional[str] = None, dry_run: bool = False) -> l
 # Interactive prompts
 # ---------------------------------------------------------------------------
 
+
 def _prompt_yn(message: str, default: bool = True) -> bool:
     """Prompt for yes/no, with a default."""
     suffix = " [Y/n]: " if default else " [y/N]: "
@@ -921,7 +983,9 @@ def _prompt_yn(message: str, default: bool = True) -> bool:
     return answer in ("y", "yes")
 
 
-def _prompt_choice(message: str, options: list[str], allow_all: bool = True) -> list[str]:
+def _prompt_choice(
+    message: str, options: list[str], allow_all: bool = True
+) -> list[str]:
     """Prompt user to pick from numbered options. Returns selected option labels."""
     for i, opt in enumerate(options, 1):
         print(f"  [{i}] {opt}")
@@ -963,6 +1027,7 @@ def _prompt_scope(message: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
+
 
 def run_init(
     *,
@@ -1035,18 +1100,25 @@ def run_init(
         elif normalized in ("off", "false", "0", "no"):
             _ss_value = False
         else:
-            print(f"  share_savings:  invalid value '{share_savings}' (expected on|off); skipped")
+            print(
+                f"  share_savings:  invalid value '{share_savings}' (expected on|off); skipped"
+            )
             _ss_value = None
         if _ss_value is not None:
             if dry_run:
-                print(f"  share_savings:  would write {_ss_value} to ~/.code-index/config.jsonc")
+                print(
+                    f"  share_savings:  would write {_ss_value} to ~/.code-index/config.jsonc"
+                )
                 if demo:
-                    _demo_actions.append((
-                        f"Write share_savings={_ss_value} to ~/.code-index/config.jsonc",
-                        "Locks the telemetry-counter setting at install time; survives package upgrades because config --upgrade preserves user-set values",
-                    ))
+                    _demo_actions.append(
+                        (
+                            f"Write share_savings={_ss_value} to ~/.code-index/config.jsonc",
+                            "Locks the telemetry-counter setting at install time; survives package upgrades because config --upgrade preserves user-set values",
+                        )
+                    )
             else:
                 from .. import config as _cfg
+
                 ss_path = _cfg.apply_share_savings(_ss_value)
                 print(f"  share_savings:  wrote {_ss_value} to {ss_path}")
 
@@ -1078,10 +1150,12 @@ def run_init(
         print(f"  {client.name}:{msg}")
         if demo and "would" in msg:
             loc = str(client.config_path) if client.config_path else "via CLI"
-            _demo_actions.append((
-                f"Register jcodemunch with {client.name} ({loc})",
-                "Your AI assistant could immediately call all jCodemunch tools without any manual setup or restart",
-            ))
+            _demo_actions.append(
+                (
+                    f"Register jcodemunch with {client.name} ({loc})",
+                    "Your AI assistant could immediately call all jCodemunch tools without any manual setup or restart",
+                )
+            )
 
     # ----- Step 2: Agent policies -----
     selected_names = {c.name for c in targets}
@@ -1098,11 +1172,17 @@ def run_init(
         msg = install_claude_md(md_scope, dry_run=dry_run, backup=backup)
         print(f"  CLAUDE.md:{msg}")
         if demo and "would" in msg:
-            where = "globally (all projects)" if md_scope == "global" else "in this project only"
-            _demo_actions.append((
-                f"Inject Code Exploration Policy into CLAUDE.md {where}",
-                "Every future Claude session would automatically navigate code via jCodemunch — no slow, token-heavy file reads",
-            ))
+            where = (
+                "globally (all projects)"
+                if md_scope == "global"
+                else "in this project only"
+            )
+            _demo_actions.append(
+                (
+                    f"Inject Code Exploration Policy into CLAUDE.md {where}",
+                    "Every future Claude session would automatically navigate code via jCodemunch — no slow, token-heavy file reads",
+                )
+            )
 
     # 2b: Cursor rules (.cursor/rules/jcodemunch.mdc)
     if "Cursor" in selected_names and not minimal:
@@ -1116,10 +1196,12 @@ def run_init(
             msg = install_cursor_rules(dry_run=dry_run, backup=backup)
             print(f"  Cursor rules:{msg}")
             if demo and "would" in msg:
-                _demo_actions.append((
-                    "Write .cursor/rules/jcodemunch.mdc (alwaysApply: true)",
-                    "Cursor and its subagents would prefer jCodemunch tools over built-in search on every turn — no more unreliable fallbacks",
-                ))
+                _demo_actions.append(
+                    (
+                        "Write .cursor/rules/jcodemunch.mdc (alwaysApply: true)",
+                        "Cursor and its subagents would prefer jCodemunch tools over built-in search on every turn — no more unreliable fallbacks",
+                    )
+                )
 
     # 2c: Windsurf rules (.windsurfrules)
     if "Windsurf" in selected_names and not minimal:
@@ -1133,10 +1215,12 @@ def run_init(
             msg = install_windsurf_rules(dry_run=dry_run, backup=backup)
             print(f"  Windsurf rules:{msg}")
             if demo and "would" in msg:
-                _demo_actions.append((
-                    "Append Code Exploration Policy to .windsurfrules",
-                    "Windsurf Cascade would prefer jCodemunch tools over built-in search on every turn",
-                ))
+                _demo_actions.append(
+                    (
+                        "Append Code Exploration Policy to .windsurfrules",
+                        "Windsurf Cascade would prefer jCodemunch tools over built-in search on every turn",
+                    )
+                )
 
     # 2d: AGENTS.md (OpenCode, Codex, etc.)
     do_agents_md = (yes or not interactive) and not minimal
@@ -1149,24 +1233,31 @@ def run_init(
         msg = install_agents_md(dry_run=dry_run, backup=backup)
         print(f"  AGENTS.md:{msg}")
         if demo and "would" in msg:
-            _demo_actions.append((
-                "Create AGENTS.md with Code Exploration Policy",
-                "OpenCode, Codex, and other AGENTS.md-reading agents would prefer jCodemunch tools over built-in search",
-            ))
+            _demo_actions.append(
+                (
+                    "Create AGENTS.md with Code Exploration Policy",
+                    "OpenCode, Codex, and other AGENTS.md-reading agents would prefer jCodemunch tools over built-in search",
+                )
+            )
 
     # ----- Step 2e: Claude Agent Skill bundle (opt-in via --skills) -----
     if skills:
         from .skills import install_claude_skill
+
         msg = install_claude_skill(
-            scope=skills_scope, dry_run=dry_run, backup=backup,
+            scope=skills_scope,
+            dry_run=dry_run,
+            backup=backup,
         )
         print(f"  Claude Skill ({skills_scope}):{msg}")
         if demo and "would" in msg:
             where = "globally" if skills_scope == "global" else "in this project"
-            _demo_actions.append((
-                f"Write .claude/skills/jcodemunch/SKILL.md {where}",
-                "Claude loads the skill on demand for code-navigation tasks instead of carrying the policy block in baseline context every turn",
-            ))
+            _demo_actions.append(
+                (
+                    f"Write .claude/skills/jcodemunch/SKILL.md {where}",
+                    "Claude loads the skill on demand for code-navigation tasks instead of carrying the policy block in baseline context every turn",
+                )
+            )
 
     # ----- Step 3: Agent hooks -----
     do_hooks = hooks
@@ -1177,10 +1268,12 @@ def run_init(
         msg = install_hooks(dry_run=dry_run, backup=backup)
         print(f"  Hooks:{msg}")
         if demo and "would" in msg:
-            _demo_actions.append((
-                "Install WorktreeCreate/WorktreeRemove hooks in ~/.claude/settings.json",
-                "New git worktrees would be automatically indexed so jCodemunch stays in sync with every branch you check out",
-            ))
+            _demo_actions.append(
+                (
+                    "Install WorktreeCreate/WorktreeRemove hooks in ~/.claude/settings.json",
+                    "New git worktrees would be automatically indexed so jCodemunch stays in sync with every branch you check out",
+                )
+            )
 
     # ----- Step 3b: Enforcement hooks (PreToolUse + PostToolUse) -----
     do_enforce = hooks  # same flag enables enforcement hooks
@@ -1209,23 +1302,27 @@ def run_init(
         except Exception:
             pass
         if demo and "would" in msg:
-            _demo_actions.append((
-                "Install PreToolUse + PostToolUse enforcement hooks in ~/.claude/settings.json",
-                "Large code files would be routed through jCodemunch (get_file_outline + get_symbol_source) "
-                "instead of raw Read, and the index would auto-update after every Edit/Write — "
-                "eliminating staleness anxiety and enforcing token-efficient navigation",
-            ))
+            _demo_actions.append(
+                (
+                    "Install PreToolUse + PostToolUse enforcement hooks in ~/.claude/settings.json",
+                    "Large code files would be routed through jCodemunch (get_file_outline + get_symbol_source) "
+                    "instead of raw Read, and the index would auto-update after every Edit/Write — "
+                    "eliminating staleness anxiety and enforcing token-efficient navigation",
+                )
+            )
 
     # ----- Step 3c: Copilot hooks (.github/hooks/hooks.json) -----
     if copilot_hooks:
         msg = install_copilot_hooks(dry_run=dry_run, backup=backup)
         print(f"  Copilot hooks:{msg}")
         if demo and "would" in msg:
-            _demo_actions.append((
-                "Write .github/hooks/hooks.json with a jcodemunch postToolUse rule",
-                "GitHub Copilot CLI / cloud-agent runs would auto-reindex edited files, "
-                "keeping jCodemunch fresh without any manual `index-file` calls",
-            ))
+            _demo_actions.append(
+                (
+                    "Write .github/hooks/hooks.json with a jcodemunch postToolUse rule",
+                    "GitHub Copilot CLI / cloud-agent runs would auto-reindex edited files, "
+                    "keeping jCodemunch fresh without any manual `index-file` calls",
+                )
+            )
 
     # ----- Step 4: Index -----
     do_index = index
@@ -1236,10 +1333,12 @@ def run_init(
         msg = run_index(dry_run=dry_run)
         print(f"  Index:{msg}")
         if demo and "would" in msg:
-            _demo_actions.append((
-                f"Index {os.getcwd()}",
-                "Symbol search, find-references, and repo exploration would be available immediately — without opening a single file",
-            ))
+            _demo_actions.append(
+                (
+                    f"Index {os.getcwd()}",
+                    "Symbol search, find-references, and repo exploration would be available immediately — without opening a single file",
+                )
+            )
 
     # ----- Step 5: Audit agent config -----
     do_audit = audit
@@ -1255,10 +1354,12 @@ def run_init(
         for line in run_audit(project_path=os.getcwd(), dry_run=dry_run):
             print(line)
         if demo:
-            _demo_actions.append((
-                "Audit agent config files (CLAUDE.md, .cursorrules, etc.) for token waste",
-                "Stale symbols, oversized instructions, and repeated boilerplate would be flagged — reducing context overhead on every Claude turn",
-            ))
+            _demo_actions.append(
+                (
+                    "Audit agent config files (CLAUDE.md, .cursorrules, etc.) for token waste",
+                    "Stale symbols, oversized instructions, and repeated boilerplate would be flagged — reducing context overhead on every Claude turn",
+                )
+            )
 
     # ----- Done -----
     print()
@@ -1363,7 +1464,9 @@ def _unconfigure_claude_code(*, dry_run: bool) -> str:
     try:
         result = subprocess.run(
             [claude, "mcp", "remove", "jcodemunch"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         if result.returncode == 0:
             return "  ran: claude mcp remove jcodemunch"
@@ -1379,7 +1482,9 @@ def _unconfigure_claude_code(*, dry_run: bool) -> str:
         return "  claude mcp remove timed out"
 
 
-def unconfigure_client(client: MCPClient, *, backup: bool = True, dry_run: bool = False) -> str:
+def unconfigure_client(
+    client: MCPClient, *, backup: bool = True, dry_run: bool = False
+) -> str:
     """Remove jcodemunch from a single MCP client. Returns a status message."""
     if client.method == "cli":
         return _unconfigure_claude_code(dry_run=dry_run)
@@ -1388,7 +1493,9 @@ def unconfigure_client(client: MCPClient, *, backup: bool = True, dry_run: bool 
     return f"  unknown method for {client.name}"
 
 
-def uninstall_claude_md(scope: str = "global", *, dry_run: bool = False, backup: bool = True) -> str:
+def uninstall_claude_md(
+    scope: str = "global", *, dry_run: bool = False, backup: bool = True
+) -> str:
     path = _claude_md_path(scope)
     if not path.exists():
         return f"  no file at {path}"
@@ -1476,7 +1583,11 @@ def _strip_jcm_hooks(data: dict[str, Any]) -> list[str]:
         kept_rules = []
         dropped = False
         for rule in rules:
-            cmds = [h.get("command", "") for h in rule.get("hooks", []) if isinstance(h, dict)]
+            cmds = [
+                h.get("command", "")
+                for h in rule.get("hooks", [])
+                if isinstance(h, dict)
+            ]
             if any("jcodemunch-mcp" in cmd for cmd in cmds):
                 dropped = True
                 continue
@@ -1522,7 +1633,9 @@ def uninstall_copilot_hooks(*, dry_run: bool = False, backup: bool = True) -> st
     pt = hooks.get("postToolUse", [])
     if not isinstance(pt, list):
         return f"  unexpected shape in {hooks_path}; skipped"
-    kept = [r for r in pt if not r.get("bash", "").startswith("jcodemunch-mcp hook-copilot")]
+    kept = [
+        r for r in pt if not r.get("bash", "").startswith("jcodemunch-mcp hook-copilot")
+    ]
     if len(kept) == len(pt):
         return f"  no jcodemunch Copilot hook in {hooks_path}"
     if dry_run:
@@ -1557,7 +1670,9 @@ _AGENT_ALIASES: dict[str, str] = {
 }
 
 
-def _resolve_target_client(target: str, detected: list[MCPClient]) -> Optional[MCPClient]:
+def _resolve_target_client(
+    target: str, detected: list[MCPClient]
+) -> Optional[MCPClient]:
     canonical = _AGENT_ALIASES.get(target.lower())
     if canonical is None:
         return None
@@ -1620,7 +1735,9 @@ def run_uninstall(
     # selected.
     scoped_to_one = bool(target) and target.lower() != "all"
 
-    if claude_md and (not scoped_to_one or target.lower() in {"claude-code", "claude-desktop"}):
+    if claude_md and (
+        not scoped_to_one or target.lower() in {"claude-code", "claude-desktop"}
+    ):
         for scope in ("global", "project"):
             msg = uninstall_claude_md(scope, dry_run=dry_run, backup=backup)
             print(f"  CLAUDE.md ({scope}):{msg}")
@@ -1647,6 +1764,7 @@ def run_uninstall(
 
     if skills and not scoped_to_one:
         from .skills import uninstall_claude_skill
+
         for scope in ("global", "project"):
             msg = uninstall_claude_skill(scope=scope, dry_run=dry_run, backup=backup)
             print(f"  Claude Skill ({scope}):{msg}")
@@ -1663,6 +1781,7 @@ def run_uninstall(
 # ---------------------------------------------------------------------------
 # Status — read-only inspection of current install state
 # ---------------------------------------------------------------------------
+
 
 def install_status() -> dict[str, Any]:
     """Read current state of every install target.
@@ -1695,14 +1814,15 @@ def install_status() -> dict[str, Any]:
                 try:
                     result = subprocess.run(
                         [claude, "mcp", "list"],
-                        capture_output=True, text=True, timeout=10,
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
                     )
                     # Launcher-agnostic: matches the server name in `mcp list`
                     # output regardless of how it's launched (uvx jcodemunch-mcp,
                     # the jmunch-mcp multiplexer, a venv path, ...).
-                    entry["configured"] = (
-                        result.returncode == 0
-                        and "jcodemunch" in (result.stdout or "")
+                    entry["configured"] = result.returncode == 0 and "jcodemunch" in (
+                        result.stdout or ""
                     )
                 except (FileNotFoundError, subprocess.TimeoutExpired):
                     entry["configured"] = False
@@ -1729,7 +1849,11 @@ def install_status() -> dict[str, Any]:
         if not isinstance(rules, list):
             continue
         for rule in rules:
-            cmds = [h.get("command", "") for h in rule.get("hooks", []) if isinstance(h, dict)]
+            cmds = [
+                h.get("command", "")
+                for h in rule.get("hooks", [])
+                if isinstance(h, dict)
+            ]
             if any("jcodemunch-mcp" in cmd for cmd in cmds):
                 jcm_events.append(event_name)
                 break
@@ -1745,7 +1869,9 @@ def install_status() -> dict[str, Any]:
         try:
             cdata = json.loads(copilot_path.read_text(encoding="utf-8"))
             for r in (cdata.get("hooks") or {}).get("postToolUse", []) or []:
-                if isinstance(r, dict) and r.get("bash", "").startswith("jcodemunch-mcp hook-copilot"):
+                if isinstance(r, dict) and r.get("bash", "").startswith(
+                    "jcodemunch-mcp hook-copilot"
+                ):
                     copilot_present = True
                     break
         except (json.JSONDecodeError, ValueError, OSError):
@@ -1757,6 +1883,7 @@ def install_status() -> dict[str, Any]:
 
     # Claude Agent Skill bundle (v1.107.0) — per-scope presence
     from .skills import skill_status as _skill_status
+
     report["skills"] = {
         "global": _skill_status("global"),
         "project": _skill_status("project"),
@@ -1765,7 +1892,9 @@ def install_status() -> dict[str, Any]:
     return report
 
 
-def print_status(report: Optional[dict[str, Any]] = None, *, as_json: bool = False) -> None:
+def print_status(
+    report: Optional[dict[str, Any]] = None, *, as_json: bool = False
+) -> None:
     """Pretty-print install_status() or emit it as JSON."""
     report = report if report is not None else install_status()
     if as_json:

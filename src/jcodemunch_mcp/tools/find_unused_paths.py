@@ -1,6 +1,6 @@
 """find_unused_paths — symbols reachable on paper but never executed (Phase 3 + 4).
 
-Distinct from ``find_dead_code`` (static-only graph reachability) — this
+Distinct from ``get_dead_code_v2`` (static-only graph reachability) — this
 tool only flags code that has *runtime evidence of absence*: zero hits
 in ``runtime_calls`` over the configured window. A symbol with no
 runtime hits but zero static callers is dead by both definitions; a
@@ -54,9 +54,10 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from ._utils import index_status_to_tool_error, resolve_repo
-from .find_dead_code import _is_test_file, _is_entry_point_filename
 from ..storage import IndexStore
+from ._utils import index_status_to_tool_error, resolve_repo
+from .get_dead_code_v2 import _is_entry_point as _is_entry_point_filename
+from .get_dead_code_v2 import _is_test_file
 
 
 def _load_declared_columns(conn: sqlite3.Connection) -> dict[str, set[str]]:
@@ -85,7 +86,9 @@ def _load_declared_columns(conn: sqlite3.Connection) -> dict[str, set[str]]:
     return out
 
 
-def _load_observed_columns(conn: sqlite3.Connection, cutoff: str) -> dict[str, set[str]]:
+def _load_observed_columns(
+    conn: sqlite3.Connection, cutoff: str
+) -> dict[str, set[str]]:
     """Return ``{model_name: {col_name, ...}}`` from ``runtime_columns``,
     filtered to rows last seen at or after ``cutoff``."""
     out: dict[str, set[str]] = {}
@@ -140,7 +143,9 @@ def find_unused_paths(
     if not db_path.exists():
         return index_status_to_tool_error(store.inspect_index(owner, name))
 
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=since_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=since_days)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
 
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&immutable=1", uri=True)
     conn.row_factory = sqlite3.Row
@@ -154,7 +159,8 @@ def find_unused_paths(
         # path. The table is only consulted when at least one row exists.
         try:
             columns_present = (
-                conn.execute("SELECT 1 FROM runtime_columns LIMIT 1").fetchone() is not None
+                conn.execute("SELECT 1 FROM runtime_columns LIMIT 1").fetchone()
+                is not None
             )
         except sqlite3.OperationalError:
             # Index is on a pre-v15 schema (table doesn't exist yet)
@@ -265,7 +271,9 @@ def find_unused_paths(
                 break
 
         # Total scanned for the _meta breakdown
-        total_scanned = conn.execute("SELECT COUNT(*) AS n FROM symbols").fetchone()["n"]
+        total_scanned = conn.execute("SELECT COUNT(*) AS n FROM symbols").fetchone()[
+            "n"
+        ]
     finally:
         conn.close()
 

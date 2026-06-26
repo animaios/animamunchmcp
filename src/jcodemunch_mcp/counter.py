@@ -42,12 +42,20 @@ FRONT_DOOR: frozenset[str] = frozenset({"order", "menu", "route"})
 # These are charter-safe (none write the user's source files or execute code),
 # but ``order`` requires an explicit ``allow_state_change=true`` before
 # dispatching one, so the front door reads as read-only by default.
-STATE_CHANGING_ACTIONS: frozenset[str] = frozenset({
-    "index_repo", "index_folder", "index_file",
-    "invalidate_cache", "register_edit", "tune_weights",
-    "set_tool_tier", "announce_model", "embed_repo",
-    "import_runtime_signal", "summarize_repo",
-})
+STATE_CHANGING_ACTIONS: frozenset[str] = frozenset(
+    {
+        "index_repo",
+        "index_folder",
+        "index_file",
+        "invalidate_cache",
+        "register_edit",
+        "tune_weights",
+        "set_tool_tier",
+        "embed_repo",
+        "import_runtime_signal",
+        "summarize_repo",
+    }
+)
 
 # Forward-looking tripwire. ``order`` refuses to dispatch any action whose name
 # matches one of these verbs, even if such a tool were somehow added to the
@@ -91,7 +99,9 @@ def order_gate(
     if not action or not isinstance(action, str):
         return "order requires a non-empty 'action' name. Call 'menu' to list actions."
     if action in FRONT_DOOR:
-        return f"'{action}' is a front-door tool and cannot be dispatched through order."
+        return (
+            f"'{action}' is a front-door tool and cannot be dispatched through order."
+        )
     names = set(catalog_names)
     if action not in names:
         return (
@@ -182,8 +192,13 @@ def _idf_weights(query_tokens: list[str], rows: list[dict]) -> dict[str, float]:
     (name + description). Rare tokens weigh more; tokens in every row weigh ~0.
     """
     import math
+
     n = max(1, len(rows))
-    docs = [set(_tokens(r["action"])) | set(_tokens(r.get("_description", r.get("summary", "")))) for r in rows]
+    docs = [
+        set(_tokens(r["action"]))
+        | set(_tokens(r.get("_description", r.get("summary", ""))))
+        for r in rows
+    ]
     weights: dict[str, float] = {}
     for qt in set(query_tokens):
         df = sum(1 for d in docs if qt in d)
@@ -222,28 +237,75 @@ def search_catalog(
 # (compiled_pattern, action, why). Kept deterministic and legible -- this is a
 # curated map, not a learned model, consistent with the read-only charter.
 _INTENT_RULES: list[tuple[re.Pattern, str, str]] = [
-    (re.compile(r"\b(who )?calls?\b|\bcallers?\b|\bcall(ed)? by\b|\bcall (graph|hierarchy)\b", re.I),
-     "get_call_hierarchy", "Trace callers/callees of a symbol."),
-    (re.compile(r"\bused? (by|where)\b|\breferences?\b|\bwhere is .* used\b", re.I),
-     "find_references", "Find where an identifier is referenced."),
-    (re.compile(r"\b(blast|impact|break|breaks?|affect|ripple|what changes)\b", re.I),
-     "get_blast_radius", "Show what a change to a symbol would affect."),
-    (re.compile(r"\bdead code\b|\bunused\b|\bunreachable\b", re.I),
-     "find_dead_code", "Find unreachable/unused code."),
-    (re.compile(r"\boutline\b|\bstructure of\b|\bwhat'?s in .*\bfile\b|\bsymbols in\b", re.I),
-     "get_file_outline", "List the symbols/structure of a file."),
-    (re.compile(r"\b(string|text|literal|config value|comment|grep|regex)\b", re.I),
-     "search_text", "Full-text search across file contents."),
-    (re.compile(r"\bclass (hierarchy|tree)\b|\bsubclass|\bsuperclass|\binherit", re.I),
-     "get_class_hierarchy", "Show a class inheritance hierarchy."),
-    (re.compile(r"\bdependenc|\bimport graph\b|\bwhat imports\b", re.I),
-     "get_dependency_graph", "Map file-level import dependencies."),
-    (re.compile(r"\bhealth\b|\bhotspot|\bcomplexit|\bchurn\b|\brisk\b", re.I),
-     "get_repo_health", "Repo-level health, hotspots, and risk."),
-    (re.compile(r"\bplan\b|\bwhere (do|should) i (start|begin)\b|\bcontext for\b|\bonboard\b|\bunderstand the\b", re.I),
-     "assemble_task_context", "Single-call task-scoped context assembly."),
-    (re.compile(r"\b(find|locate|where is|look up|search for|definition of)\b", re.I),
-     "search_symbols", "Find a symbol by name."),
+    (
+        re.compile(
+            r"\b(who )?calls?\b|\bcallers?\b|\bcall(ed)? by\b|\bcall (graph|hierarchy)\b",
+            re.I,
+        ),
+        "get_call_hierarchy",
+        "Trace callers/callees of a symbol.",
+    ),
+    (
+        re.compile(r"\bused? (by|where)\b|\breferences?\b|\bwhere is .* used\b", re.I),
+        "find_references",
+        "Find where an identifier is referenced.",
+    ),
+    (
+        re.compile(
+            r"\b(blast|impact|break|breaks?|affect|ripple|what changes)\b", re.I
+        ),
+        "get_blast_radius",
+        "Show what a change to a symbol would affect.",
+    ),
+    (
+        re.compile(r"\bdead code\b|\bunused\b|\bunreachable\b", re.I),
+        "get_dead_code_v2",
+        "Find unreachable/unused code.",
+    ),
+    (
+        re.compile(
+            r"\boutline\b|\bstructure of\b|\bwhat'?s in .*\bfile\b|\bsymbols in\b", re.I
+        ),
+        "get_file_outline",
+        "List the symbols/structure of a file.",
+    ),
+    (
+        re.compile(r"\b(string|text|literal|config value|comment|grep|regex)\b", re.I),
+        "search_text",
+        "Full-text search across file contents.",
+    ),
+    (
+        re.compile(
+            r"\bclass (hierarchy|tree)\b|\bsubclass|\bsuperclass|\binherit", re.I
+        ),
+        "get_class_hierarchy",
+        "Show a class inheritance hierarchy.",
+    ),
+    (
+        re.compile(r"\bdependenc|\bimport graph\b|\bwhat imports\b", re.I),
+        "get_dependency_graph",
+        "Map file-level import dependencies.",
+    ),
+    (
+        re.compile(r"\bhealth\b|\bhotspot|\bcomplexit|\bchurn\b|\brisk\b", re.I),
+        "get_repo_health",
+        "Repo-level health, hotspots, and risk.",
+    ),
+    (
+        re.compile(
+            r"\bplan\b|\bwhere (do|should) i (start|begin)\b|\bcontext for\b|\bonboard\b|\bunderstand the\b",
+            re.I,
+        ),
+        "assemble_task_context",
+        "Single-call task-scoped context assembly.",
+    ),
+    (
+        re.compile(
+            r"\b(find|locate|where is|look up|search for|definition of)\b", re.I
+        ),
+        "search_symbols",
+        "Find a symbol by name.",
+    ),
 ]
 
 # Repo-scoped actions whose primary query arg is named differently. Used by
