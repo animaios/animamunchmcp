@@ -169,7 +169,7 @@ def _barrel_exports(
             targets.add(m.group(1))
         for spec in targets:
             resolved = resolve_specifier(
-                spec, file_path, source_files, alias_map, psr4_map
+                spec, file_path, set(source_files), alias_map, psr4_map
             )
             if resolved and resolved in source_files:
                 _collect(resolved, depth + 1)
