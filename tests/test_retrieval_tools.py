@@ -1,16 +1,17 @@
 """Tests for repository-wide retrieval tools."""
 
 import json
-import pytest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
+
+import pytest
 
 from jcodemunch_mcp.parser import Symbol
 from jcodemunch_mcp.storage import IndexStore
 from jcodemunch_mcp.tools.get_file_content import get_file_content
-from jcodemunch_mcp.tools.index_folder import index_folder
 from jcodemunch_mcp.tools.get_file_outline import get_file_outline
-from jcodemunch_mcp.tools.get_repo_outline import get_repo_outline
+from jcodemunch_mcp.tools.get_repo_map import get_repo_map
+from jcodemunch_mcp.tools.index_folder import index_folder
 from jcodemunch_mcp.tools.search_text import search_text
 
 
@@ -53,7 +54,9 @@ def test_get_file_outline_returns_language_for_no_symbol_file(tmp_path):
     """No-symbol files should still resolve language and summaries."""
     _seed_repo(tmp_path)
 
-    result = get_file_outline("retrieval/demo", "include/no_symbols.h", storage_path=str(tmp_path))
+    result = get_file_outline(
+        "retrieval/demo", "include/no_symbols.h", storage_path=str(tmp_path)
+    )
 
     assert result["language"] == "cpp"
     assert result["file_summary"] == ""
@@ -61,11 +64,11 @@ def test_get_file_outline_returns_language_for_no_symbol_file(tmp_path):
     assert result["_meta"]["symbol_count"] == 0
 
 
-def test_get_repo_outline_counts_no_symbol_files(tmp_path):
+def test_get_repo_map_outline_counts_no_symbol_files(tmp_path):
     """Repo outline should count every indexed file, not just symbol-bearing ones."""
     _seed_repo(tmp_path)
 
-    result = get_repo_outline("retrieval/demo", storage_path=str(tmp_path))
+    result = get_repo_map("retrieval/demo", storage_path=str(tmp_path), mode="outline")
 
     assert result["file_count"] == 2
     assert result["languages"] == {"python": 1, "cpp": 1}
@@ -87,34 +90,36 @@ def _backdate_index(tmp_path, owner, name, days):
         conn.close()
     # Evict cache — direct DB edit bypasses save_index's cache update
     from jcodemunch_mcp.storage.sqlite_store import _cache_evict
+
     safe_name = store._sqlite._safe_repo_component(name, "name")
     _cache_evict(owner, safe_name)
 
 
-def test_get_repo_outline_staleness_warning_when_old(tmp_path):
-    """get_repo_outline should include staleness_warning when index is >= 7 days old."""
+def test_get_repo_map_outline_staleness_warning_when_old(tmp_path):
+    """get_repo_map(mode="outline") should include staleness_warning when index is >= 7 days old."""
     _seed_repo(tmp_path)
     _backdate_index(tmp_path, "retrieval", "demo", days=8)
 
-    result = get_repo_outline("retrieval/demo", storage_path=str(tmp_path))
+    result = get_repo_map("retrieval/demo", storage_path=str(tmp_path), mode="outline")
 
     assert "staleness_warning" in result
     assert "8 days old" in result["staleness_warning"]
 
 
-def test_get_repo_outline_no_staleness_warning_when_fresh(tmp_path):
-    """get_repo_outline should not include staleness_warning for a recent index."""
+def test_get_repo_map_outline_no_staleness_warning_when_fresh(tmp_path):
+    """get_repo_map(mode="outline") should not include staleness_warning for a recent index."""
     _seed_repo(tmp_path)
 
-    result = get_repo_outline("retrieval/demo", storage_path=str(tmp_path))
+    result = get_repo_map("retrieval/demo", storage_path=str(tmp_path), mode="outline")
 
     assert "staleness_warning" not in result
 
 
 def test_sha_staleness_in_meta(tmp_path):
-    """get_repo_outline _meta should include is_stale=True when SHA differs."""
+    """get_repo_map(mode="outline") _meta should include is_stale=True when SHA differs."""
     store = IndexStore(base_path=str(tmp_path))
     from jcodemunch_mcp.parser import Symbol
+
     symbol = Symbol(
         id="src-main-py::run#function",
         file="src/main.py",
@@ -140,10 +145,12 @@ def test_sha_staleness_in_meta(tmp_path):
     )
     stale_sha = "999999888888777777666666555555444444333a"
     with patch(
-        "jcodemunch_mcp.tools.get_repo_outline._get_git_head",
+        "jcodemunch_mcp.tools.get_repo_map._get_git_head",
         return_value=stale_sha,
     ):
-        result = get_repo_outline("retrieval/demo_sha", storage_path=str(tmp_path))
+        result = get_repo_map(
+            "retrieval/demo_sha", storage_path=str(tmp_path), mode="outline"
+        )
     assert result["_meta"]["is_stale"] is True
     assert "staleness_warning" in result
 
@@ -152,7 +159,9 @@ def test_search_text_groups_matches_and_includes_context(tmp_path):
     """search_text should return grouped matches and surrounding lines."""
     _seed_repo(tmp_path)
 
-    result = search_text("retrieval/demo", "TODO", context_lines=1, storage_path=str(tmp_path))
+    result = search_text(
+        "retrieval/demo", "TODO", context_lines=1, storage_path=str(tmp_path)
+    )
 
     assert result["result_count"] == 2
     grouped = {entry["file"]: entry["matches"] for entry in result["results"]}
@@ -167,7 +176,13 @@ def test_search_text_truncates_across_grouped_matches(tmp_path):
     """max_results should cap total matches, not files."""
     _seed_repo(tmp_path)
 
-    result = search_text("retrieval/demo", "TODO", max_results=1, context_lines=1, storage_path=str(tmp_path))
+    result = search_text(
+        "retrieval/demo",
+        "TODO",
+        max_results=1,
+        context_lines=1,
+        storage_path=str(tmp_path),
+    )
 
     assert result["result_count"] == 1
     assert result["_meta"]["truncated"] is True
@@ -195,7 +210,9 @@ def test_search_text_clamps_context_lines(tmp_path):
     """Excessively large context requests should be clamped, not blow up responses."""
     _seed_repo(tmp_path)
 
-    result = search_text("retrieval/demo", "TODO", context_lines=999, storage_path=str(tmp_path))
+    result = search_text(
+        "retrieval/demo", "TODO", context_lines=999, storage_path=str(tmp_path)
+    )
 
     grouped = {entry["file"]: entry["matches"] for entry in result["results"]}
     assert grouped["src/main.py"][0]["before"] == ["def run():"]
@@ -285,7 +302,9 @@ def test_get_file_content_returns_unsliced_content_verbatim(tmp_path):
         file_languages={"demo.txt": "text"},
     )
 
-    result = get_file_content("retrieval/verbatim", "demo.txt", storage_path=str(tmp_path))
+    result = get_file_content(
+        "retrieval/verbatim", "demo.txt", storage_path=str(tmp_path)
+    )
 
     assert result["line_count"] == 2
     assert result["start_line"] == 1
@@ -299,7 +318,9 @@ def test_get_file_content_reports_missing_cached_file(tmp_path):
     cached = tmp_path / "retrieval-demo" / "src" / "main.py"
     cached.unlink()
 
-    result = get_file_content("retrieval/demo", "src/main.py", storage_path=str(tmp_path))
+    result = get_file_content(
+        "retrieval/demo", "src/main.py", storage_path=str(tmp_path)
+    )
 
     assert result["error"] == "File content not found: src/main.py"
 
@@ -312,11 +333,19 @@ def test_get_file_outline_batch(tmp_path):
     (src / "b.py").write_text("def bar(): pass")
 
     from jcodemunch_mcp.tools.index_folder import index_folder
-    idx = index_folder(path=str(tmp_path), use_ai_summaries=False, storage_path=str(tmp_path / "idx"))
+
+    idx = index_folder(
+        path=str(tmp_path), use_ai_summaries=False, storage_path=str(tmp_path / "idx")
+    )
     repo = idx["repo"]
 
     from jcodemunch_mcp.tools.get_file_outline import get_file_outline
-    result = get_file_outline(repo=repo, file_paths=["src/a.py", "src/b.py"], storage_path=str(tmp_path / "idx"))
+
+    result = get_file_outline(
+        repo=repo,
+        file_paths=["src/a.py", "src/b.py"],
+        storage_path=str(tmp_path / "idx"),
+    )
     assert "results" in result
     assert len(result["results"]) == 2
     files = [r["file"] for r in result["results"]]
@@ -329,10 +358,14 @@ def test_get_file_outline_batch_empty_list(tmp_path):
     src = tmp_path / "src"
     src.mkdir()
     (src / "a.py").write_text("def foo(): pass")
-    idx = index_folder(path=str(tmp_path), use_ai_summaries=False, storage_path=str(tmp_path / "idx"))
+    idx = index_folder(
+        path=str(tmp_path), use_ai_summaries=False, storage_path=str(tmp_path / "idx")
+    )
     repo = idx["repo"]
 
-    result = get_file_outline(repo=repo, file_paths=[], storage_path=str(tmp_path / "idx"))
+    result = get_file_outline(
+        repo=repo, file_paths=[], storage_path=str(tmp_path / "idx")
+    )
     assert result["results"] == []
 
 
@@ -341,10 +374,13 @@ def test_get_file_outline_both_params_raises(tmp_path):
     src = tmp_path / "src"
     src.mkdir()
     (src / "a.py").write_text("def foo(): pass")
-    idx = index_folder(path=str(tmp_path), use_ai_summaries=False, storage_path=str(tmp_path / "idx"))
+    idx = index_folder(
+        path=str(tmp_path), use_ai_summaries=False, storage_path=str(tmp_path / "idx")
+    )
     repo = idx["repo"]
 
     from jcodemunch_mcp.tools.get_file_outline import get_file_outline
+
     with pytest.raises(ValueError):
         get_file_outline(
             repo=repo,
@@ -369,23 +405,32 @@ def bar():
     """An undecorated function."""
     pass
 ''')
-    idx = index_folder(path=str(tmp_path), use_ai_summaries=False, storage_path=str(tmp_path / "idx"))
+    idx = index_folder(
+        path=str(tmp_path), use_ai_summaries=False, storage_path=str(tmp_path / "idx")
+    )
     repo = idx["repo"]
 
     from jcodemunch_mcp.tools.get_file_outline import get_file_outline
-    result = get_file_outline(repo=repo, file_path="src/props.py", storage_path=str(tmp_path / "idx"))
+
+    result = get_file_outline(
+        repo=repo, file_path="src/props.py", storage_path=str(tmp_path / "idx")
+    )
 
     assert "symbols" in result
     symbols = {s["name"]: s for s in result["symbols"]}
 
     # foo is decorated with @property
     assert "foo" in symbols
-    assert "decorators" in symbols["foo"], "Decorated function should have decorators field"
+    assert "decorators" in symbols["foo"], (
+        "Decorated function should have decorators field"
+    )
     assert "@property" in symbols["foo"]["decorators"]
 
     # bar is undecorated
     assert "bar" in symbols
-    assert "decorators" not in symbols["bar"], "Undecorated function should not have decorators field"
+    assert "decorators" not in symbols["bar"], (
+        "Undecorated function should not have decorators field"
+    )
 
 
 def test_search_symbols_result_includes_decorators(tmp_path):
@@ -402,22 +447,34 @@ def plain():
     """A plain function."""
     pass
 ''')
-    idx = index_folder(path=str(tmp_path), use_ai_summaries=False, storage_path=str(tmp_path / "idx"))
+    idx = index_folder(
+        path=str(tmp_path), use_ai_summaries=False, storage_path=str(tmp_path / "idx")
+    )
     repo = idx["repo"]
 
     from jcodemunch_mcp.tools.search_symbols import search_symbols
 
     # Search for helper (decorated)
-    result = search_symbols(repo=repo, query="helper", detail_level="standard",
-                            storage_path=str(tmp_path / "idx"))
+    result = search_symbols(
+        repo=repo,
+        query="helper",
+        detail_level="standard",
+        storage_path=str(tmp_path / "idx"),
+    )
     assert result.get("result_count", 0) > 0
     found = result["results"][0]
     assert "decorators" in found, "Result for decorated symbol should have decorators"
     assert "@staticmethod" in found["decorators"]
 
     # Search for plain (undecorated)
-    result_plain = search_symbols(repo=repo, query="plain", detail_level="standard",
-                                  storage_path=str(tmp_path / "idx"))
+    result_plain = search_symbols(
+        repo=repo,
+        query="plain",
+        detail_level="standard",
+        storage_path=str(tmp_path / "idx"),
+    )
     assert result_plain.get("result_count", 0) > 0
     found_plain = result_plain["results"][0]
-    assert "decorators" not in found_plain, "Result for undecorated symbol should not have decorators"
+    assert "decorators" not in found_plain, (
+        "Result for undecorated symbol should not have decorators"
+    )

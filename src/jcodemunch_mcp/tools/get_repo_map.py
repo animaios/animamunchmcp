@@ -6,14 +6,27 @@ by file rank under the token budget.
 
 When ``group_by="flat"``, returns a flat ranked list of symbols by PageRank
 or in-degree centrality (the former ``get_symbol_importance`` behaviour).
+
+Supports two modes via the ``mode`` parameter:
+  - ``"map"`` (default): the original get_repo_map behaviour — symbols
+    grouped by file, ranked by PageRank, packed under a token budget.
+  - ``"outline"``: the former get_repo_outline behaviour — a lighter
+    per-directory summary (file counts, language breakdown, symbol counts).
 """
 
+import json
+import os
 import time
+from collections import Counter
+from datetime import datetime, timezone
 from fnmatch import fnmatch
 from typing import Optional
 
+from .. import config as _config
+from ..parser.imports import resolve_specifier
 from ..storage import IndexStore, cost_avoided, estimate_savings, record_savings
-from ._utils import index_status_to_tool_error, resolve_repo
+from ..storage.index_store import _get_git_head
+from ._utils import index_status_to_tool_error, load_repo_index_or_error, resolve_repo
 from .get_context_bundle import _count_tokens
 from .pagerank import compute_in_out_degrees, compute_pagerank
 
@@ -34,55 +47,213 @@ def _signature_or_name(sym: dict) -> str:
     return f"{kind} {name}".strip() if name else ""
 
 
-def get_repo_map(
+# ═══════════════════════════════════════════════════════════════════════════
+# Mode "outline" — former get_repo_outline logic
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def _mode_outline(
     repo: str,
-    token_budget: int = _DEFAULT_BUDGET,
-    scope: Optional[str] = None,
-    max_per_file: int = 5,
-    include_kinds: Optional[list] = None,
-    storage_path: Optional[str] = None,
-    group_by: str = "file",
-    algorithm: str = "pagerank",
-    top_n: int = 20,
+    storage_path: Optional[str],
 ) -> dict:
-    """Build a query-less, signature-level map of a repository within a token budget.
+    """Return the simpler per-directory outline (file counts, language breakdown,
+    symbol counts) — the former get_repo_outline behaviour."""
+    start = time.perf_counter()
 
-    Groups symbols by file, ranks files by PageRank on the import graph, and
-    greedy-packs signatures (not bodies) under ``token_budget``. Designed for
-    cold-start orientation: "I just cloned this repo — what matters here?"
+    index, error, _status = load_repo_index_or_error(repo, storage_path)
+    if error:
+        return error
+    owner, name = index.owner, index.name
+    store = IndexStore(base_path=storage_path)
 
-    When ``group_by="flat"``, returns a flat ranked list of symbols sorted by
-    PageRank or in-degree centrality (the former ``get_symbol_importance``
-    behaviour). In flat mode, ``token_budget``, ``max_per_file`` are ignored;
-    ``algorithm`` and ``top_n`` apply.
+    # Compute directory-level stats
+    # For large repos, use 2-level grouping so agents get useful navigation hints.
+    _LARGE_REPO_THRESHOLD = 500  # files
+    _MAX_DIR_ENTRIES = 40
 
-    Args:
-        repo: Repository identifier (owner/repo or just repo name).
-        token_budget: Hard cap on returned tokens (default 2048). Ignored when
-            ``group_by="flat"``.
-        scope: Optional subdirectory glob to limit results (e.g. ``src/core/*``).
-        max_per_file: Max signatures to include per file (default 5, capped at 50).
-            Ignored when ``group_by="flat"``.
-        include_kinds: Optional list of symbol kinds to restrict results to
-            (e.g. ``['class', 'function']``). Defaults to all kinds.
-        storage_path: Custom storage path.
-        group_by: ``"file"`` (default, backward-compatible) groups symbols by
-            file. ``"flat"`` returns a flat ranked list of symbols sorted by
-            importance.
-        algorithm: ``"pagerank"`` (default) or ``"degree"`` (simple in-degree
-            count). Only used when ``group_by="flat"``.
-        top_n: Number of top symbols to return in flat mode (default 20, max 200).
-            Only used when ``group_by="flat"``.
+    dir_file_counts: Counter = Counter()
+    for f in index.source_files:
+        parts = f.split("/")
+        if len(parts) > 1:
+            dir_file_counts[parts[0] + "/"] += 1
+        else:
+            dir_file_counts["(root)"] += 1
 
-    Returns:
-        When ``group_by="file"``: dict with ``files`` list (each entry has
-        path, rank, score, in_degree, symbols[]) plus summary fields and
-        ``_meta``.
+    if len(index.source_files) > _LARGE_REPO_THRESHOLD:
+        # Expand large top-level dirs into 2-level groupings
+        expanded: Counter = Counter()
+        for f in index.source_files:
+            parts = f.split("/")
+            if len(parts) >= 3:
+                key = parts[0] + "/" + parts[1] + "/"
+            elif len(parts) == 2:
+                key = parts[0] + "/"
+            else:
+                key = "(root)"
+            expanded[key] += 1
+        # Only use 2-level if it gives more granularity than 1-level
+        if len(expanded) > len(dir_file_counts):
+            # Cap at _MAX_DIR_ENTRIES, keeping highest-count dirs
+            dir_file_counts = Counter(dict(expanded.most_common(_MAX_DIR_ENTRIES)))
 
-        When ``group_by="flat"``: dict with ``ranked_symbols`` list, each entry
-        has symbol_id, rank, score, in_degree, out_degree, kind; plus
-        ``algorithm`` and ``iterations_to_converge``.
-    """
+    # Symbol kind breakdown
+    kind_counts: Counter = Counter()
+    for sym in index.symbols:
+        kind_counts[sym.get("kind", "unknown")] += 1
+
+    # Token savings: sum of all raw file sizes (user would need to read all files)
+    raw_bytes = 0
+    content_dir = store._content_dir(owner, name)
+    for f in index.source_files:
+        try:
+            raw_bytes += os.path.getsize(content_dir / f)
+        except OSError:
+            pass
+    # Most-imported files: count in-degree from import graph (PageRank-lite)
+    most_imported: list = []
+    if index.imports is not None:
+        in_degree: Counter = Counter()
+        source_files_set = frozenset(index.source_files)
+        for src_file, file_imports in index.imports.items():
+            for imp in file_imports:
+                target = resolve_specifier(
+                    imp["specifier"],
+                    src_file,
+                    source_files_set,
+                    index.alias_map,
+                    getattr(index, "psr4_map", None),
+                )
+                if target and target != src_file:
+                    in_degree[target] += 1
+        most_imported = [
+            {"file": f, "imported_by": c} for f, c in in_degree.most_common(10) if c > 1
+        ]
+
+    # Most central symbols: top symbols by PageRank score on the import graph
+    most_central: list = []
+    if index.imports is not None:
+        try:
+            pr_scores, _ = compute_pagerank(
+                index.imports,
+                index.source_files,
+                index.alias_map,
+                psr4_map=getattr(index, "psr4_map", None),
+            )
+            # Kind priority for picking the representative symbol per file
+            _KIND_PRIO = {
+                "class": 0,
+                "function": 1,
+                "method": 2,
+                "type": 3,
+                "constant": 4,
+            }
+            file_to_best: dict = {}
+            for sym in index.symbols:
+                f = sym.get("file", "")
+                if not pr_scores.get(f):
+                    continue
+                kp = _KIND_PRIO.get(sym.get("kind", ""), 5)
+                bl = sym.get("byte_length", 0)
+                prev = file_to_best.get(f)
+                if prev is None or (kp, -bl) < (prev[0], prev[1]):
+                    file_to_best[f] = (kp, -bl, sym)
+            top_files = sorted(pr_scores.items(), key=lambda x: x[1], reverse=True)[:10]
+            for f, pr_score in top_files:
+                entry = file_to_best.get(f)
+                if entry and pr_score > 0:
+                    most_central.append(
+                        {
+                            "symbol_id": entry[2]["id"],
+                            "score": round(pr_score, 6),
+                            "kind": entry[2].get("kind", ""),
+                        }
+                    )
+        except Exception:
+            pass
+
+    payload_content = {
+        "repo": f"{owner}/{name}",
+        "indexed_at": index.indexed_at,
+        "file_count": len(index.source_files),
+        "symbol_count": len(index.symbols),
+        "languages": index.languages,
+        "directories": dict(dir_file_counts.most_common()),
+        "symbol_kinds": dict(kind_counts.most_common()),
+    }
+    if most_imported:
+        payload_content["most_imported_files"] = most_imported
+    if most_central:
+        payload_content["most_central_symbols"] = most_central
+    response_bytes = len(json.dumps(payload_content).encode("utf-8"))
+    tokens_saved = estimate_savings(raw_bytes, response_bytes)
+    total_saved = record_savings(tokens_saved, tool_name="get_repo_outline")
+
+    elapsed = (time.perf_counter() - start) * 1000
+
+    # Staleness check — SHA-based (accurate) with time-based fallback
+    staleness_warning = None
+    is_stale = None
+    try:
+        from pathlib import Path
+
+        if index.source_root and index.git_head:
+            # Local repo: compare SHAs
+            current_sha = _get_git_head(Path(index.source_root))
+            if current_sha is not None:
+                is_stale = current_sha != index.git_head
+                if is_stale:
+                    staleness_warning = (
+                        f"Index SHA ({index.git_head[:12]}) does not match current HEAD "
+                        f"({current_sha[:12]}). Run index_folder to refresh."
+                    )
+        else:
+            # GitHub repo or no git: fall back to time-based check.
+            # Project-overridable (#301): per-repo freshness expectations.
+            staleness_days = _config.get("staleness_days", 7, repo=repo)
+            indexed_dt = datetime.fromisoformat(index.indexed_at)
+            if indexed_dt.tzinfo is None:
+                indexed_dt = indexed_dt.replace(tzinfo=timezone.utc)
+            age_days = (datetime.now(timezone.utc) - indexed_dt).days
+            if age_days >= staleness_days:
+                is_stale = True
+                staleness_warning = (
+                    f"Index is {age_days} days old. Run index_repo to refresh."
+                )
+    except Exception:
+        pass
+
+    result = {
+        **payload_content,
+        "_meta": {
+            "timing_ms": round(elapsed, 1),
+            "tokens_saved": tokens_saved,
+            "total_tokens_saved": total_saved,
+            "is_stale": is_stale,
+            **cost_avoided(tokens_saved, total_saved),
+        },
+    }
+    if staleness_warning:
+        result["staleness_warning"] = staleness_warning
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Mode "map" — original get_repo_map logic
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def _mode_map(
+    repo: str,
+    token_budget: int,
+    scope: Optional[str],
+    max_per_file: int,
+    include_kinds: Optional[list],
+    storage_path: Optional[str],
+    group_by: str,
+    algorithm: str,
+    top_n: int,
+) -> dict:
+    """Original get_repo_map behaviour — symbols grouped by file, ranked by PageRank."""
     start = time.perf_counter()
 
     if group_by not in ("file", "flat"):
@@ -353,3 +524,83 @@ def get_repo_map(
         )
 
     return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Unified public entry point
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def get_repo_map(
+    repo: str,
+    token_budget: int = _DEFAULT_BUDGET,
+    scope: Optional[str] = None,
+    max_per_file: int = 5,
+    include_kinds: Optional[list] = None,
+    storage_path: Optional[str] = None,
+    group_by: str = "file",
+    algorithm: str = "pagerank",
+    top_n: int = 20,
+    mode: str = "map",
+) -> dict:
+    """Build a query-less, signature-level map or outline of a repository.
+
+    Two modes via the ``mode`` parameter:
+
+    * ``"map"`` (default): the original get_repo_map behaviour. Groups symbols
+      by file, ranks files by PageRank on the import graph, and greedy-packs
+      signatures (not bodies) under ``token_budget``. Designed for cold-start
+      orientation: "I just cloned this repo — what matters here?"
+
+      When ``group_by="flat"``, returns a flat ranked list of symbols sorted by
+      PageRank or in-degree centrality (the former ``get_symbol_importance``
+      behaviour). In flat mode, ``token_budget``, ``max_per_file`` are ignored;
+      ``algorithm`` and ``top_n`` apply.
+
+    * ``"outline"``: the former get_repo_outline behaviour. A lighter weight
+      overview returning top-level directories, file counts, language breakdown,
+      and symbol counts. The ``token_budget``, ``scope``, ``max_per_file``,
+      ``include_kinds``, ``group_by``, ``algorithm``, and ``top_n`` params are
+      ignored in outline mode.
+
+    Args:
+        repo: Repository identifier (owner/repo or just repo name).
+        mode: ``"map"`` (default) or ``"outline"``.
+
+    Map-mode params:
+        token_budget: Hard cap on returned tokens (default 2048). Ignored when
+            ``group_by="flat"``.
+        scope: Optional subdirectory glob to limit results (e.g. ``src/core/*``).
+        max_per_file: Max signatures to include per file (default 5, capped at 50).
+            Ignored when ``group_by="flat"``.
+        include_kinds: Optional list of symbol kinds to restrict results to
+            (e.g. ``['class', 'function']``). Defaults to all kinds.
+        storage_path: Custom storage path.
+        group_by: ``"file"`` (default) or ``"flat"``.
+        algorithm: ``"pagerank"`` (default) or ``"degree"``. Only used when ``group_by="flat"``.
+        top_n: Number of top symbols to return in flat mode (default 20, max 200).
+
+    Returns:
+        Map mode: dict with ``files`` list or ``ranked_symbols`` list, plus
+        ``_meta``.
+
+        Outline mode: dict with repo info, directories, languages, symbol_kinds,
+        and ``_meta``.
+    """
+    if mode == "outline":
+        return _mode_outline(repo=repo, storage_path=storage_path)
+
+    if mode != "map":
+        return {"error": f"Invalid mode '{mode}'. Must be 'map' or 'outline'."}
+
+    return _mode_map(
+        repo=repo,
+        token_budget=token_budget,
+        scope=scope,
+        max_per_file=max_per_file,
+        include_kinds=include_kinds,
+        storage_path=storage_path,
+        group_by=group_by,
+        algorithm=algorithm,
+        top_n=top_n,
+    )

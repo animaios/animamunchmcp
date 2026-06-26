@@ -331,7 +331,7 @@ def get_pr_risk_profile(
     # Step 4: Churn signal (historical volatility of touched files)
     # -------------------------------------------------------------------
     from ._utils import run_git as _hotspot_git
-    from .get_hotspots import _get_file_churn
+    from .get_repo_health import _get_file_churn
 
     cwd = index.source_root
     file_churn: dict[str, int] = {}

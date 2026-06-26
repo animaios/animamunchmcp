@@ -20,23 +20,23 @@ Always use jCodemunch-MCP tools for code navigation. Never fall back to Read, Gr
 - specific line range only → `get_file_content` (last resort)
 
 **Repo structure:**
-- `get_repo_outline` → dirs, languages, symbol counts
+- `get_repo_map(mode="outline")` → dirs, languages, symbol counts
 - `get_file_tree` → file layout, filter with `path_prefix`
 
 **Relationships & impact:**
-- what imports this file → `find_importers`
+- what imports this file → `find_references(mode="importers")`
 - where is this name used → `find_references`
-- is this identifier used anywhere → `check_references`
+- is this identifier used anywhere → `find_references(quick=true)`
 - file dependency graph → `get_dependency_graph`
 - what breaks if I change X → `get_blast_radius`
 - what symbols actually changed since last commit → `get_changed_symbols`
-- find unreachable/dead code → `find_dead_code`
+- find unreachable/dead code → `get_dead_code_v2`
 - class hierarchy → `get_class_hierarchy`
 
 ## Session-Aware Routing
 
 **Opening move for any task:**
-1. `plan_turn { "repo": "...", "query": "your task description", "model": "<your-model-id>" }` — get confidence + recommended files; the `model` parameter narrows the exposed tool list to match your capabilities at zero extra requests.
+1. `assemble_task_context { "repo": "...", "task": "your task description" }` — returns a prioritized, token-budgeted context capsule. Auto-classifies intent (explore / debug / refactor / extend / audit / review) and runs the appropriate tool chain in one call.
 2. Obey the confidence level:
    - `high` → go directly to recommended symbols, max 2 supplementary reads
    - `medium` → explore recommended files, max 5 supplementary reads
@@ -61,7 +61,7 @@ Always use jCodemunch-MCP tools for code navigation. Never fall back to Read, Gr
 - Use `get_session_context` to check what you've already read — avoid re-reading the same files
 
 **Reading the response envelope (v1.74.0+):**
-- `_meta.confidence` (0–1) — calibrated retrieval-quality score on `search_symbols` / `plan_turn` / `get_ranked_context`. ≥ 0.8 → trust the top result; ≤ 0.4 → widen the search or report a gap
+- `_meta.confidence` (0–1) — calibrated retrieval-quality score on `search_symbols` / `assemble_task_context`. ≥ 0.8 → trust the top result; ≤ 0.4 → widen the search or report a gap
 - `_meta.freshness` — `{fresh, edited_uncommitted, stale_index}` counts plus `repo_is_stale` flag. Per-result `_freshness` field on each symbol entry
 - If `repo_is_stale=true`, suggest `index_folder` before claiming current behaviour
 - For latency / cache health: `analyze_perf` (in-memory by default; `window=1h|24h|7d|all` reads `~/.code-index/telemetry.db` when `perf_telemetry_enabled` is on)
@@ -69,7 +69,7 @@ Always use jCodemunch-MCP tools for code navigation. Never fall back to Read, Gr
 
 ## Model-Driven Tool Tiering
 
-Your jcodemunch-mcp server narrows the exposed tool list based on the model you are running as. To avoid wasting requests on primitives when a composite would do, always include `model="<your-model-id>"` in your opening `plan_turn` call.
+Pass `model="<your-model-id>"` to `assemble_task_context` to let the server optimize which sub-tools it runs for your capability level.
 
 Replace `<your-model-id>` with your active model:
 - Claude Opus variants → `claude-opus-4-7` (or any `claude-opus-*`)
@@ -77,5 +77,5 @@ Replace `<your-model-id>` with your active model:
 - Claude Haiku variants → `claude-haiku-4-5`
 - GPT-4o / GPT-5 / o1 / Llama → use the model id as printed by your runner
 
-The `model=` parameter rides on the existing `plan_turn` call — it does **not** add a separate tool invocation. If `plan_turn` is not appropriate for a non-code task, call `announce_model(model="...")` once instead.
+If `assemble_task_context` is not appropriate for a non-code task, call `announce_model(model="...")` once instead.
 

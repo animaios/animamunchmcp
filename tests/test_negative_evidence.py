@@ -1,7 +1,8 @@
 """Tests for negative evidence in search_symbols (Feature 1)."""
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 from tests.conftest_helpers import create_mini_index
 
@@ -12,6 +13,7 @@ class TestNegativeEvidence:
     def test_negative_evidence_on_empty_results(self, tmp_path: Path):
         """When no matches found, negative_evidence is present with verdict."""
         from jcodemunch_mcp.tools.search_symbols import search_symbols
+
         repo, storage_path = create_mini_index(tmp_path)
         result = search_symbols(
             repo=repo,
@@ -28,6 +30,7 @@ class TestNegativeEvidence:
     def test_no_negative_evidence_on_strong_match(self, tmp_path: Path):
         """When strong match found, negative_evidence is NOT present."""
         from jcodemunch_mcp.tools.search_symbols import search_symbols
+
         repo, storage_path = create_mini_index(tmp_path)
         result = search_symbols(repo=repo, query="my_func", storage_path=storage_path)
         assert result["result_count"] >= 1
@@ -36,6 +39,7 @@ class TestNegativeEvidence:
     def test_related_existing_files(self, tmp_path: Path):
         """When query matches file name but not symbol, related_existing shows nearby files."""
         from jcodemunch_mcp.tools.search_symbols import search_symbols
+
         repo, storage_path = create_mini_index(tmp_path, filename="auth_handler.py")
         result = search_symbols(
             repo=repo,
@@ -54,12 +58,17 @@ class TestNegativeEvidence:
     def test_threshold_constant_importable(self):
         """_NEGATIVE_EVIDENCE_THRESHOLD constant exists and is > 0."""
         from jcodemunch_mcp.tools.search_symbols import _NEGATIVE_EVIDENCE_THRESHOLD
+
         assert _NEGATIVE_EVIDENCE_THRESHOLD > 0
         assert _NEGATIVE_EVIDENCE_THRESHOLD < 10  # Reasonable range
 
     def test_low_confidence_match_shows_negative_evidence(self, tmp_path: Path):
         """When match score is below threshold, negative_evidence is present."""
-        from jcodemunch_mcp.tools.search_symbols import search_symbols, _NEGATIVE_EVIDENCE_THRESHOLD
+        from jcodemunch_mcp.tools.search_symbols import (
+            _NEGATIVE_EVIDENCE_THRESHOLD,
+            search_symbols,
+        )
+
         repo, storage_path = create_mini_index(tmp_path)
         # Search for something that partially matches but shouldn't be a strong match
         result = search_symbols(
@@ -74,26 +83,29 @@ class TestNegativeEvidence:
             assert "verdict" in ne
 
 
-class TestGetRankedContextNegativeEvidence:
-    """Tests for negative_evidence field in get_ranked_context."""
+class TestSearchSymbolsContextNegativeEvidence:
+    """Tests for negative_evidence field in search_symbols(mode="context")."""
 
     def test_negative_evidence_on_empty_result(self, tmp_path: Path):
-        """get_ranked_context returns negative_evidence when query doesn't match."""
+        """search_symbols(mode="context") returns negative_evidence when query doesn't match."""
         from jcodemunch_mcp.tools.index_folder import index_folder
-        from jcodemunch_mcp.tools.get_ranked_context import get_ranked_context
+        from jcodemunch_mcp.tools.search_symbols import search_symbols
 
         src = tmp_path / "src"
         src.mkdir()
         (src / "a.py").write_text("def real_function(): pass\n")
 
         storage = str(tmp_path / "idx")
-        idx = index_folder(path=str(tmp_path), use_ai_summaries=False, storage_path=storage)
+        idx = index_folder(
+            path=str(tmp_path), use_ai_summaries=False, storage_path=storage
+        )
         repo = idx["repo"]
 
-        result = get_ranked_context(
+        result = search_symbols(
             repo=repo,
             query="completely_nonexistent_feature_xyz",
             token_budget=4000,
+            mode="context",
             storage_path=storage,
         )
 
@@ -106,20 +118,23 @@ class TestGetRankedContextNegativeEvidence:
     def test_warning_string_present_on_negative_evidence(self, tmp_path: Path):
         """Verify warning string at top level when negative evidence triggers."""
         from jcodemunch_mcp.tools.index_folder import index_folder
-        from jcodemunch_mcp.tools.get_ranked_context import get_ranked_context
+        from jcodemunch_mcp.tools.search_symbols import search_symbols
 
         src = tmp_path / "src"
         src.mkdir()
         (src / "a.py").write_text("def real_function(): pass\n")
 
         storage = str(tmp_path / "idx")
-        idx = index_folder(path=str(tmp_path), use_ai_summaries=False, storage_path=storage)
+        idx = index_folder(
+            path=str(tmp_path), use_ai_summaries=False, storage_path=storage
+        )
         repo = idx["repo"]
 
-        result = get_ranked_context(
+        result = search_symbols(
             repo=repo,
             query="nonexistent_xyz",
             token_budget=4000,
+            mode="context",
             storage_path=storage,
         )
 
@@ -129,20 +144,23 @@ class TestGetRankedContextNegativeEvidence:
     def test_no_negative_evidence_on_strong_match(self, tmp_path: Path):
         """No negative_evidence when query matches well."""
         from jcodemunch_mcp.tools.index_folder import index_folder
-        from jcodemunch_mcp.tools.get_ranked_context import get_ranked_context
+        from jcodemunch_mcp.tools.search_symbols import search_symbols
 
         src = tmp_path / "src"
         src.mkdir()
         (src / "a.py").write_text("def my_special_function():\n    return 42\n")
 
         storage = str(tmp_path / "idx")
-        idx = index_folder(path=str(tmp_path), use_ai_summaries=False, storage_path=storage)
+        idx = index_folder(
+            path=str(tmp_path), use_ai_summaries=False, storage_path=storage
+        )
         repo = idx["repo"]
 
-        result = get_ranked_context(
+        result = search_symbols(
             repo=repo,
             query="my_special_function",
             token_budget=4000,
+            mode="context",
             storage_path=storage,
         )
 
@@ -153,20 +171,23 @@ class TestGetRankedContextNegativeEvidence:
     def test_related_existing_in_negative_evidence(self, tmp_path: Path):
         """related_existing lists files with partial name match."""
         from jcodemunch_mcp.tools.index_folder import index_folder
-        from jcodemunch_mcp.tools.get_ranked_context import get_ranked_context
+        from jcodemunch_mcp.tools.search_symbols import search_symbols
 
         src = tmp_path / "src"
         src.mkdir()
         (src / "auth_handler.py").write_text("def login(): pass\n")
 
         storage = str(tmp_path / "idx")
-        idx = index_folder(path=str(tmp_path), use_ai_summaries=False, storage_path=storage)
+        idx = index_folder(
+            path=str(tmp_path), use_ai_summaries=False, storage_path=storage
+        )
         repo = idx["repo"]
 
-        result = get_ranked_context(
+        result = search_symbols(
             repo=repo,
             query="auth_nonexistent_feature",
             token_budget=4000,
+            mode="context",
             storage_path=storage,
         )
 
@@ -189,7 +210,9 @@ class TestSearchSymbolsWarningString:
         (src / "a.py").write_text("def real_function(): pass\n")
 
         storage = str(tmp_path / "idx")
-        idx = index_folder(path=str(tmp_path), use_ai_summaries=False, storage_path=storage)
+        idx = index_folder(
+            path=str(tmp_path), use_ai_summaries=False, storage_path=storage
+        )
         repo = idx["repo"]
 
         result = search_symbols(
@@ -212,7 +235,9 @@ class TestSearchSymbolsWarningString:
         (src / "a.py").write_text("def real_function(): pass\n")
 
         storage = str(tmp_path / "idx")
-        idx = index_folder(path=str(tmp_path), use_ai_summaries=False, storage_path=storage)
+        idx = index_folder(
+            path=str(tmp_path), use_ai_summaries=False, storage_path=storage
+        )
         repo = idx["repo"]
 
         result = search_symbols(

@@ -5,17 +5,18 @@ Covers:
   - get_ranked_context: query-driven ranked context assembly
 """
 
-import pytest
 from pathlib import Path
 
-from jcodemunch_mcp.tools.get_context_bundle import get_context_bundle
-from jcodemunch_mcp.tools.get_ranked_context import get_ranked_context
-from jcodemunch_mcp.tools.index_folder import index_folder
+import pytest
 
+from jcodemunch_mcp.tools.get_context_bundle import get_context_bundle
+from jcodemunch_mcp.tools.index_folder import index_folder
+from jcodemunch_mcp.tools.search_symbols import search_symbols
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_repo(tmp_path: Path, files: dict[str, str]) -> tuple[str, str]:
     """Write files to tmp_path and index them. Return (repo_id, storage_path)."""
@@ -32,7 +33,7 @@ def _make_repo(tmp_path: Path, files: dict[str, str]) -> tuple[str, str]:
 _SMALL_REPO = {
     "engine.py": (
         "class Engine:\n"
-        "    \"\"\"Core engine.\"\"\"\n"
+        '    """Core engine."""\n'
         "    def run(self):\n"
         "        pass\n\n"
         "    def stop(self):\n"
@@ -47,11 +48,14 @@ _SMALL_REPO = {
 # get_context_bundle — token_budget
 # ---------------------------------------------------------------------------
 
+
 class TestContextBundleTokenBudget:
     def test_budget_none_returns_full_source(self, tmp_path):
         """Without a budget, source is always included."""
         repo, storage = _make_repo(tmp_path, _SMALL_REPO)
-        result = get_context_bundle(repo, symbol_id="engine.py::Engine#class", storage_path=storage)
+        result = get_context_bundle(
+            repo, symbol_id="engine.py::Engine#class", storage_path=storage
+        )
         assert "error" not in result
         assert result.get("source", "") != ""
 
@@ -67,7 +71,9 @@ class TestContextBundleTokenBudget:
         )
         assert "error" not in result
         for sym in result["symbols"]:
-            assert sym["source"] == "", f"Expected empty source, got: {sym['source'][:50]}"
+            assert sym["source"] == "", (
+                f"Expected empty source, got: {sym['source'][:50]}"
+            )
 
     def test_compact_strategy_retains_signature(self, tmp_path):
         """compact mode keeps signature even when source is stripped."""
@@ -157,7 +163,9 @@ class TestContextBundleTokenBudget:
     def test_no_budget_backward_compat(self, tmp_path):
         """Without token_budget, response shape is unchanged (backward compat)."""
         repo, storage = _make_repo(tmp_path, _SMALL_REPO)
-        result = get_context_bundle(repo, symbol_id="utils.py::format_date#function", storage_path=storage)
+        result = get_context_bundle(
+            repo, symbol_id="utils.py::format_date#function", storage_path=storage
+        )
         assert "error" not in result
         assert "symbol_id" in result
         assert "source" in result
@@ -168,11 +176,14 @@ class TestContextBundleTokenBudget:
 # get_ranked_context
 # ---------------------------------------------------------------------------
 
+
 class TestGetRankedContext:
     def test_returns_context_items(self, tmp_path):
         """Basic call returns context_items list."""
         repo, storage = _make_repo(tmp_path, _SMALL_REPO)
-        result = get_ranked_context(repo, query="engine run", storage_path=storage)
+        result = search_symbols(
+            repo, query="engine run", mode="context", storage_path=storage
+        )
         assert "error" not in result
         assert "context_items" in result
         assert isinstance(result["context_items"], list)
@@ -181,14 +192,16 @@ class TestGetRankedContext:
         """total_tokens must not exceed token_budget."""
         repo, storage = _make_repo(tmp_path, _SMALL_REPO)
         budget = 100
-        result = get_ranked_context(repo, query="engine", token_budget=budget, storage_path=storage)
+        result = search_symbols(repo, mode="context", query="engine", token_budget=budget, storage_path=storage
+        )
         assert "error" not in result
         assert result["total_tokens"] <= budget
 
     def test_items_include_source(self, tmp_path):
         """Each context item includes a non-empty source field."""
         repo, storage = _make_repo(tmp_path, _SMALL_REPO)
-        result = get_ranked_context(repo, query="Engine", token_budget=4000, storage_path=storage)
+        result = search_symbols(repo, mode="context", query="Engine", token_budget=4000, storage_path=storage
+        )
         assert "error" not in result
         for item in result["context_items"]:
             assert "source" in item
@@ -196,7 +209,8 @@ class TestGetRankedContext:
     def test_items_have_score_fields(self, tmp_path):
         """Each context item has relevance_score, centrality_score, combined_score."""
         repo, storage = _make_repo(tmp_path, _SMALL_REPO)
-        result = get_ranked_context(repo, query="Engine", token_budget=4000, storage_path=storage)
+        result = search_symbols(repo, mode="context", query="Engine", token_budget=4000, storage_path=storage
+        )
         assert "error" not in result
         for item in result["context_items"]:
             assert "relevance_score" in item
@@ -207,21 +221,24 @@ class TestGetRankedContext:
     def test_bm25_strategy(self, tmp_path):
         """strategy='bm25' returns results without error."""
         repo, storage = _make_repo(tmp_path, _SMALL_REPO)
-        result = get_ranked_context(repo, query="format date", strategy="bm25", storage_path=storage)
+        result = search_symbols(repo, mode="context", query="format date", strategy="bm25", storage_path=storage
+        )
         assert "error" not in result
         assert "context_items" in result
 
     def test_budget_zero_returns_error(self, tmp_path):
         """token_budget=0 returns a structured error."""
         repo, storage = _make_repo(tmp_path, _SMALL_REPO)
-        result = get_ranked_context(repo, query="engine", token_budget=0, storage_path=storage)
+        result = search_symbols(repo, mode="context", query="engine", token_budget=0, storage_path=storage
+        )
         assert "error" in result
 
     def test_include_kinds_filter(self, tmp_path):
         """include_kinds restricts results to specified kinds."""
         repo, storage = _make_repo(tmp_path, _SMALL_REPO)
-        result = get_ranked_context(
-            repo, query="engine", token_budget=4000,
+        result = search_symbols(repo, mode="context",
+            query="engine",
+            token_budget=4000,
             include_kinds=["class"],
             storage_path=storage,
         )
@@ -234,19 +251,20 @@ class TestGetRankedContext:
     def test_unknown_repo_returns_error(self, tmp_path):
         """Non-existent repo returns a structured error."""
         storage = str(tmp_path / ".index")
-        result = get_ranked_context("no_such_repo", query="engine", storage_path=storage)
+        result = search_symbols("no_such_repo", mode="context", query="engine", storage_path=storage
+        )
         assert "error" in result
 
     def test_query_too_long_returns_error(self, tmp_path):
         """Query exceeding 500 chars returns a structured error."""
         repo, storage = _make_repo(tmp_path, _SMALL_REPO)
-        result = get_ranked_context(repo, query="x" * 501, storage_path=storage)
+        result = search_symbols(repo, mode="context", query="x" * 501, storage_path=storage)
         assert "error" in result
 
     def test_meta_fields_present(self, tmp_path):
         """Response includes _meta with timing and savings fields."""
         repo, storage = _make_repo(tmp_path, _SMALL_REPO)
-        result = get_ranked_context(repo, query="Engine", storage_path=storage)
+        result = search_symbols(repo, mode="context", query="Engine", storage_path=storage)
         assert "error" not in result
         assert "_meta" in result
         meta = result["_meta"]
@@ -261,11 +279,14 @@ class TestGetRankedContext:
         repo, storage = create_exact_match_index(tmp_path)
         _cache_clear()
 
-        result = get_ranked_context(repo, query="build_ui", strategy="bm25", storage_path=storage)
+        result = search_symbols(repo, mode="context", query="build_ui", strategy="bm25", storage_path=storage
+        )
 
         assert "error" not in result
         assert result["context_items"]
-        assert result["context_items"][0]["symbol_id"].endswith("UiBuilder.build_ui#method")
+        assert result["context_items"][0]["symbol_id"].endswith(
+            "UiBuilder.build_ui#method"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -314,8 +335,10 @@ class TestDiversityPacking:
     def test_diversity_spreads_across_files(self, tmp_path):
         """With diversity enabled, results should come from multiple files."""
         repo, storage = _make_repo(tmp_path, _CONCENTRATED_REPO)
-        result = get_ranked_context(
-            repo, query="get", token_budget=4000, storage_path=storage,
+        result = search_symbols(repo, mode="context",
+            query="get",
+            token_budget=4000,
+            storage_path=storage,
         )
         assert "error" not in result
         items = result["context_items"]
@@ -334,10 +357,13 @@ class TestDiversityPacking:
 
     def test_file_group_cap_respected(self, tmp_path):
         """No more than _FILE_GROUP_CAP symbols from a single file."""
-        from jcodemunch_mcp.tools.get_ranked_context import _FILE_GROUP_CAP
+        from jcodemunch_mcp.tools.search_symbols import _FILE_GROUP_CAP
+
         repo, storage = _make_repo(tmp_path, _CONCENTRATED_REPO)
-        result = get_ranked_context(
-            repo, query="get", token_budget=8000, storage_path=storage,
+        result = search_symbols(repo, mode="context",
+            query="get",
+            token_budget=8000,
+            storage_path=storage,
         )
         assert "error" not in result
         file_counts: dict[str, int] = {}
@@ -354,22 +380,27 @@ class TestDiversityPacking:
         """Diversity packing must still respect the token budget."""
         repo, storage = _make_repo(tmp_path, _CONCENTRATED_REPO)
         budget = 50
-        result = get_ranked_context(
-            repo, query="get", token_budget=budget, storage_path=storage,
+        result = search_symbols(repo, mode="context",
+            query="get",
+            token_budget=budget,
+            storage_path=storage,
         )
         assert "error" not in result
         assert result["total_tokens"] <= budget
 
     def test_pack_budget_no_diversity_fallback(self, tmp_path):
         """_pack_budget with diversity=False behaves like the old greedy packer."""
-        from jcodemunch_mcp.tools.get_ranked_context import _pack_budget
+        from jcodemunch_mcp.tools.search_symbols import _pack_budget
+
         syms = [
             {"id": f"a.py::f{i}#function", "file": "a.py", "byte_length": 20}
             for i in range(5)
         ]
         scored = [(10.0 - i, sym) for i, sym in enumerate(syms)]
+
         def get_tok(sym):
             return "x" * 20, 5
+
         packed, total = _pack_budget(scored, 100, get_tok, diversity=False)
         # Without diversity, all 5 from same file should be packed
         assert len(packed) == 5

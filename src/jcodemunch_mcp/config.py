@@ -1675,62 +1675,44 @@ def generate_template() -> str:
         [
             "assemble_task_context",
             "check_safe",
-            "digest",
             "embed_repo",
             "find_hot_paths",
             "find_implementations",
-            "find_importers",
             "find_references",
             "find_similar_symbols",
             "find_unused_paths",
             "get_blast_radius",
             "get_call_hierarchy",
             "get_changed_symbols",
-            "get_churn_rate",
             "get_class_hierarchy",
             "get_context_bundle",
-            "get_coupling_metrics",
             "get_dead_code_v2",
-            "get_dependency_cycles",
             "get_dependency_graph",
-            "get_extraction_candidates",
             "get_file_content",
             "get_file_outline",
             "get_file_tree",
-            "get_hotspots",
-            "get_layer_violations",
             "get_pr_risk_profile",
             "get_project_intel",
-            "get_ranked_context",
-            "get_related_symbols",
             "get_repo_health",
             "get_repo_map",
-            "get_repo_outline",
-            "get_session_context",
-            "get_signal_chains",
             "get_symbol_complexity",
             "get_symbol_provenance",
             "get_symbol_source",
             "get_tectonic_map",
-            "get_untested_symbols",
             "import_runtime_signal",
             "index_file",
             "index_folder",
             "index_repo",
-            "jcodemunch_guide",
             "list_repos",
             "list_workspaces",
             "plan_refactoring",
             "register_edit",
-            "render_diagram",
             "resolve_repo",
             "search_ast",
             "search_columns",
             "search_symbols",
             "search_text",
-            "suggest_queries",
             "summarize_repo",
-            "winnow_symbols",
         ]
     )
     tools_str = "\n  // ".join(f'"{t}",' for t in all_tools)
@@ -1915,11 +1897,9 @@ def generate_template() -> str:
     //   "detail_level": "",
     //   "language": ""
     // }},
-    // "find_importers": {{ "_tool": "" }},
     // "find_references": {{ "_tool": "" }},
     // "get_blast_radius": {{ "_tool": "" }},
     // "get_context_bundle": {{ "_tool": "" }},
-    // "suggest_queries": {{ "_tool": "" }},
     // "_shared": {{ "repo": "" }}
   }},
 
@@ -2026,7 +2006,7 @@ def generate_template() -> str:
   //   skip the probe entirely. Index still builds; only the blame
   //   metadata is omitted.
   // "cross_repo_default": false,
-  //   When true, find_importers / get_blast_radius / get_dependency_graph
+  //   When true, get_blast_radius / get_dependency_graph
   //   traverse OTHER indexed repos by default, not just the focal one. A
   //   per-call `cross_repo` argument still overrides this. Default false
   //   keeps results scoped to the repo you asked about.

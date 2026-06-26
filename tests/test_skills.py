@@ -1,4 +1,5 @@
 """Tests for the Claude Agent Skill bundle install/uninstall/status flow (v1.107.0)."""
+
 import json
 from pathlib import Path
 
@@ -15,10 +16,10 @@ from jcodemunch_mcp.cli.skills import (
     uninstall_claude_skill,
 )
 
-
 # ---------------------------------------------------------------------------
 # Content builder
 # ---------------------------------------------------------------------------
+
 
 class TestBuildSkillContent:
     def test_has_yaml_frontmatter(self):
@@ -40,12 +41,13 @@ class TestBuildSkillContent:
         assert "Opening move" in content
         assert "Anti-patterns" in content
         assert "resolve_repo" in content
-        assert "plan_turn" in content
+        assert "assemble_task_context" in content
 
 
 # ---------------------------------------------------------------------------
 # install_claude_skill
 # ---------------------------------------------------------------------------
+
 
 class TestInstallSkill:
     def test_creates_skill_in_global_scope(self, tmp_path, monkeypatch):
@@ -79,6 +81,7 @@ class TestInstallSkill:
 # ---------------------------------------------------------------------------
 # uninstall_claude_skill
 # ---------------------------------------------------------------------------
+
 
 class TestUninstallSkill:
     def test_removes_file_and_empty_dirs(self, tmp_path, monkeypatch):
@@ -141,6 +144,7 @@ class TestUninstallSkill:
 # skill_status
 # ---------------------------------------------------------------------------
 
+
 class TestSkillStatus:
     def test_reports_absent_when_missing(self, tmp_path, monkeypatch):
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
@@ -166,9 +170,11 @@ class TestSkillStatus:
 # Round-trip via run_init + run_uninstall
 # ---------------------------------------------------------------------------
 
+
 class TestRoundTrip:
     def test_install_skill_via_run_init_then_uninstall(self, tmp_path, monkeypatch):
         from jcodemunch_mcp.cli.init import run_init, run_uninstall
+
         monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
         monkeypatch.setattr(
             "jcodemunch_mcp.cli.init._claude_md_path",
@@ -179,9 +185,16 @@ class TestRoundTrip:
 
         # Install with skills
         rc = run_init(
-            clients=["none"], claude_md="global", hooks=False, copilot_hooks=False,
-            index=False, audit=False, yes=True, no_backup=True,
-            skills=True, skills_scope="global",
+            clients=["none"],
+            claude_md="global",
+            hooks=False,
+            copilot_hooks=False,
+            index=False,
+            audit=False,
+            yes=True,
+            no_backup=True,
+            skills=True,
+            skills_scope="global",
         )
         assert rc == 0
         skill_path = tmp_path / ".claude" / "skills" / "jcodemunch" / "SKILL.md"
@@ -189,9 +202,15 @@ class TestRoundTrip:
 
         # Uninstall scrubs it
         rc = run_uninstall(
-            claude_md=False, cursor_rules=False, windsurf_rules=False,
-            agents_md=False, hooks=False, copilot_hooks=False,
-            skills=True, yes=True, no_backup=True,
+            claude_md=False,
+            cursor_rules=False,
+            windsurf_rules=False,
+            agents_md=False,
+            hooks=False,
+            copilot_hooks=False,
+            skills=True,
+            yes=True,
+            no_backup=True,
         )
         assert rc == 0
         assert not skill_path.exists(), "Skill should be removed"

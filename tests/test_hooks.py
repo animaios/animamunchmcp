@@ -13,17 +13,17 @@ import pytest
 from jcodemunch_mcp.cli.hooks import (
     _CODE_EXTENSIONS,
     _MIN_SIZE_BYTES,
-    run_pretooluse,
     run_posttooluse,
     run_precompact,
-    run_taskcomplete,
+    run_pretooluse,
     run_subagentstart,
+    run_taskcomplete,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_hook_input(tool_name: str, file_path: str, **extra) -> str:
     """Build a JSON string mimicking Claude Code hook stdin."""
@@ -37,7 +37,9 @@ def _make_hook_input(tool_name: str, file_path: str, **extra) -> str:
     return json.dumps(data)
 
 
-def _make_hook_input_with_params(tool_name: str, file_path: str, **tool_input_extra) -> str:
+def _make_hook_input_with_params(
+    tool_name: str, file_path: str, **tool_input_extra
+) -> str:
     """Build hook JSON with extra tool_input fields (offset, limit, etc.)."""
     data = {
         "session_id": "test-session",
@@ -53,9 +55,11 @@ def _run_with_stdin(func, stdin_text: str) -> tuple[int, str, str]:
     fake_in = io.StringIO(stdin_text)
     fake_out = io.StringIO()
     fake_err = io.StringIO()
-    with mock.patch.object(sys, "stdin", fake_in), \
-         mock.patch.object(sys, "stdout", fake_out), \
-         mock.patch.object(sys, "stderr", fake_err):
+    with (
+        mock.patch.object(sys, "stdin", fake_in),
+        mock.patch.object(sys, "stdout", fake_out),
+        mock.patch.object(sys, "stderr", fake_err),
+    ):
         rc = func()
     return rc, fake_out.getvalue(), fake_err.getvalue()
 
@@ -63,6 +67,7 @@ def _run_with_stdin(func, stdin_text: str) -> tuple[int, str, str]:
 # ---------------------------------------------------------------------------
 # PreToolUse tests
 # ---------------------------------------------------------------------------
+
 
 class TestPreToolUse:
     """Tests for run_pretooluse()."""
@@ -165,7 +170,9 @@ class TestPreToolUse:
             assert out == ""  # No deny
             assert "jCodemunch hint" in err
 
-    @pytest.mark.parametrize("ext", [".py", ".ts", ".go", ".rs", ".java", ".cpp", ".rb"])
+    @pytest.mark.parametrize(
+        "ext", [".py", ".ts", ".go", ".rs", ".java", ".cpp", ".rb"]
+    )
     def test_code_extensions_covered(self, ext, tmp_path):
         """Spot-check that major code extensions are in the set."""
         assert ext in _CODE_EXTENSIONS
@@ -183,6 +190,7 @@ class TestPreToolUse:
 # ---------------------------------------------------------------------------
 # PreToolUse: Grep → jCodemunch nudge
 # ---------------------------------------------------------------------------
+
 
 def _make_grep_input(pattern: str, *, path: str = "", cwd: str = "") -> str:
     """Build hook JSON mimicking a Claude Code Grep PreToolUse call."""
@@ -247,8 +255,12 @@ class TestGrepNudge:
 
     def test_silent_when_nothing_indexed(self, monkeypatch):
         """No indexed repos → jcm can't help → no nudge."""
-        monkeypatch.setattr("jcodemunch_mcp.cli.hooks._indexed_source_roots", lambda: [])
-        rc, out, err = _run_with_stdin(run_pretooluse, _make_grep_input("foo", cwd="/tmp"))
+        monkeypatch.setattr(
+            "jcodemunch_mcp.cli.hooks._indexed_source_roots", lambda: []
+        )
+        rc, out, err = _run_with_stdin(
+            run_pretooluse, _make_grep_input("foo", cwd="/tmp")
+        )
         assert rc == 0
         assert err == ""
 
@@ -267,11 +279,15 @@ class TestGrepNudge:
 
     def test_store_failure_is_silent(self, monkeypatch):
         """If the index store blows up, the Grep is allowed without a nudge."""
+
         def boom():
             raise RuntimeError("store unavailable")
+
         # _indexed_source_roots swallows internally, but guard the contract too.
         monkeypatch.setattr("jcodemunch_mcp.cli.hooks._indexed_source_roots", boom)
-        rc, out, err = _run_with_stdin(run_pretooluse, _make_grep_input("foo", cwd="/x"))
+        rc, out, err = _run_with_stdin(
+            run_pretooluse, _make_grep_input("foo", cwd="/x")
+        )
         assert rc == 0  # never crashes the agent's Grep
 
     def test_grep_never_blocks(self, tmp_path, monkeypatch):
@@ -290,6 +306,7 @@ class TestGrepNudge:
 # ---------------------------------------------------------------------------
 # PreToolUse: strict enforcement mode (JCODEMUNCH_ENFORCE=strict)
 # ---------------------------------------------------------------------------
+
 
 def _assert_deny(out: str) -> str:
     """Assert *out* is a Claude Code PreToolUse deny decision; return the reason."""
@@ -379,7 +396,9 @@ class TestStrictEnforce:
         self._index(monkeypatch, tmp_path)
         f = tmp_path / "big.py"
         f.write_text("x = 1\n" * 2000)
-        rc_r, out_r, err_r = _run_with_stdin(run_pretooluse, _make_hook_input("Read", str(f)))
+        rc_r, out_r, err_r = _run_with_stdin(
+            run_pretooluse, _make_hook_input("Read", str(f))
+        )
         rc_g, out_g, err_g = _run_with_stdin(
             run_pretooluse, _make_grep_input("foo", cwd=str(tmp_path))
         )
@@ -412,6 +431,7 @@ class TestStrictEnforce:
 # PostToolUse tests
 # ---------------------------------------------------------------------------
 
+
 class TestPostToolUse:
     """Tests for run_posttooluse()."""
 
@@ -419,12 +439,14 @@ class TestPostToolUse:
         """Editing a code file triggers jcodemunch-mcp index-file."""
         f = tmp_path / "edited.py"
         f.write_text("def foo(): pass\n")
-        inp = json.dumps({
-            "hook_event_name": "PostToolUse",
-            "tool_name": "Edit",
-            "tool_input": {"file_path": str(f)},
-            "tool_response": {"success": True},
-        })
+        inp = json.dumps(
+            {
+                "hook_event_name": "PostToolUse",
+                "tool_name": "Edit",
+                "tool_input": {"file_path": str(f)},
+                "tool_response": {"success": True},
+            }
+        )
         with mock.patch("jcodemunch_mcp.cli.hooks.subprocess.Popen") as mock_popen:
             rc, out, _ = _run_with_stdin(run_posttooluse, inp)
 
@@ -437,12 +459,14 @@ class TestPostToolUse:
         """Non-code files don't trigger indexing."""
         f = tmp_path / "data.json"
         f.write_text("{}")
-        inp = json.dumps({
-            "hook_event_name": "PostToolUse",
-            "tool_name": "Write",
-            "tool_input": {"file_path": str(f)},
-            "tool_response": {"success": True},
-        })
+        inp = json.dumps(
+            {
+                "hook_event_name": "PostToolUse",
+                "tool_name": "Write",
+                "tool_input": {"file_path": str(f)},
+                "tool_response": {"success": True},
+            }
+        )
         with mock.patch("jcodemunch_mcp.cli.hooks.subprocess.Popen") as mock_popen:
             rc, out, _ = _run_with_stdin(run_posttooluse, inp)
 
@@ -468,12 +492,14 @@ class TestPostToolUse:
         """If jcodemunch-mcp is not in PATH, fail silently."""
         f = tmp_path / "code.rs"
         f.write_text("fn main() {}")
-        inp = json.dumps({
-            "hook_event_name": "PostToolUse",
-            "tool_name": "Edit",
-            "tool_input": {"file_path": str(f)},
-            "tool_response": {"success": True},
-        })
+        inp = json.dumps(
+            {
+                "hook_event_name": "PostToolUse",
+                "tool_name": "Edit",
+                "tool_input": {"file_path": str(f)},
+                "tool_response": {"success": True},
+            }
+        )
         with mock.patch(
             "jcodemunch_mcp.cli.hooks.subprocess.Popen",
             side_effect=FileNotFoundError("jcodemunch-mcp not found"),
@@ -485,14 +511,17 @@ class TestPostToolUse:
     def test_windows_creation_flags(self, tmp_path):
         """On Windows, CREATE_NO_WINDOW flag is passed."""
         import subprocess as sp
+
         f = tmp_path / "win.py"
         f.write_text("pass\n")
-        inp = json.dumps({
-            "hook_event_name": "PostToolUse",
-            "tool_name": "Write",
-            "tool_input": {"file_path": str(f)},
-            "tool_response": {"success": True},
-        })
+        inp = json.dumps(
+            {
+                "hook_event_name": "PostToolUse",
+                "tool_name": "Write",
+                "tool_input": {"file_path": str(f)},
+                "tool_response": {"success": True},
+            }
+        )
         with mock.patch("jcodemunch_mcp.cli.hooks.subprocess.Popen") as mock_popen:
             rc, _, _ = _run_with_stdin(run_posttooluse, inp)
         kwargs = mock_popen.call_args[1]
@@ -500,12 +529,13 @@ class TestPostToolUse:
 
 
 # ---------------------------------------------------------------------------
-# PreCompact tests 
+# PreCompact tests
 # ---------------------------------------------------------------------------
+
 
 class TestPreCompact:
     """Tests for run_precompact()."""
-    
+
     def test_precompact_empty_stdin(self):
         """Empty stdin returns exit 0, no stdout."""
         rc, out, _ = _run_with_stdin(run_precompact, "")
@@ -517,7 +547,7 @@ class TestPreCompact:
         rc, out, _ = _run_with_stdin(run_precompact, "invalid json")
         assert rc == 0
         assert out == ""
-    
+
     def test_precompact_with_session_data(self, monkeypatch):
         """Populate journal, run hook, verify JSON output has systemMessage."""
         from jcodemunch_mcp.tools.session_journal import get_journal
@@ -528,20 +558,15 @@ class TestPreCompact:
         journal.record_search("test_query", 2)
         journal.record_edit("src/test.py")
 
-        # Mock the get_session_snapshot function to return predictable data
-        def mock_get_session_snapshot(max_files=10, max_searches=5, max_edits=10, include_negative_evidence=True, storage_path=None):
-            return {
-                "snapshot": "## Session Snapshot (jCodemunch)\n**Duration:** 2m | **Files explored:** 1 | **Searches:** 1\n\n### Focus files (most accessed)\n- src/server.py (1 reads, last: get_file_outline)\n\n### Key searches\n- \"test_query\" → 2 results",
-                "structured": {"files_accessed": [], "key_searches": [], "dead_ends": []},
-                "_meta": {"timing_ms": 1.0}
-            }
+        # Add format_compact method to the journal instance, then mock it
+        def mock_format_compact():
+            return '## Session Snapshot (jCodemunch)\n**Duration:** 2m | **Files explored:** 1 | **Searches:** 1\n\n### Focus files (most accessed)\n- src/server.py (1 reads, last: get_file_outline)\n\n### Key searches\n- "test_query" \u2192 2 results'
 
-        monkeypatch.setattr(
-            "jcodemunch_mcp.tools.get_session_snapshot.get_session_snapshot",
-            mock_get_session_snapshot
+        journal.format_compact = mock_format_compact
+
+        rc, out, _ = _run_with_stdin(
+            run_precompact, '{"hook_event_name": "PreCompact"}'
         )
-
-        rc, out, _ = _run_with_stdin(run_precompact, '{"hook_event_name": "PreCompact"}')
         assert rc == 0
         assert out != ""
         result = json.loads(out)
@@ -557,10 +582,14 @@ class TestPreCompact:
         journal.record_edit("src/nonexistent.py")
 
         # Mock IndexStore at the storage module level (where it's imported from)
-        MockStore = type("MockStore", (), {
-            "__init__": lambda self, **kw: None,
-            "list_repos": lambda self: [],
-        })
+        MockStore = type(
+            "MockStore",
+            (),
+            {
+                "__init__": lambda self, **kw: None,
+                "list_repos": lambda self: [],
+            },
+        )
         monkeypatch.setattr("jcodemunch_mcp.storage.IndexStore", MockStore)
         result = _build_landmark_section()
         assert isinstance(result, str)
@@ -568,6 +597,7 @@ class TestPreCompact:
     def test_precompact_landmark_returns_string(self):
         """_build_landmark_section must always return a string."""
         from jcodemunch_mcp.cli.hooks import _build_landmark_section
+
         result = _build_landmark_section()
         assert isinstance(result, str)
 
@@ -576,17 +606,23 @@ class TestPreCompact:
 # Init integration: enforcement hooks
 # ---------------------------------------------------------------------------
 
+
 class TestEnforcementHooksInstall:
     """Tests for install_enforcement_hooks() in init.py."""
 
     def test_installs_enforcement_hooks(self, tmp_path):
         """Enforcement hooks are added to a clean settings file."""
-        from jcodemunch_mcp.cli.init import install_enforcement_hooks, _settings_json_path
+        from jcodemunch_mcp.cli.init import (
+            _settings_json_path,
+            install_enforcement_hooks,
+        )
 
         settings = tmp_path / "settings.json"
         settings.write_text("{}", encoding="utf-8")
 
-        with mock.patch("jcodemunch_mcp.cli.init._settings_json_path", return_value=settings):
+        with mock.patch(
+            "jcodemunch_mcp.cli.init._settings_json_path", return_value=settings
+        ):
             msg = install_enforcement_hooks(dry_run=False, backup=False)
 
         assert "PreToolUse" in msg or "PostToolUse" in msg or "PreCompact" in msg
@@ -610,7 +646,9 @@ class TestEnforcementHooksInstall:
         settings = tmp_path / "settings.json"
         settings.write_text("{}", encoding="utf-8")
 
-        with mock.patch("jcodemunch_mcp.cli.init._settings_json_path", return_value=settings):
+        with mock.patch(
+            "jcodemunch_mcp.cli.init._settings_json_path", return_value=settings
+        ):
             install_enforcement_hooks(dry_run=False, backup=False)
             msg2 = install_enforcement_hooks(dry_run=False, backup=False)
 
@@ -626,18 +664,22 @@ class TestEnforcementHooksInstall:
         settings = tmp_path / "settings.json"
         existing = {
             "hooks": {
-                "SessionStart": [{"hooks": [{"type": "command", "command": "echo hello"}]}],
+                "SessionStart": [
+                    {"hooks": [{"type": "command", "command": "echo hello"}]}
+                ],
             }
         }
         settings.write_text(json.dumps(existing), encoding="utf-8")
 
-        with mock.patch("jcodemunch_mcp.cli.init._settings_json_path", return_value=settings):
+        with mock.patch(
+            "jcodemunch_mcp.cli.init._settings_json_path", return_value=settings
+        ):
             install_enforcement_hooks(dry_run=False, backup=False)
 
         data = json.loads(settings.read_text(encoding="utf-8"))
         assert "SessionStart" in data["hooks"]  # preserved
-        assert "PreToolUse" in data["hooks"]     # added
-        assert "PostToolUse" in data["hooks"]    # added
+        assert "PreToolUse" in data["hooks"]  # added
+        assert "PostToolUse" in data["hooks"]  # added
 
     def test_dry_run(self, tmp_path):
         """Dry run doesn't write anything."""
@@ -646,7 +688,9 @@ class TestEnforcementHooksInstall:
         settings = tmp_path / "settings.json"
         settings.write_text("{}", encoding="utf-8")
 
-        with mock.patch("jcodemunch_mcp.cli.init._settings_json_path", return_value=settings):
+        with mock.patch(
+            "jcodemunch_mcp.cli.init._settings_json_path", return_value=settings
+        ):
             msg = install_enforcement_hooks(dry_run=True, backup=False)
 
         assert "would add" in msg
@@ -660,7 +704,9 @@ class TestEnforcementHooksInstall:
         settings = tmp_path / "settings.json"
         settings.write_text("{}", encoding="utf-8")
 
-        with mock.patch("jcodemunch_mcp.cli.init._settings_json_path", return_value=settings):
+        with mock.patch(
+            "jcodemunch_mcp.cli.init._settings_json_path", return_value=settings
+        ):
             install_enforcement_hooks(dry_run=False, backup=False)
 
         data = json.loads(settings.read_text(encoding="utf-8"))
@@ -677,6 +723,7 @@ class TestEnforcementHooksInstall:
 # ---------------------------------------------------------------------------
 # TaskCompleted tests
 # ---------------------------------------------------------------------------
+
 
 class TestTaskComplete:
     """Tests for run_taskcomplete()."""
@@ -696,24 +743,37 @@ class TestTaskComplete:
     def test_no_edited_files(self, monkeypatch):
         """No edited files → no output."""
         mock_journal = mock.MagicMock()
-        mock_journal.get_context.return_value = {"files_edited": [], "files_accessed": []}
-        monkeypatch.setattr("jcodemunch_mcp.cli.hooks.get_journal", lambda: mock_journal, raising=False)
+        mock_journal.get_context.return_value = {
+            "files_edited": [],
+            "files_accessed": [],
+        }
+        monkeypatch.setattr(
+            "jcodemunch_mcp.cli.hooks.get_journal", lambda: mock_journal, raising=False
+        )
 
         # Need to import get_journal in hooks context
         import jcodemunch_mcp.cli.hooks as hooks_mod
-        with mock.patch.object(hooks_mod, "get_journal", create=True, return_value=mock_journal):
-            rc, out, _ = _run_with_stdin(run_taskcomplete, '{"hook_event_name": "TaskCompleted"}')
+
+        with mock.patch.object(
+            hooks_mod, "get_journal", create=True, return_value=mock_journal
+        ):
+            rc, out, _ = _run_with_stdin(
+                run_taskcomplete, '{"hook_event_name": "TaskCompleted"}'
+            )
         assert rc == 0
 
     def test_always_returns_zero(self):
         """Hook must always return 0 to avoid blocking the agent."""
-        rc, _, _ = _run_with_stdin(run_taskcomplete, '{"hook_event_name": "TaskCompleted"}')
+        rc, _, _ = _run_with_stdin(
+            run_taskcomplete, '{"hook_event_name": "TaskCompleted"}'
+        )
         assert rc == 0
 
 
 # ---------------------------------------------------------------------------
 # SubagentStart tests
 # ---------------------------------------------------------------------------
+
 
 class TestSubagentStart:
     """Tests for run_subagentstart()."""
@@ -732,12 +792,18 @@ class TestSubagentStart:
 
     def test_no_repos(self, monkeypatch):
         """No indexed repos → no output."""
-        MockStore = type("MockStore", (), {
-            "__init__": lambda self, **kw: None,
-            "list_repos": lambda self: [],
-        })
+        MockStore = type(
+            "MockStore",
+            (),
+            {
+                "__init__": lambda self, **kw: None,
+                "list_repos": lambda self: [],
+            },
+        )
         monkeypatch.setattr("jcodemunch_mcp.storage.IndexStore", MockStore)
-        rc, out, _ = _run_with_stdin(run_subagentstart, '{"hook_event_name": "SubagentStart"}')
+        rc, out, _ = _run_with_stdin(
+            run_subagentstart, '{"hook_event_name": "SubagentStart"}'
+        )
         assert rc == 0
         assert out == ""
 
@@ -747,20 +813,33 @@ class TestSubagentStart:
 
         mock_index = mock.MagicMock(spec=CodeIndex)
         mock_index.symbols = [
-            {"id": "a", "name": "main", "kind": "function", "file": "main.py", "line": 1, "language": "python"},
+            {
+                "id": "a",
+                "name": "main",
+                "kind": "function",
+                "file": "main.py",
+                "line": 1,
+                "language": "python",
+            },
         ]
         mock_index.source_files = ["main.py"]
         mock_index.imports = {}
         mock_index.alias_map = None
 
-        MockStore = type("MockStore", (), {
-            "__init__": lambda self, **kw: None,
-            "list_repos": lambda self: [{"owner": "test", "name": "repo"}],
-            "load_index": lambda self, owner, name: mock_index,
-        })
+        MockStore = type(
+            "MockStore",
+            (),
+            {
+                "__init__": lambda self, **kw: None,
+                "list_repos": lambda self: [{"owner": "test", "name": "repo"}],
+                "load_index": lambda self, owner, name: mock_index,
+            },
+        )
         monkeypatch.setattr("jcodemunch_mcp.storage.IndexStore", MockStore)
 
-        rc, out, _ = _run_with_stdin(run_subagentstart, '{"hook_event_name": "SubagentStart"}')
+        rc, out, _ = _run_with_stdin(
+            run_subagentstart, '{"hook_event_name": "SubagentStart"}'
+        )
         assert rc == 0
         if out:
             result = json.loads(out)
@@ -771,5 +850,7 @@ class TestSubagentStart:
 
     def test_always_returns_zero(self):
         """Hook must always return 0 to avoid blocking the agent."""
-        rc, _, _ = _run_with_stdin(run_subagentstart, '{"hook_event_name": "SubagentStart"}')
+        rc, _, _ = _run_with_stdin(
+            run_subagentstart, '{"hook_event_name": "SubagentStart"}'
+        )
         assert rc == 0

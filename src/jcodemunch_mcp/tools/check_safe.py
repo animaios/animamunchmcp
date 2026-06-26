@@ -224,11 +224,12 @@ def _gather_signals(
 
     # ── File-level importers (cross_repo when requested) ─────────────────
     try:
-        from .find_importers import find_importers  # noqa: PLC0415
+        from .find_references import find_references  # noqa: PLC0415
 
-        importers_out = find_importers(
+        importers_out = find_references(
             repo=f"{owner}/{name}",
             file_path=target_file,
+            mode="importers",
             cross_repo=cross_repo,
             storage_path=storage_path,
         )

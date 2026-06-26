@@ -316,7 +316,7 @@ def _nudge_grep(tool_input: dict, cwd: str) -> int:
         "routes first, since they're tighter and credited (raw Grep is neither):\n"
         "  - search_text     : same regex/substring scan, ranked + winnowed\n"
         "  - search_symbols  : when hunting a definition (function/class/const/type)\n"
-        "  - find_references / find_importers : 'where is X used / who imports this'\n"
+        "  - find_references (mode=importers) : 'who imports this file'\n"
         "Fall back to Grep only once those come up empty.",
         file=sys.stderr,
     )
@@ -335,7 +335,7 @@ def _strict_grep(tool_input: dict, cwd: str) -> int:
     return _emit_pretooluse_deny(
         f"jCodemunch strict mode: this Grep{for_pat} targets an indexed repo. Use "
         "search_text (same scan, ranked + credited), search_symbols (definitions), "
-        "or find_references / find_importers ('where is X used / who imports this') "
+        "or find_references(mode=importers) ('who imports this file') "
         "instead. (JCODEMUNCH_ENFORCE=advisory for warn-only, =off to disable.)"
     )
 
@@ -477,27 +477,15 @@ def run_precompact() -> int:
     snapshot_text = ""
     live_context = None
     try:
-        from jcodemunch_mcp.tools.get_session_context import snapshot_from_live
+        from jcodemunch_mcp.tools.session_journal import get_journal
 
-        live = snapshot_from_live()
-        if live:
-            snapshot_text = live.get("snapshot", "")
-            live_context = live.get("_context")
+        journal = get_journal()
+        # Try to build a compact session summary from the live journal
+        snapshot_text = (
+            journal.format_compact() if hasattr(journal, "format_compact") else ""
+        )
     except Exception:
         snapshot_text = ""
-
-    if not snapshot_text:
-        try:
-            from jcodemunch_mcp.tools.get_session_context import get_session_context
-
-            snap = get_session_context(format="compact")
-            structured = snap.get("structured", {})
-            if structured.get("total_files_explored") or structured.get(
-                "total_searches"
-            ):
-                snapshot_text = snap.get("snapshot", "")
-        except Exception:
-            snapshot_text = ""
 
     used_fallback = False
     if not snapshot_text:
@@ -771,16 +759,16 @@ def run_taskcomplete() -> int:
 
         # 2. Untested symbols in edited files
         try:
-            from ..tools.get_untested_symbols import get_untested_symbols
+            from ..tools.get_dead_code_v2 import get_dead_code_v2
 
             for sf in session_files[:5]:  # Limit to avoid slow scans
                 # Convert file path to a glob pattern
                 pattern = sf.replace("\\", "/")
-                untested = get_untested_symbols(
+                untested = get_dead_code_v2(
                     repo_id, file_pattern=pattern, max_results=5
                 )
                 if untested and not untested.get("error"):
-                    syms = untested.get("untested_symbols", [])
+                    syms = untested.get("dead_symbols", [])
                     if syms:
                         diag.setdefault("untested_symbols", []).extend(syms[:5])
         except Exception:
@@ -940,18 +928,15 @@ def run_subagentstart() -> int:
     parts.append("\n### Available jCodemunch Tools")
     parts.append(
         "search_symbols, get_symbol_source, get_context_bundle, get_file_content, "
-        "search_text, get_ranked_context, find_importers, find_references, "
+        "search_text, find_references, "
         "get_dependency_graph, get_class_hierarchy, "
         "get_call_hierarchy, get_blast_radius, "
-        "get_changed_symbols, get_dead_code_v2, get_untested_symbols, "
-        "get_symbol_complexity, get_churn_rate, get_hotspots, get_repo_health, "
-        "get_coupling_metrics, get_extraction_candidates, "
+        "get_changed_symbols, get_dead_code_v2, "
+        "get_symbol_complexity, get_repo_health, "
         "plan_refactoring, "
-        "get_file_outline, get_file_tree, get_repo_outline, index_folder, "
-        "index_repo, embed_repo, suggest_queries, "
-        "get_session_context, "
-        "get_layer_violations, "
-        "get_dead_code_v2, search_columns"
+        "get_file_outline, get_file_tree, index_folder, "
+        "index_repo, embed_repo, "
+        "search_columns"
     )
 
     result = {"systemMessage": "\n".join(parts)}

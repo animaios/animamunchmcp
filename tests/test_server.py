@@ -29,67 +29,49 @@ async def test_server_lists_all_tools():
     try:
         tools = await list_tools()
 
-        assert len(tools) == 57
+        assert len(tools) == 39
 
         names = {t.name for t in tools}
         expected = {
-            "get_tectonic_map",
-            "get_blast_radius",
-            "get_file_content",
-            "index_file",
-            "find_hot_paths",
-            "get_hotspots",
-            "get_untested_symbols",
-            "get_ranked_context",
-            "get_repo_health",
-            "jcodemunch_guide",
-            "get_symbol_complexity",
-            "import_runtime_signal",
             "get_changed_symbols",
-            "find_importers",
-            "get_dependency_cycles",
-            "get_extraction_candidates",
-            "index_folder",
-            "search_columns",
             "get_symbol_provenance",
-            "get_session_context",
-            "get_project_intel",
-            "get_dead_code_v2",
-            "get_repo_map",
-            "plan_refactoring",
-            "get_call_hierarchy",
-            "summarize_repo",
-            "get_signal_chains",
-            "get_class_hierarchy",
-            "find_implementations",
-            "get_file_outline",
-            "get_layer_violations",
             "assemble_task_context",
-            "get_coupling_metrics",
-            "get_symbol_source",
-            "find_similar_symbols",
-            "index_repo",
-            "get_churn_rate",
-            "get_context_bundle",
-            "get_file_tree",
-            "get_repo_outline",
-            "get_dependency_graph",
-            "register_edit",
+            "search_columns",
             "search_ast",
-            "get_pr_risk_profile",
-            "resolve_repo",
-            "search_symbols",
-            "find_references",
-            "winnow_symbols",
-            "list_repos",
-            "digest",
-            "render_diagram",
-            "suggest_queries",
+            "index_repo",
+            "plan_refactoring",
             "embed_repo",
-            "list_workspaces",
-            "get_related_symbols",
             "check_safe",
+            "register_edit",
+            "get_repo_map",
             "search_text",
+            "resolve_repo",
+            "index_folder",
+            "get_dead_code_v2",
+            "get_pr_risk_profile",
+            "list_workspaces",
+            "get_dependency_graph",
+            "import_runtime_signal",
+            "get_project_intel",
+            "get_file_content",
+            "search_symbols",
+            "list_repos",
+            "find_hot_paths",
+            "get_call_hierarchy",
+            "get_class_hierarchy",
+            "find_references",
+            "find_similar_symbols",
+            "get_file_outline",
+            "get_tectonic_map",
+            "get_context_bundle",
+            "get_blast_radius",
+            "find_implementations",
+            "summarize_repo",
+            "get_symbol_source",
+            "get_repo_health",
+            "get_symbol_complexity",
+            "get_file_tree",
+            "index_file",
         }
         assert names == expected
         assert "test_summarizer" not in names  # disabled by default in DEFAULTS
@@ -772,16 +754,16 @@ async def test_disabled_tools_filtered_from_schema(monkeypatch):
     try:
         config_module._GLOBAL_CONFIG["disabled_tools"] = [
             "index_repo",
-            "digest",
+            "search_symbols",
         ]
 
         tools = await list_tools()
         tool_names = [t.name for t in tools]
 
         assert "index_repo" not in tool_names
-        assert "digest" not in tool_names
+        assert "search_symbols" not in tool_names
         assert "get_file_tree" in tool_names  # Not disabled
-        assert len(tools) == 55
+        assert len(tools) == 37  # 39 - 2 disabled
     finally:
         config_module._GLOBAL_CONFIG.clear()
         config_module._GLOBAL_CONFIG.update(orig_config)
@@ -789,7 +771,7 @@ async def test_disabled_tools_filtered_from_schema(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_disabled_tools_empty_all_tools_present(monkeypatch):
-    """When disabled_tools is empty, all tools are present (57 default + test_summarizer)."""
+    """When disabled_tools is empty, all tools are present (40 default + test_summarizer)."""
     from jcodemunch_mcp import config as config_module
 
     orig_config = config_module._GLOBAL_CONFIG.copy()
@@ -799,7 +781,7 @@ async def test_disabled_tools_empty_all_tools_present(monkeypatch):
         config_module._GLOBAL_CONFIG["disabled_tools"] = []
 
         tools = await list_tools()
-        assert len(tools) == 57  # 57 tools (config cleared, so disabled gate off)
+        assert len(tools) == 39  # 39 tools (config cleared, so disabled gate off)
     finally:
         config_module._GLOBAL_CONFIG.clear()
         config_module._GLOBAL_CONFIG.update(orig_config)
@@ -1178,19 +1160,3 @@ async def test_compact_schemas_off_preserves_all_params():
 # --------------------------------------------------------------------------- #
 # jcodemunch_guide (issue #255): one-line CLAUDE.md pulls latest policy       #
 # --------------------------------------------------------------------------- #
-
-
-@pytest.mark.asyncio
-async def test_jcodemunch_guide_returns_current_snippet():
-    """Tool content matches _generate_claude_md_snippet and embeds current version."""
-    from jcodemunch_mcp import __version__
-    from jcodemunch_mcp.server import _generate_claude_md_snippet
-
-    result = await call_tool("jcodemunch_guide", {})
-    payload = json.loads(result[0].text)
-
-    assert payload["version"] == __version__
-    assert payload["content"] == _generate_claude_md_snippet(missing_only=False)
-    # Sanity: snippet names a canonical tool and the running version
-    assert "search_symbols" in payload["content"]
-    assert f"v{__version__}" in payload["content"]

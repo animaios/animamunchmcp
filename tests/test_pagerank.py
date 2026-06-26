@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 
 from jcodemunch_mcp.tools.get_repo_map import get_repo_map
-from jcodemunch_mcp.tools.get_repo_outline import get_repo_outline
 from jcodemunch_mcp.tools.index_folder import index_folder
 from jcodemunch_mcp.tools.pagerank import compute_in_out_degrees, compute_pagerank
 from jcodemunch_mcp.tools.search_symbols import search_symbols
@@ -287,12 +286,12 @@ class TestSearchSymbolsSortBy:
 
 
 # ---------------------------------------------------------------------------
-# Integration tests: get_repo_outline most_central_symbols
+# Integration tests: get_repo_map(mode="outline") most_central_symbols
 # ---------------------------------------------------------------------------
 
 
-class TestRepoOutlineMostCentralSymbols:
-    """Tests for the most_central_symbols field in get_repo_outline."""
+class TestRepoMapOutlineMostCentralSymbols:
+    """Tests for the most_central_symbols field in get_repo_map(mode="outline")."""
 
     @pytest.fixture
     def indexed_repo(self, tmp_path):
@@ -307,16 +306,16 @@ class TestRepoOutlineMostCentralSymbols:
         return result["repo"], store
 
     def test_most_central_symbols_present(self, indexed_repo):
-        """get_repo_outline includes most_central_symbols when import graph exists."""
+        """get_repo_map(mode="outline") includes most_central_symbols when import graph exists."""
         repo_id, store = indexed_repo
-        result = get_repo_outline(repo_id, storage_path=str(store))
+        result = get_repo_map(repo_id, storage_path=str(store), mode="outline")
         assert "error" not in result
         assert "most_central_symbols" in result
 
     def test_most_central_symbols_shape(self, indexed_repo):
         """Each entry has symbol_id, score, kind."""
         repo_id, store = indexed_repo
-        result = get_repo_outline(repo_id, storage_path=str(store))
+        result = get_repo_map(repo_id, storage_path=str(store), mode="outline")
         for sym in result.get("most_central_symbols", []):
             assert "symbol_id" in sym
             assert "score" in sym
@@ -325,7 +324,7 @@ class TestRepoOutlineMostCentralSymbols:
     def test_most_central_top_is_most_imported_file(self, indexed_repo):
         """core.py (imported by 2 files) should contain the #1 most central symbol."""
         repo_id, store = indexed_repo
-        result = get_repo_outline(repo_id, storage_path=str(store))
+        result = get_repo_map(repo_id, storage_path=str(store), mode="outline")
         central = result.get("most_central_symbols", [])
         assert len(central) > 0
         assert "core.py" in central[0]["symbol_id"]

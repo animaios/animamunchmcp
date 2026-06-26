@@ -6,12 +6,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from jcodemunch_mcp.groq.config import GcmConfig, DEFAULT_MODEL, FAST_MODEL
-
+from jcodemunch_mcp.groq.config import DEFAULT_MODEL, FAST_MODEL, GcmConfig
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
+
 
 class TestGcmConfig:
     def test_defaults(self):
@@ -47,9 +47,11 @@ class TestGcmConfig:
 # Retriever
 # ---------------------------------------------------------------------------
 
+
 class TestRetriever:
     def test_is_github_repo(self):
         from jcodemunch_mcp.groq.retriever import _is_github_repo
+
         assert _is_github_repo("pallets/flask") is True
         assert _is_github_repo("facebook/react") is True
         assert _is_github_repo("flask") is False
@@ -61,6 +63,7 @@ class TestRetriever:
 
     def test_find_indexed_repo_match(self):
         from jcodemunch_mcp.groq.retriever import _find_indexed_repo
+
         with patch("jcodemunch_mcp.groq.retriever.list_repos") as mock_lr:
             mock_lr.return_value = {
                 "repos": [
@@ -75,11 +78,22 @@ class TestRetriever:
 
     def test_retrieve_context_formats(self):
         from jcodemunch_mcp.groq.retriever import retrieve_context
-        with patch("jcodemunch_mcp.groq.retriever.get_ranked_context") as mock_rc:
-            mock_rc.return_value = {
+
+        with patch("jcodemunch_mcp.groq.retriever.search_symbols") as mock_ss:
+            mock_ss.return_value = {
                 "context_items": [
-                    {"file": "app.py", "symbol": "create_app", "kind": "function", "source": "def create_app(): ..."},
-                    {"file": "auth.py", "symbol": "login", "kind": "function", "source": "def login(): ..."},
+                    {
+                        "file": "app.py",
+                        "symbol": "create_app",
+                        "kind": "function",
+                        "source": "def create_app(): ...",
+                    },
+                    {
+                        "file": "auth.py",
+                        "symbol": "login",
+                        "kind": "function",
+                        "source": "def login(): ...",
+                    },
                 ],
                 "tokens_used": 200,
             }
@@ -91,8 +105,9 @@ class TestRetriever:
 
     def test_retrieve_context_error(self):
         from jcodemunch_mcp.groq.retriever import retrieve_context
-        with patch("jcodemunch_mcp.groq.retriever.get_ranked_context") as mock_rc:
-            mock_rc.return_value = {"error": "not found"}
+
+        with patch("jcodemunch_mcp.groq.retriever.search_symbols") as mock_ss:
+            mock_ss.return_value = {"error": "not found"}
             text, raw = retrieve_context("x/y", "test")
             assert text == ""
             assert "error" in raw
@@ -101,6 +116,7 @@ class TestRetriever:
 # ---------------------------------------------------------------------------
 # Inference
 # ---------------------------------------------------------------------------
+
 
 class TestInference:
     def test_ask_calls_openai(self):
@@ -111,8 +127,11 @@ class TestInference:
         mock_response.choices[0].message.content = "The answer is 42."
         mock_client.chat.completions.create.return_value = mock_response
 
-        with patch("jcodemunch_mcp.groq.inference._get_client", return_value=mock_client):
+        with patch(
+            "jcodemunch_mcp.groq.inference._get_client", return_value=mock_client
+        ):
             from jcodemunch_mcp.groq.inference import ask
+
             result = ask(cfg, "context here", "what is this?")
             assert result == "The answer is 42."
             mock_client.chat.completions.create.assert_called_once()
@@ -134,8 +153,11 @@ class TestInference:
 
         mock_client.chat.completions.create.return_value = iter(chunks)
 
-        with patch("jcodemunch_mcp.groq.inference._get_client", return_value=mock_client):
+        with patch(
+            "jcodemunch_mcp.groq.inference._get_client", return_value=mock_client
+        ):
             from jcodemunch_mcp.groq.inference import ask_stream
+
             tokens = list(ask_stream(cfg, "ctx", "q"))
             assert tokens == ["Hello", " world", "!"]
 
@@ -144,9 +166,11 @@ class TestInference:
 # CLI argument parsing
 # ---------------------------------------------------------------------------
 
+
 class TestCliParser:
     def test_single_question(self):
         from jcodemunch_mcp.groq.cli import _build_parser
+
         p = _build_parser()
         args = p.parse_args(["how does auth work?", "--repo", "pallets/flask"])
         assert args.question == "how does auth work?"
@@ -155,24 +179,28 @@ class TestCliParser:
 
     def test_fast_flag(self):
         from jcodemunch_mcp.groq.cli import _build_parser
+
         p = _build_parser()
         args = p.parse_args(["test", "--fast"])
         assert args.model == FAST_MODEL
 
     def test_chat_flag(self):
         from jcodemunch_mcp.groq.cli import _build_parser
+
         p = _build_parser()
         args = p.parse_args(["--chat", "--repo", "x/y"])
         assert args.chat is True
 
     def test_version_flag(self):
         from jcodemunch_mcp.groq.cli import _build_parser
+
         p = _build_parser()
         args = p.parse_args(["--version"])
         assert args.version is True
 
     def test_custom_budget(self):
         from jcodemunch_mcp.groq.cli import _build_parser
+
         p = _build_parser()
         args = p.parse_args(["q", "--budget", "4000"])
         assert args.budget == 4000
