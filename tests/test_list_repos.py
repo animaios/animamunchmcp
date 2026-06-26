@@ -19,15 +19,17 @@ def test_repos_report_shape(tmp_path):
     assert isinstance(report, list) and report
     entry = report[0]
     assert {
-        "repo_id", "display_name", "source_root", "file_count", "symbol_count",
-        "languages", "indexed_at", "freshness", "watcher_state", "lock_holder",
+        "repo_id",
+        "display_name",
+        "source_root",
+        "file_count",
+        "symbol_count",
+        "languages",
+        "indexed_at",
+        "freshness",
     } <= entry.keys()
-    assert entry["source_root"]  # path is needed by the Console launcher
+    assert entry["source_root"]
     assert entry["symbol_count"] >= 1
     assert entry["file_count"] >= 1
     assert isinstance(entry["languages"], dict)
     assert entry["freshness"] in ("fresh", "edited_uncommitted", "stale_index")
-    assert entry["watcher_state"] in ("idle", "watching", "reindexing")
-    # Fresh, unwatched index in a throwaway store: no watcher holder.
-    assert entry["watcher_state"] == "idle"
-    assert entry["lock_holder"] is None

@@ -85,7 +85,6 @@ _CANONICAL_TOOL_NAMES: tuple[str, ...] = (
     "get_call_hierarchy",
     # Impact & Safety
     "get_blast_radius",
-    "check_rename_safe",
     "check_safe",
     "get_impact_preview",
     "get_changed_symbols",
@@ -99,8 +98,6 @@ _CANONICAL_TOOL_NAMES: tuple[str, ...] = (
     "get_coupling_metrics",
     "get_layer_violations",
     "get_extraction_candidates",
-    "get_cross_repo_map",
-    "get_group_contracts",
     "get_tectonic_map",
     "get_signal_chains",
     "render_diagram",
@@ -109,7 +106,6 @@ _CANONICAL_TOOL_NAMES: tuple[str, ...] = (
     # Quality & Metrics
     "get_symbol_complexity",
     "get_churn_rate",
-    "get_delivery_metrics",
     "get_hotspots",
     "get_repo_health",
     "get_symbol_importance",
@@ -118,36 +114,19 @@ _CANONICAL_TOOL_NAMES: tuple[str, ...] = (
     "get_untested_symbols",
     "find_similar_symbols",
     "search_ast",
-    # Diffs & Embeddings
-    "get_symbol_diff",
     "embed_repo",
-    # Utilities
     "get_session_context",
     "plan_turn",
     "register_edit",
-    "invalidate_cache",
-    "audit_agent_config",
-    "get_watch_status",
-    "analyze_perf",
-    "tune_weights",
-    "check_embedding_drift",
-    "suggest_corrections",
     # Agent stand-up briefing
     "digest",
-    # Health-radar diff (PR-time diff-grade reports)
-    "diff_health_radar",
-    # Per-file risk (powers VS Code gutter)
-    "get_file_risk",
     # Runtime tier switching
     "set_tool_tier",
     # Composite retrieval
     "winnow_symbols",
-    # Runtime trace ingest + analytics (Phases 1-6)
+    # Runtime trace ingest + analytics
     "import_runtime_signal",
-    "get_runtime_coverage",
     "find_hot_paths",
-    "find_unused_paths",
-    "get_redaction_log",
     # Self-guide (force-included; lets one-line CLAUDE.md pull full policy on demand)
     "jcodemunch_guide",
 )
@@ -200,7 +179,6 @@ _SNIPPET_TOOL_CATEGORIES: list[tuple[str, list[str]]] = [
         "Impact & Safety",
         [
             "get_blast_radius",
-            "check_rename_safe",
             "check_safe",
             "get_impact_preview",
             "get_changed_symbols",
@@ -216,13 +194,11 @@ _SNIPPET_TOOL_CATEGORIES: list[tuple[str, list[str]]] = [
             "get_coupling_metrics",
             "get_layer_violations",
             "get_extraction_candidates",
-            "get_cross_repo_map",
             "get_tectonic_map",
             "get_signal_chains",
             "render_diagram",
             "get_project_intel",
             "list_workspaces",
-            "get_group_contracts",
         ],
     ),
     (
@@ -230,11 +206,8 @@ _SNIPPET_TOOL_CATEGORIES: list[tuple[str, list[str]]] = [
         [
             "get_symbol_complexity",
             "get_churn_rate",
-            "get_delivery_metrics",
             "get_hotspots",
             "get_repo_health",
-            "diff_health_radar",
-            "get_file_risk",
             "get_symbol_importance",
             "get_repo_map",
             "find_similar_symbols",
@@ -244,7 +217,7 @@ _SNIPPET_TOOL_CATEGORIES: list[tuple[str, list[str]]] = [
             "winnow_symbols",
         ],
     ),
-    ("Diffs & Embeddings", ["get_symbol_diff", "embed_repo"]),
+    ("Diffs & Embeddings", ["embed_repo"]),
     (
         "Session-Aware Routing",
         [
@@ -255,25 +228,10 @@ _SNIPPET_TOOL_CATEGORIES: list[tuple[str, list[str]]] = [
         ],
     ),
     (
-        "Utilities",
-        [
-            "analyze_perf",
-            "tune_weights",
-            "check_embedding_drift",
-            "invalidate_cache",
-            "audit_agent_config",
-            "suggest_corrections",
-            "get_watch_status",
-        ],
-    ),
-    (
         "Runtime Trace Ingest & Analytics",
         [
             "import_runtime_signal",
-            "get_runtime_coverage",
             "find_hot_paths",
-            "find_unused_paths",
-            "get_redaction_log",
         ],
     ),
     ("Runtime Tier Switching", ["set_tool_tier"]),
@@ -316,10 +274,7 @@ _TOOL_TIER_STANDARD: frozenset[str] = _TOOL_TIER_CORE | frozenset(
         "summarize_repo",
         "embed_repo",
         "import_runtime_signal",
-        "get_runtime_coverage",
         "find_hot_paths",
-        "find_unused_paths",
-        "get_redaction_log",
         # Discovery extras
         "suggest_queries",
         "search_columns",
@@ -331,7 +286,6 @@ _TOOL_TIER_STANDARD: frozenset[str] = _TOOL_TIER_CORE | frozenset(
         "get_call_hierarchy",
         # Impact & Safety
         "get_blast_radius",
-        "check_rename_safe",
         "check_safe",
         "get_impact_preview",
         "get_changed_symbols",
@@ -352,24 +306,20 @@ _TOOL_TIER_STANDARD: frozenset[str] = _TOOL_TIER_CORE | frozenset(
         # Architecture
         "get_dependency_cycles",
         "get_coupling_metrics",
-        "get_cross_repo_map",
         "render_diagram",
         "get_project_intel",
-        # Utilities
-        "invalidate_cache",
-        "get_watch_status",
-        "analyze_perf",
-        "tune_weights",
-        "check_embedding_drift",
-        "suggest_corrections",
         # Agent stand-up briefing
         "digest",
-        # Per-file risk (powers VS Code gutter)
-        "get_file_risk",
     }
 )
 
 # full = everything (no filter applied)
+
+# TODO: Purge the entire tiering system (tool_profile / core/standard/full).
+# No one uses it — plan_turn(model=) and set_tool_tier are vestigial.
+# Collapse to a single flat tool surface and delete _TOOL_TIER_CORE,
+# _TOOL_TIER_STANDARD, _ALWAYS_PRESENT_TOOLS, _UNDISABLEABLE_TOOLS,
+# _PROFILE_TIERS, and the tier-filtering logic in _build_tools_list.
 
 _PROFILE_TIERS: dict[str, frozenset[str] | None] = {
     "core": _TOOL_TIER_CORE,
@@ -828,10 +778,6 @@ _EXCLUDED_FROM_STRICT = frozenset(
         "index_repo",
         "index_folder",
         "index_file",
-        "invalidate_cache",
-        "analyze_perf",
-        "tune_weights",
-        "check_embedding_drift",
     }
 )
 
@@ -1341,35 +1287,6 @@ def _build_tools_list() -> list[Tool]:
             },
         ),
         Tool(
-            name="get_runtime_coverage",
-            description=(
-                "Runtime coverage histogram for a repo or a single file: count of "
-                "indexed symbols with vs without runtime evidence, plus the diagnostic "
-                "list of unmapped runtime spans (likely reflective dispatch the AST "
-                "missed). Pairs with Phase 2's per-result _runtime_confidence stamping. "
-                "Returns coverage_pct=0 with sources=[] when no traces have been ingested."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository identifier (owner/name)",
-                    },
-                    "file_path": {
-                        "type": "string",
-                        "description": "Optional repo-relative file path. When set, scopes the histogram to this file.",
-                    },
-                    "unmapped_limit": {
-                        "type": "integer",
-                        "description": "Cap on the unmapped_runtime list (default 50)",
-                        "default": 50,
-                    },
-                },
-                "required": ["repo"],
-            },
-        ),
-        Tool(
             name="find_hot_paths",
             description=(
                 "Top-N symbols ranked by total runtime hit count across ingested traces, "
@@ -1399,79 +1316,6 @@ def _build_tools_list() -> list[Tool]:
             },
         ),
         Tool(
-            name="find_unused_paths",
-            description=(
-                "Symbols with zero (or stale) runtime hits over the look-back window. "
-                "Distinct from get_dead_code_v2: this surfaces code that's reachable on "
-                "paper but never executed — only possible to detect with runtime data. "
-                "Excludes test files and entry-point filenames by default. Returns an "
-                "empty results list when no traces have been ingested (refuses to flag "
-                "every symbol as 'unused' against an empty runtime baseline)."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository identifier (owner/name)",
-                    },
-                    "since_days": {
-                        "type": "integer",
-                        "description": "Look-back window in days (default 90)",
-                        "default": 90,
-                    },
-                    "include_tests": {
-                        "type": "boolean",
-                        "description": "Include symbols in test files",
-                        "default": False,
-                    },
-                    "include_entry_points": {
-                        "type": "boolean",
-                        "description": "Include symbols in entry-point filenames (main.py, wsgi.py, etc.)",
-                        "default": False,
-                    },
-                    "max_results": {
-                        "type": "integer",
-                        "description": "Cap on returned rows (default 200, max 1000)",
-                        "default": 200,
-                    },
-                },
-                "required": ["repo"],
-            },
-        ),
-        Tool(
-            name="get_redaction_log",
-            description=(
-                "Per-pattern PII redaction counts from runtime_redaction_log. "
-                "Operators run this to verify the redaction chokepoint is firing on "
-                "production traffic — covers the OTel / SQL / stack ingest paths "
-                "(file-based or HTTP live-ingest, Phase 6). Returns "
-                "{patterns: [{source, pattern, count, last_redacted}], "
-                "total_redactions, sources}. Empty patterns list = either no traffic "
-                "yet, or JCODEMUNCH_RUNTIME_REDACT was disabled."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository identifier (owner/name)",
-                    },
-                    "source": {
-                        "type": "string",
-                        "enum": ["otel", "sql_log", "stack_log", "apm"],
-                        "description": "Optional filter to a single source label",
-                    },
-                    "since_days": {
-                        "type": "integer",
-                        "description": "Lookback window for last_redacted filter (default 30)",
-                        "default": 30,
-                    },
-                },
-                "required": ["repo"],
-            },
-        ),
-        Tool(
             name="list_repos",
             description=(
                 "List all indexed repositories. "
@@ -1481,16 +1325,6 @@ def _build_tools_list() -> list[Tool]:
                 "call ToolSearch to load their schemas first."
                 if config_module.get("discovery_hint", True)
                 else "List all indexed repositories."
-            ),
-            inputSchema={"type": "object", "properties": {}},
-        ),
-        Tool(
-            name="get_watch_status",
-            description=(
-                "Report watch-all daemon coverage: every locally-indexed repo, "
-                "each repo's staleness / reindex-in-progress state, and the "
-                "OS-level service status. Call before relying on index freshness "
-                "when you suspect files may have changed since the last index."
             ),
             inputSchema={"type": "object", "properties": {}},
         ),
@@ -1759,20 +1593,6 @@ def _build_tools_list() -> list[Tool]:
             },
         ),
         Tool(
-            name="invalidate_cache",
-            description="Delete the index and cached files for a repository. Forces a full re-index on next index_repo or index_folder call.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository identifier (owner/repo or just repo name)",
-                    }
-                },
-                "required": ["repo"],
-            },
-        ),
-        Tool(
             name="search_text",
             description="Full-text search across indexed file contents. Useful when symbol search misses (e.g., string literals, comments, config values). Supports regex (is_regex=true) and context lines around matches (context_lines=N, like grep -C).",
             inputSchema={
@@ -2003,102 +1823,12 @@ def _build_tools_list() -> list[Tool]:
             },
         ),
         Tool(
-            name="analyze_perf",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "window": {
-                        "type": "string",
-                        "enum": ["session", "1h", "24h", "7d", "all"],
-                        "default": "session",
-                        "description": "session = in-memory ring; others read telemetry.db.",
-                    },
-                    "top": {
-                        "type": "integer",
-                        "default": 20,
-                        "description": "Cap on slowest tools to return.",
-                    },
-                    "tool": {
-                        "type": "string",
-                        "description": "Restrict the analysis to a single tool name.",
-                    },
-                    "compare_release": {
-                        "type": "string",
-                        "description": 'Compare current session against a saved baseline at benchmarks/token_baselines/v{version}.json (e.g. "1.74.0"). Adds baseline_diff to the response with per-tool deltas in tokens_saved and latency.',
-                    },
-                    "ledger": {
-                        "type": "boolean",
-                        "default": False,
-                        "description": "Include ranking_ledger summary (per-repo and per-tool event counts, average confidence, identity hits, semantic usage). Reads telemetry.db ranking_events table populated since v1.78.0; requires perf_telemetry_enabled.",
-                    },
-                },
-            },
-        ),
-        Tool(
-            name="check_embedding_drift",
-            description="Pin (or re-check) a 16-string canary against the active embedding provider. On first run with capture=True (or force=True), embeds CANARY_STRINGS and persists the vectors to ~/.code-index/embed_canary.json. Subsequent calls re-embed those strings and report cosine drift; alarm fires when max drift exceeds threshold (default 0.05 = cos sim < 0.95). Use after upgrading providers, when retrieval quality drops unexpectedly, or as a periodic background check.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "capture": {
-                        "type": "boolean",
-                        "default": False,
-                        "description": "Pin a fresh canary instead of running the drift check. No-ops when a canary already exists unless force=True.",
-                    },
-                    "force": {
-                        "type": "boolean",
-                        "default": False,
-                        "description": "Re-pin the canary before checking. Use after intentional provider/model upgrades.",
-                    },
-                    "threshold": {
-                        "type": "number",
-                        "default": 0.05,
-                        "description": "Cosine-distance threshold above which the alarm fires (per-canary maximum, not mean).",
-                    },
-                },
-            },
-        ),
-        Tool(
-            name="tune_weights",
-            description="Learn per-repo retrieval weights from the v1.78.0 ranking ledger. Computes confidence correlations for the semantic and identity-match channels and writes overrides to ~/.code-index/tuning.jsonc. search_symbols reads those overrides at query time when the caller doesn't pass an explicit semantic_weight. Learns from a recency window of the ledger (default 90 days) so stale events can't anchor the weights. Safe to re-run; idempotent for stable signal.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Limit tuning to a single repo. Default: every repo present in the ledger.",
-                    },
-                    "dry_run": {
-                        "type": "boolean",
-                        "default": False,
-                        "description": "Compute proposed deltas without writing tuning.jsonc.",
-                    },
-                    "min_events": {
-                        "type": "integer",
-                        "default": 50,
-                        "description": "Skip repos with fewer ledger events than this (defends against overfitting on small samples).",
-                    },
-                    "explain": {
-                        "type": "boolean",
-                        "default": False,
-                        "description": "Include per-signal correlations (mean confidence with/without semantic and identity channels) in the response.",
-                    },
-                    "max_age_days": {
-                        "type": "integer",
-                        "default": 90,
-                        "description": "Only learn from ledger events newer than this many days. Keeps stale events from anchoring weights to an outdated query distribution. 0 = lifetime ledger.",
-                    },
-                },
-            },
-        ),
-        Tool(
             name="get_session_context",
             description=(
                 "Get the current session context — files accessed, searches performed, "
                 "and edits registered during this MCP session. Use to avoid re-reading "
                 "the same files. When format='compact', returns a ~200 token markdown "
-                "summary (formerly get_session_snapshot); when format='stats', returns "
-                "token savings and cost avoided (formerly get_session_stats)."
+                "summary (formerly get_session_snapshot)."
             ),
             inputSchema={
                 "type": "object",
@@ -2115,9 +1845,9 @@ def _build_tools_list() -> list[Tool]:
                     },
                     "format": {
                         "type": "string",
-                        "enum": ["json", "compact", "stats"],
+                        "enum": ["json", "compact"],
                         "default": "json",
-                        "description": "'json' (default) returns full session context; 'compact' returns a ~200 token markdown summary for context-compaction recovery; 'stats' returns token savings and cost avoided.",
+                        "description": "'json' (default) returns full session context; 'compact' returns a ~200 token markdown summary for context-compaction recovery.",
                     },
                     "max_searches": {
                         "type": "integer",
@@ -2135,59 +1865,6 @@ def _build_tools_list() -> list[Tool]:
                         "description": "Include dead-end searches (negative evidence) in snapshot (format='compact' only).",
                     },
                 },
-            },
-        ),
-        Tool(
-            name="get_file_risk",
-            description=(
-                "Per-symbol composite risk for one file. For each function or "
-                "method, returns a 0-100 composite score (higher = healthier; "
-                "lower = riskier) plus per-axis sub-scores (complexity, exposure, "
-                "churn, test_gap). Powers the VS Code risk-density gutter. "
-                "complexity is per-symbol (cyclomatic from the index); the other "
-                "three axes are file-level (shared across all symbols in the file) "
-                "because per-symbol caller-count needs find_references per symbol "
-                "and would be too slow for save-time refresh."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repo identifier (owner/name, full id, or bare display name).",
-                    },
-                    "file_path": {
-                        "type": "string",
-                        "description": "Path to the file within the indexed repo.",
-                    },
-                },
-                "required": ["repo", "file_path"],
-            },
-        ),
-        Tool(
-            name="diff_health_radar",
-            description=(
-                "Compare two health-radar payloads (from get_repo_health.radar) "
-                "and return axis-by-axis deltas, composite delta, grade movement, "
-                "and a one-line verdict. Pure data transform — no index access, "
-                "no I/O. Designed for PR-time diff-grade reports: run "
-                "get_repo_health on the base branch, run it on the PR branch, "
-                "pass both radar payloads here. Returns regressions/improvements "
-                "lists for axes that moved more than 3 points."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "baseline": {
-                        "type": "object",
-                        "description": "Radar payload from baseline (e.g. base branch). The `radar` field of a get_repo_health response.",
-                    },
-                    "current": {
-                        "type": "object",
-                        "description": "Radar payload from current (e.g. PR branch). The `radar` field of a get_repo_health response.",
-                    },
-                },
-                "required": ["baseline", "current"],
             },
         ),
         Tool(
@@ -2291,72 +1968,6 @@ def _build_tools_list() -> list[Tool]:
             },
         ),
         Tool(
-            name="audit_agent_config",
-            description=(
-                "Audit agent configuration files (CLAUDE.md, .cursorrules, copilot-instructions.md, etc.) "
-                "for token waste. Reports per-file token cost, stale symbol references, dead file paths, "
-                "redundancy between global and project configs, bloat patterns, and scope leaks. "
-                "Cross-references against the jcodemunch index to catch references to renamed or deleted "
-                "symbols and files that no other linter can detect."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": (
-                            "Repository identifier for cross-referencing symbols and files. "
-                            "If omitted, skips stale-reference and dead-path checks."
-                        ),
-                    },
-                    "project_path": {
-                        "type": "string",
-                        "description": "Project directory to scan for config files. Defaults to cwd.",
-                    },
-                },
-            },
-        ),
-        Tool(
-            name="suggest_corrections",
-            description=(
-                "Mine the ranking telemetry ledger for retrieval regret (re-query churn, "
-                "low confidence, thin/ambiguous results, stale-at-query, vocabulary gaps) "
-                "and return a prioritized, explainable set of SUGGESTED corrections: "
-                "CLAUDE.md routing/glossary lines (as unified-diff previews), index-freshness "
-                "hints, stale-config findings, and a dry-run ranking-weight proposal. "
-                "Read-only by charter — it never writes a user file; applying a patch is your "
-                "keystroke. Requires perf_telemetry_enabled; returns an honest hint when off."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository whose retrieval ledger to analyze.",
-                    },
-                    "project_path": {
-                        "type": "string",
-                        "description": "Project directory holding the config files to target. Defaults to cwd.",
-                    },
-                    "window_days": {
-                        "type": "integer",
-                        "description": "Rolling window of ledger history to mine (default 30).",
-                        "default": 30,
-                    },
-                    "all_time": {
-                        "type": "boolean",
-                        "description": "Ignore the window and analyze the full ledger.",
-                        "default": False,
-                    },
-                    "apply_weights": {
-                        "type": "boolean",
-                        "description": "Persist the ranking-weight proposal to the tuning.jsonc sidecar (NOT user source). User files are never written regardless.",
-                        "default": False,
-                    },
-                },
-            },
-        ),
-        Tool(
             name="get_dependency_graph",
             description="Get the file-level dependency graph for a given file. Traverses import relationships up to 3 hops. Use to understand what a file depends on ('imports'), what depends on it ('importers'), or both. Prerequisite for blast radius analysis. Set cross_repo=true to include cross-repository edges.",
             inputSchema={
@@ -2388,24 +1999,6 @@ def _build_tools_list() -> list[Tool]:
                     },
                 },
                 "required": ["repo", "file"],
-            },
-        ),
-        Tool(
-            name="get_symbol_diff",
-            description="Diff symbol sets between two indexed snapshots. Shows added, removed, and changed symbols. Branch workflow: index branch A as repo-main, index branch B as repo-feature, then diff.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo_a": {
-                        "type": "string",
-                        "description": "First repo identifier (the 'before' snapshot)",
-                    },
-                    "repo_b": {
-                        "type": "string",
-                        "description": "Second repo identifier (the 'after' snapshot)",
-                    },
-                },
-                "required": ["repo_a", "repo_b"],
             },
         ),
         Tool(
@@ -2726,38 +2319,6 @@ def _build_tools_list() -> list[Tool]:
             },
         ),
         Tool(
-            name="check_rename_safe",
-            description=(
-                "Check whether renaming a symbol to a new name would cause name collisions. "
-                "Scans the symbol's own file and every file that imports it, "
-                "looking for an existing symbol with the proposed new name. "
-                "Returns safe=true when no collisions are found. "
-                "Run this before any rename/refactor to avoid silent breakage. "
-                "For a full rename plan with edits, use plan_refactoring."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository identifier (owner/repo or just repo name)",
-                    },
-                    "symbol_id": {
-                        "type": "string",
-                        "description": (
-                            "Symbol ID to rename (e.g. 'src/utils.py::helper#function'). "
-                            "Bare name accepted when unambiguous."
-                        ),
-                    },
-                    "new_name": {
-                        "type": "string",
-                        "description": "Proposed new symbol name (not a full ID, just the name).",
-                    },
-                },
-                "required": ["repo", "symbol_id", "new_name"],
-            },
-        ),
-        Tool(
             name="check_safe",
             description=(
                 "Composite preflight: can this symbol be safely deleted or edited? "
@@ -3033,43 +2594,6 @@ def _build_tools_list() -> list[Tool]:
                     },
                 },
                 "required": ["repo", "target"],
-            },
-        ),
-        Tool(
-            name="get_delivery_metrics",
-            description=(
-                "Quantify durable-change delivery over a window: of the non-merge commits "
-                "in the last window_days, how many landed and stuck (commits_durable) vs were "
-                "reverted or re-touched within rework_horizon_days (churn-back). commits_durable "
-                "is the honest numerator for a cost-per-outcome ratio — divide AI spend over the "
-                "same window by it to show how much got done for how little, instead of rewarding "
-                "raw activity. Hub files co-touched by most commits (CHANGELOG, version, a "
-                "monolithic dispatch module) are excluded from the rework signal (auditable via "
-                "_meta.hub_files_excluded). Durability is trailing: commits inside the horizon are "
-                "flagged commits_provisional (not yet settled). Diagnostic trend, not a score to "
-                "chase. Requires a locally indexed repo (index_folder); GitHub-indexed repos are "
-                "not supported."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository identifier (owner/repo or just repo name)",
-                    },
-                    "window_days": {
-                        "type": "integer",
-                        "description": "Look-back window in days (default 30).",
-                        "default": 30,
-                    },
-                    "rework_horizon_days": {
-                        "type": "integer",
-                        "description": "Days within which a re-touch counts as churn-back; also "
-                        "defines the provisional tail (default 14).",
-                        "default": 14,
-                    },
-                },
-                "required": ["repo"],
             },
         ),
         Tool(
@@ -3531,86 +3055,6 @@ def _build_tools_list() -> list[Tool]:
                     },
                 },
                 "required": ["repo"],
-            },
-        ),
-        Tool(
-            name="get_cross_repo_map",
-            description=(
-                "Return which indexed repos depend on which other indexed repos at the package level. "
-                "Shows the full cross-repository dependency map based on package names extracted from "
-                "manifest files (pyproject.toml, package.json, go.mod, Cargo.toml, etc.). "
-                "Use to visualize how your indexed repos are interconnected. "
-                "Pass repo to filter to a single repo's perspective."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Optional repo ID to filter. If omitted, returns the full cross-repo map.",
-                    },
-                },
-            },
-        ),
-        Tool(
-            name="get_group_contracts",
-            description=(
-                "Surface the de-facto API contracts across a group of indexed repos. Walks each "
-                "member's named imports, resolves them to symbols in other members via the package "
-                "registry, and classifies each shared symbol into one of four verdict tiers: "
-                "'de_facto_api' (used by ≥min_importers external repos), 'leaky_internal' (underscore-"
-                "prefixed or in _internal/ but imported externally — architecture violation), "
-                "'dead_contract' (declared public but unused externally; opt-in), 'version_skew' "
-                "(same name imported via multiple specifier roots — coordination risk). Attaches "
-                "stability score (churn-weighted), last breaking change (from get_symbol_provenance), "
-                "and runtime hits (when traces have been ingested). Pairs with get_cross_repo_map: "
-                "that gives the repo-level edge graph; this zooms in to the symbol-level surface."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repos": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "List of indexed repo IDs (owner/name or bare names). Must be ≥2.",
-                    },
-                    "min_importers": {
-                        "type": "integer",
-                        "description": "Minimum distinct external repo importers to surface a contract (default 2).",
-                        "default": 2,
-                    },
-                    "include_internal": {
-                        "type": "boolean",
-                        "description": "Surface leaky_internal contracts (architecture violations). Default true.",
-                        "default": True,
-                    },
-                    "include_dead_contracts": {
-                        "type": "boolean",
-                        "description": "Surface public symbols with zero external importers. Default false.",
-                        "default": False,
-                    },
-                    "classify": {
-                        "type": "boolean",
-                        "description": "Attach verdict tier per contract. Default true.",
-                        "default": True,
-                    },
-                    "churn_days": {
-                        "type": "integer",
-                        "description": "Window for stability scoring (default 90).",
-                        "default": 90,
-                    },
-                    "max_contracts": {
-                        "type": "integer",
-                        "description": "Cap on returned contracts (default 50).",
-                        "default": 50,
-                    },
-                    "token_budget": {
-                        "type": "integer",
-                        "description": "Hard cap on response payload (default 4000).",
-                        "default": 4000,
-                    },
-                },
-                "required": ["repos"],
             },
         ),
         Tool(
@@ -4083,11 +3527,10 @@ complexity, churn, test gaps, and change volume. Includes actionable recommendat
 2. **get_blast_radius** on each changed file → depth-scored transitive impact + `has_test_reach` per file.
 3. **get_impact_preview** on key changed symbols → "what breaks?" analysis.
 4. **get_symbol_provenance** on unfamiliar symbols → understand why the code exists before changing it.
-5. **check_rename_safe** if any symbols were renamed → verify no broken refs.
-6. **get_untested_symbols** on affected files → flag unreached symbols in the blast radius.
-7. **get_coupling_metrics** on changed files → check if the change increases coupling.
-8. **get_dependency_cycles** → check if the change introduces new cycles.
-9. **search_ast** with `category='security'` on changed files → catch hardcoded secrets or eval() calls in the diff.
+5. **get_untested_symbols** on affected files → flag unreached symbols in the blast radius.
+6. **get_coupling_metrics** on changed files → check if the change increases coupling.
+7. **get_dependency_cycles** → check if the change introduces new cycles.
+8. **search_ast** with `category='security'` on changed files → catch hardcoded secrets or eval() calls in the diff.
 """
 
 _TRIAGE_PROMPT_TEXT = """\
@@ -4118,7 +3561,6 @@ Goal: Follow a suspected bug from symptom to root cause.
 5. **get_context_bundle** on the suspect symbol → full source + imports in one call.
 6. **find_references** for the symbol name → all files that reference it.
 7. **get_blast_radius** on the suspect file → what else could be affected?
-8. **get_symbol_diff** if a recent change is suspected → compare current vs. previous version.
 """
 
 
@@ -4190,9 +3632,6 @@ _AUTO_WATCH_EXCLUDED = frozenset(
         "list_repos",
         "get_session_context",
         "index_file",  # path arg is a file path, not a folder; requires repo already indexed
-        "analyze_perf",
-        "tune_weights",
-        "check_embedding_drift",
     }
 )
 
@@ -4614,18 +4053,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     storage_path=storage_path,
                 )
             )
-        elif name == "get_runtime_coverage":
-            from .tools.get_runtime_coverage import get_runtime_coverage
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    get_runtime_coverage,
-                    repo=arguments["repo"],
-                    file_path=arguments.get("file_path"),
-                    unmapped_limit=arguments.get("unmapped_limit", 50),
-                    storage_path=storage_path,
-                )
-            )
         elif name == "find_hot_paths":
             from .tools.find_hot_paths import find_hot_paths
 
@@ -4638,43 +4065,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     storage_path=storage_path,
                 )
             )
-        elif name == "find_unused_paths":
-            from .tools.find_unused_paths import find_unused_paths
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    find_unused_paths,
-                    repo=arguments["repo"],
-                    since_days=arguments.get("since_days", 90),
-                    include_tests=arguments.get("include_tests", False),
-                    include_entry_points=arguments.get("include_entry_points", False),
-                    max_results=arguments.get("max_results", 200),
-                    storage_path=storage_path,
-                )
-            )
-        elif name == "get_redaction_log":
-            from .tools.get_redaction_log import get_redaction_log
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    get_redaction_log,
-                    repo=arguments["repo"],
-                    source=arguments.get("source"),
-                    since_days=arguments.get("since_days", 30),
-                    storage_path=storage_path,
-                )
-            )
         elif name == "list_repos":
             from .tools.list_repos import list_repos
 
             result = await asyncio.to_thread(
                 functools.partial(list_repos, storage_path=storage_path)
-            )
-        elif name == "get_watch_status":
-            from .tools.get_watch_status import get_watch_status
-
-            result = await asyncio.to_thread(
-                functools.partial(get_watch_status, storage_path=storage_path)
             )
         elif name == "resolve_repo":
             from .tools.resolve_repo import resolve_repo
@@ -4779,17 +4174,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                         fqn=arguments.get("fqn"),
                     )
                 )
-        elif name == "invalidate_cache":
-            from .tools.invalidate_cache import invalidate_cache
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    invalidate_cache,
-                    repo=arguments["repo"],
-                    storage_path=storage_path,
-                )
-            )
-            _result_cache_invalidate()
         elif name == "search_text":
             from .tools.search_text import search_text
 
@@ -4920,46 +4304,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     storage_path=storage_path,
                 )
             )
-        elif name == "analyze_perf":
-            from .tools.analyze_perf import analyze_perf
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    analyze_perf,
-                    window=arguments.get("window", "session"),
-                    top=arguments.get("top", 20),
-                    tool=arguments.get("tool"),
-                    storage_path=storage_path,
-                    compare_release=arguments.get("compare_release"),
-                    ledger=arguments.get("ledger", False),
-                )
-            )
-        elif name == "tune_weights":
-            from .tools.tune_weights import tune_weights
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    tune_weights,
-                    repo=arguments.get("repo"),
-                    dry_run=arguments.get("dry_run", False),
-                    min_events=arguments.get("min_events", 50),
-                    explain=arguments.get("explain", False),
-                    max_age_days=arguments.get("max_age_days", 90),
-                    storage_path=storage_path,
-                )
-            )
-        elif name == "check_embedding_drift":
-            from .tools.check_embedding_drift import check_embedding_drift
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    check_embedding_drift,
-                    capture=arguments.get("capture", False),
-                    force=arguments.get("force", False),
-                    threshold=arguments.get("threshold", 0.05),
-                    storage_path=storage_path,
-                )
-            )
         elif name == "get_session_context":
             from .tools.get_session_context import get_session_context
 
@@ -4975,27 +4319,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                         "include_negative_evidence", True
                     ),
                     storage_path=storage_path,
-                )
-            )
-        elif name == "get_file_risk":
-            from .tools.get_file_risk import get_file_risk
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    get_file_risk,
-                    repo=arguments["repo"],
-                    file_path=arguments["file_path"],
-                    storage_path=storage_path,
-                )
-            )
-        elif name == "diff_health_radar":
-            from .tools.health_radar import diff_health_radar
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    diff_health_radar,
-                    baseline=arguments["baseline"],
-                    current=arguments["current"],
                 )
             )
         elif name == "digest":
@@ -5043,31 +4366,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     file_paths=arguments["file_paths"],
                     reindex=arguments.get("reindex", False),
                     storage_path=storage_path,
-                )
-            )
-        elif name == "audit_agent_config":
-            from .tools.audit_agent_config import audit_agent_config
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    audit_agent_config,
-                    repo=arguments.get("repo"),
-                    project_path=arguments.get("project_path"),
-                    storage_path=storage_path,
-                )
-            )
-        elif name == "suggest_corrections":
-            from .tools.suggest_corrections import suggest_corrections
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    suggest_corrections,
-                    repo=arguments.get("repo"),
-                    project_path=arguments.get("project_path"),
-                    storage_path=storage_path,
-                    window_days=arguments.get("window_days", 30),
-                    all_time=arguments.get("all_time", False),
-                    apply_weights=arguments.get("apply_weights", False),
                 )
             )
         elif name == "get_dependency_graph":
@@ -5186,18 +4484,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     storage_path=storage_path,
                 )
             )
-        elif name == "check_rename_safe":
-            from .tools.check_rename_safe import check_rename_safe
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    check_rename_safe,
-                    repo=arguments["repo"],
-                    symbol_id=arguments["symbol_id"],
-                    new_name=arguments["new_name"],
-                    storage_path=storage_path,
-                )
-            )
         elif name == "check_safe":
             from .tools.check_safe import check_safe
 
@@ -5295,18 +4581,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     storage_path=storage_path,
                 )
             )
-        elif name == "get_delivery_metrics":
-            from .tools.get_delivery_metrics import get_delivery_metrics
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    get_delivery_metrics,
-                    repo=arguments["repo"],
-                    window_days=arguments.get("window_days", 30),
-                    rework_horizon_days=arguments.get("rework_horizon_days", 14),
-                    storage_path=storage_path,
-                )
-            )
         elif name == "get_hotspots":
             from .tools.get_hotspots import get_hotspots
 
@@ -5328,17 +4602,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     get_repo_health,
                     repo=arguments["repo"],
                     days=arguments.get("days", 90),
-                    storage_path=storage_path,
-                )
-            )
-        elif name == "get_symbol_diff":
-            from .tools.get_symbol_diff import get_symbol_diff
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    get_symbol_diff,
-                    repo_a=arguments["repo_a"],
-                    repo_b=arguments["repo_b"],
                     storage_path=storage_path,
                 )
             )
@@ -5473,35 +4736,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     force=arguments.get("force", False),
                     storage_path=storage_path,
                     progress_cb=_progress_cb,
-                )
-            )
-        elif name == "get_cross_repo_map":
-            from .tools.get_cross_repo_map import get_cross_repo_map
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    get_cross_repo_map,
-                    repo=arguments.get("repo"),
-                    storage_path=storage_path,
-                )
-            )
-        elif name == "get_group_contracts":
-            from .tools.get_group_contracts import get_group_contracts
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    get_group_contracts,
-                    repos=arguments.get("repos") or [],
-                    min_importers=arguments.get("min_importers", 2),
-                    include_internal=arguments.get("include_internal", True),
-                    include_dead_contracts=arguments.get(
-                        "include_dead_contracts", False
-                    ),
-                    classify=arguments.get("classify", True),
-                    churn_days=arguments.get("churn_days", 90),
-                    max_contracts=arguments.get("max_contracts", 50),
-                    token_budget=arguments.get("token_budget", 4000),
-                    storage_path=storage_path,
                 )
             )
         elif name == "get_tectonic_map":
@@ -7672,10 +6906,10 @@ def main(argv: Optional[list[str]] = None):
         help="Emit structured JSON (repo_id/counts/languages/indexed_at/freshness/watcher_state/lock_holder)",
     )
 
-    # --- delete-index (CLI alias for the invalidate_cache tool) ---
+    # --- delete-index (CLI command for index deletion) ---
     delete_index_parser = subparsers.add_parser(
         "delete-index",
-        help="Delete a repository's index and cached data (CLI alias for the invalidate_cache tool)",
+        "Delete a repository's index and cached data",
     )
     delete_index_parser.add_argument(
         "repo",
@@ -7874,11 +7108,6 @@ def main(argv: Optional[list[str]] = None):
         "--index",
         action="store_true",
         help="Index the current working directory after setup",
-    )
-    init_parser.add_argument(
-        "--audit",
-        action="store_true",
-        help="Audit agent config files for token waste, stale references, and bloat",
     )
     init_parser.add_argument(
         "--dry-run",
@@ -8187,23 +7416,6 @@ def main(argv: Optional[list[str]] = None):
         help="Where to write the starter config.",
     )
 
-    # --- file-risk ---
-    file_risk_parser = subparsers.add_parser(
-        "file-risk",
-        help="Print per-symbol risk JSON for a file (used by VS Code risk-density gutter)",
-    )
-    file_risk_parser.add_argument(
-        "file", help="Path to the file within an indexed repo."
-    )
-    file_risk_parser.add_argument(
-        "--repo",
-        default=None,
-        help="Repo identifier (auto-detected from file path if omitted).",
-    )
-    file_risk_parser.add_argument(
-        "--storage-path", default=None, help="Override index storage location."
-    )
-
     # --- health ---
     health_parser = subparsers.add_parser(
         "health",
@@ -8227,42 +7439,6 @@ def main(argv: Optional[list[str]] = None):
         help="Emit only the `radar` sub-field instead of the full health response.",
     )
     health_parser.add_argument(
-        "--storage-path", default=None, help="Override index storage location."
-    )
-
-    # --- delivery ---
-    delivery_parser = subparsers.add_parser(
-        "delivery",
-        help="Print durable-change delivery metrics (and optional cost-per-outcome) for a window.",
-    )
-    delivery_parser.add_argument(
-        "repo",
-        nargs="?",
-        default=".",
-        help="Repo identifier (path, owner/name, or bare display name). Defaults to '.' (cwd).",
-    )
-    delivery_parser.add_argument(
-        "--window-days",
-        type=int,
-        default=30,
-        help="Look-back window in days (default 30).",
-    )
-    delivery_parser.add_argument(
-        "--rework-horizon-days",
-        type=int,
-        default=14,
-        help="Days within which a re-touch counts as churn-back (default 14).",
-    )
-    delivery_parser.add_argument(
-        "--cost",
-        type=float,
-        default=None,
-        help="AI spend (dollars) over the same window; prints cost-per-durable-change.",
-    )
-    delivery_parser.add_argument(
-        "--json", action="store_true", help="Emit the structured payload as JSON."
-    )
-    delivery_parser.add_argument(
         "--storage-path", default=None, help="Override index storage location."
     )
 
@@ -8338,48 +7514,6 @@ def main(argv: Optional[list[str]] = None):
         "--projects-root",
         default=None,
         help="Override Claude Code projects directory (default ~/.claude/projects).",
-    )
-
-    # --- reflect ---
-    reflect_parser = subparsers.add_parser(
-        "reflect",
-        help="Surface retrieval regret from the ranking ledger as suggested config corrections",
-    )
-    reflect_parser.add_argument(
-        "repo",
-        nargs="?",
-        default=".",
-        help="Repo identifier (path, owner/name, or bare display name). Defaults to '.' (cwd).",
-    )
-    reflect_parser.add_argument(
-        "--project-path",
-        default=None,
-        help="Directory holding the config files to target. Defaults to cwd.",
-    )
-    reflect_parser.add_argument(
-        "--window-days",
-        type=int,
-        default=30,
-        help="Rolling ledger window to mine (default 30).",
-    )
-    reflect_parser.add_argument(
-        "--all",
-        dest="all_time",
-        action="store_true",
-        help="Analyze the full ledger, ignoring the window.",
-    )
-    reflect_parser.add_argument(
-        "--apply-weights",
-        action="store_true",
-        help="Persist the ranking-weight proposal to tuning.jsonc (sidecar, not user source).",
-    )
-    reflect_parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit the structured payload as JSON instead of the human report.",
-    )
-    reflect_parser.add_argument(
-        "--storage-path", default=None, help="Override index storage location."
     )
 
     # --- whatsnew ---
@@ -8627,10 +7761,7 @@ def main(argv: Optional[list[str]] = None):
             "whatsnew",
             "receipt",
             "digest",
-            "reflect",
-            "delivery",
             "health",
-            "file-risk",
             "observatory",
             "keyring",
         }
@@ -8873,15 +8004,28 @@ def main(argv: Optional[list[str]] = None):
         return
 
     if args.command == "delete-index":
-        # CLI alias for the invalidate_cache MCP tool: resolves the repo,
-        # deletes its index + cached data, and clears in-process caches.
+        # Delete a repo's index + cached data.
         # Exit non-zero on failure so callers (e.g. the jMunch Console) can
         # detect it via the return code, not just the JSON body.
-        from .tools.invalidate_cache import invalidate_cache
+        from .storage.index_store import IndexStore
 
-        result = invalidate_cache(
-            args.repo, storage_path=os.environ.get("CODE_INDEX_PATH")
-        )
+        storage_path = os.environ.get("CODE_INDEX_PATH")
+        try:
+            store = IndexStore(storage_path=storage_path)
+            repo_arg = args.repo
+            # Parse owner/name from repo arg
+            if "/" in repo_arg:
+                owner, name = repo_arg.split("/", 1)
+            else:
+                owner, name = "", repo_arg
+            deleted = store.delete_index(owner, name)
+            result = {"success": deleted, "repo": repo_arg}
+            if deleted:
+                result["message"] = f"Deleted index for {repo_arg}"
+            else:
+                result["error"] = f"No index found for {repo_arg}"
+        except Exception as e:
+            result = {"success": False, "repo": args.repo, "error": str(e)}
         if getattr(args, "json", False):
             print(json.dumps(result, indent=2))
         elif result.get("success"):
@@ -8909,7 +8053,6 @@ def main(argv: Optional[list[str]] = None):
                 hooks=args.hooks,
                 copilot_hooks=getattr(args, "copilot_hooks", False),
                 index=args.index,
-                audit=args.audit,
                 dry_run=args.dry_run,
                 demo=args.demo,
                 yes=args.yes,
@@ -8964,7 +8107,6 @@ def main(argv: Optional[list[str]] = None):
                 hooks=True,
                 copilot_hooks=False,
                 index=False,
-                audit=False,
                 dry_run=getattr(args, "dry_run", False),
                 demo=False,
                 yes=True,
@@ -9148,16 +8290,6 @@ def main(argv: Optional[list[str]] = None):
             argv = []
         sys.exit(observatory_main(argv))
 
-    if args.command == "file-risk":
-        from .cli.file_risk import main as file_risk_main
-
-        argv = [args.file]
-        if args.repo:
-            argv += ["--repo", args.repo]
-        if args.storage_path:
-            argv += ["--storage-path", args.storage_path]
-        sys.exit(file_risk_main(argv))
-
     if args.command == "health":
         from .cli.health import main as health_main
 
@@ -9167,24 +8299,6 @@ def main(argv: Optional[list[str]] = None):
         if args.storage_path:
             argv += ["--storage-path", args.storage_path]
         sys.exit(health_main(argv))
-
-    if args.command == "delivery":
-        from .cli.delivery import main as delivery_main
-
-        argv = [
-            args.repo,
-            "--window-days",
-            str(args.window_days),
-            "--rework-horizon-days",
-            str(args.rework_horizon_days),
-        ]
-        if args.cost is not None:
-            argv += ["--cost", str(args.cost)]
-        if args.json:
-            argv += ["--json"]
-        if args.storage_path:
-            argv += ["--storage-path", args.storage_path]
-        sys.exit(delivery_main(argv))
 
     if args.command == "digest":
         from .cli.digest import main as digest_main
@@ -9200,22 +8314,6 @@ def main(argv: Optional[list[str]] = None):
         if args.storage_path:
             argv += ["--storage-path", args.storage_path]
         sys.exit(digest_main(argv))
-
-    if args.command == "reflect":
-        from .cli.reflect import main as reflect_main
-
-        argv = [args.repo, "--window-days", str(args.window_days)]
-        if args.project_path:
-            argv += ["--project-path", args.project_path]
-        if args.all_time:
-            argv += ["--all"]
-        if args.apply_weights:
-            argv += ["--apply-weights"]
-        if args.json:
-            argv += ["--json"]
-        if args.storage_path:
-            argv += ["--storage-path", args.storage_path]
-        sys.exit(reflect_main(argv))
 
     if args.command == "receipt":
         from .cli.receipt import main as receipt_main
@@ -9337,14 +8435,10 @@ def main(argv: Optional[list[str]] = None):
     elif args.command == "watch-status":
         import json as _json
 
-        from .tools.get_watch_status import get_watch_status
+        from .service_installer import service_status
 
-        print(
-            _json.dumps(
-                get_watch_status(storage_path=os.environ.get("CODE_INDEX_PATH")),
-                indent=2,
-            )
-        )
+        result = service_status()
+        print(_json.dumps(result, indent=2))
     elif args.command == "watch-claude":
         from .watcher import watch_claude_worktrees
 

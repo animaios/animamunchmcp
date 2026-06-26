@@ -59,7 +59,6 @@ _TOOL_MULTIPLIERS: dict[str, float] = {
     "get_layer_violations": 20.0,
     "get_extraction_candidates": 25.0,
     "get_signal_chains": 30.0,
-    "get_cross_repo_map": 25.0,
     "get_related_symbols": 18.0,
     # Risk / health / quality — composite metrics that have no naive
     # equivalent (you'd have to write the analysis yourself).
@@ -76,10 +75,7 @@ _TOOL_MULTIPLIERS: dict[str, float] = {
     "get_symbol_importance": 15.0,
     # Refactoring / maintenance.
     "plan_refactoring": 25.0,
-    "check_rename_safe": 15.0,
-    "get_symbol_diff": 12.0,
     "get_changed_symbols": 12.0,
-    "audit_agent_config": 8.0,
     # Indexing / repo management.
     "resolve_repo": 3.0,
     "list_repos": 2.0,

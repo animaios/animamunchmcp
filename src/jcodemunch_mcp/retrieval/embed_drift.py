@@ -80,6 +80,7 @@ def _resolve_provider() -> tuple[Optional[str], Optional[str]]:
     """Reuse embed_repo's detection so we don't drift from the live encoder."""
     try:
         from ..tools.embed_repo import _detect_provider
+
         detected = _detect_provider()
         if detected:
             return detected
@@ -90,6 +91,7 @@ def _resolve_provider() -> tuple[Optional[str], Optional[str]]:
 
 def _embed(strings: list[str], provider: str, model: str) -> list[list[float]]:
     from ..tools.embed_repo import embed_texts
+
     return embed_texts(strings, provider=provider, model=model)
 
 
@@ -182,7 +184,7 @@ def check_drift(
         return {
             "has_canary": False,
             "hint": (
-                "Call capture_canary() (or check_embedding_drift(force=True))"
+                "Call capture_canary() (or check_drift(force=True))"
                 " to pin a canary first."
             ),
         }
@@ -225,12 +227,14 @@ def check_drift(
         sim = _cosine(saved, cur)
         drift = round(1.0 - sim, 6)
         drifts.append(drift)
-        per_canary.append({
-            "index": i,
-            "string": s if len(s) <= 60 else s[:57] + "...",
-            "cosine": round(sim, 6),
-            "drift": drift,
-        })
+        per_canary.append(
+            {
+                "index": i,
+                "string": s if len(s) <= 60 else s[:57] + "...",
+                "cosine": round(sim, 6),
+                "drift": drift,
+            }
+        )
 
     if not drifts:
         return {

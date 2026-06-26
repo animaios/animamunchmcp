@@ -921,48 +921,11 @@ def run_index(*, dry_run: bool = False) -> str:
 def run_audit(
     *, project_path: Optional[str] = None, dry_run: bool = False
 ) -> list[str]:
-    """Run audit_agent_config and return formatted output lines."""
-    if dry_run:
-        return ["  would audit agent config files for token waste"]
+    """Run audit_agent_config and return formatted output lines.
 
-    try:
-        from ..tools.audit_agent_config import audit_agent_config
-
-        result = audit_agent_config(project_path=project_path or os.getcwd())
-    except Exception as e:
-        return [f"  audit failed: {e}"]
-
-    lines: list[str] = []
-    total = result.get("total_tokens", 0)
-    scanned = result.get("files_scanned", 0)
-
-    if scanned == 0:
-        lines.append("  no agent config files found")
-        return lines
-
-    lines.append(f"  scanned {scanned} file(s), {total:,} tokens total per turn")
-
-    # Token breakdown (compact)
-    for entry in result.get("token_breakdown", []):
-        scope_tag = " (global)" if entry["scope"] == "global" else ""
-        lines.append(
-            f"    {entry['tokens']:>5,} tokens  {entry['description']}{scope_tag}"
-        )
-
-    # Findings
-    findings = result.get("findings", [])
-    if findings:
-        lines.append(f"  {len(findings)} finding(s):")
-        for f in findings[:10]:  # Cap display at 10
-            icon = "!" if f["severity"] == "warning" else "-"
-            loc = f" (line {f['line']})" if f.get("line") else ""
-            lines.append(f"    {icon} [{f['category']}]{loc} {f['message']}")
-        if len(findings) > 10:
-            lines.append(f"    ... and {len(findings) - 10} more")
-    else:
-        lines.append("  no issues found")
-
-    return lines
+    .. deprecated:: Removed along with audit_agent_config tool.
+    """
+    return ["  audit_agent_config has been removed — this step is no longer available"]
 
 
 # ---------------------------------------------------------------------------
@@ -1337,27 +1300,6 @@ def run_init(
                 (
                     f"Index {os.getcwd()}",
                     "Symbol search, find-references, and repo exploration would be available immediately — without opening a single file",
-                )
-            )
-
-    # ----- Step 5: Audit agent config -----
-    do_audit = audit
-    if not do_audit and interactive:
-        print()
-        do_audit = _prompt_yn("Audit agent config files for token waste?", default=True)
-    elif not do_audit and yes and not minimal:
-        do_audit = True  # default for --yes mode (suppressed under --minimal)
-
-    if do_audit:
-        print()
-        print("  Audit:")
-        for line in run_audit(project_path=os.getcwd(), dry_run=dry_run):
-            print(line)
-        if demo:
-            _demo_actions.append(
-                (
-                    "Audit agent config files (CLAUDE.md, .cursorrules, etc.) for token waste",
-                    "Stale symbols, oversized instructions, and repeated boilerplate would be flagged — reducing context overhead on every Claude turn",
                 )
             )
 

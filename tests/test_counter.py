@@ -45,11 +45,13 @@ def _call(name, args):
     # call_tool returns a plain content list on success and a CallToolResult
     # (isError) on failure (F-P01); read the content uniformly.
     from mcp.types import CallToolResult
+
     content = res.content if isinstance(res, CallToolResult) else res
     return json.loads(content[0].text)
 
 
 # --- 1. Full surface: front door hidden, behavior unchanged ---------------- #
+
 
 def test_full_surface_hides_front_door():
     _surface(None)
@@ -67,6 +69,7 @@ def test_full_surface_count_matches_standard_default():
 
 # --- 2. Counter surface: collapse to the front door ------------------------ #
 
+
 def test_counter_surface_collapses_to_front_door():
     _surface("counter")
     names = {t.name for t in asyncio.run(server.list_tools())}
@@ -79,6 +82,7 @@ def test_counter_surface_collapses_to_front_door():
 
 
 # --- 3. order: dispatch + charter gate ------------------------------------- #
+
 
 def test_order_gate_rejects_unknown_action():
     err = counter.order_gate("does_not_exist", server._catalog_names(), False)
@@ -103,7 +107,14 @@ def test_order_gate_blocks_state_change_without_optin():
 
 def test_order_gate_exec_tripwire_is_unconditional():
     # Even with the opt-in, an exec/write verb is refused outright.
-    for verb in ("shell", "exec", "run_command", "write_file", "edit_file", "apply_patch"):
+    for verb in (
+        "shell",
+        "exec",
+        "run_command",
+        "write_file",
+        "edit_file",
+        "apply_patch",
+    ):
         assert counter.forbidden_reason(verb) is not None
         assert counter.forbidden_reason(f"do_{verb}_now") is not None
     assert counter.forbidden_reason("search_symbols") is None
@@ -122,6 +133,7 @@ def test_order_rejects_bad_args_type():
 
 # --- 4. menu: discovery ----------------------------------------------------- #
 
+
 def test_menu_lists_full_catalog():
     out = _call("menu", {})
     assert out["tool"] == "menu"
@@ -132,7 +144,7 @@ def test_menu_lists_full_catalog():
 def test_menu_query_ranks_relevant_actions():
     out = _call("menu", {"query": "dead unused code", "limit": 5})
     actions = [a["action"] for a in out["actions"]]
-    assert any(a in actions for a in ("find_dead_code", "find_unused_paths", "get_dead_code_v2"))
+    assert any(a in actions for a in ("find_dead_code", "get_dead_code_v2"))
 
 
 def test_menu_rows_flag_state_changing():
@@ -143,6 +155,7 @@ def test_menu_rows_flag_state_changing():
 
 
 # --- 5. route: intent -> action -------------------------------------------- #
+
 
 def test_route_recommends_for_intent():
     out = _call("route", {"task": "who calls this function", "repo": "x"})
@@ -157,7 +170,14 @@ def test_route_requires_task():
 
 def test_route_execute_blocks_state_changing_top_pick():
     # "reindex the repo" should map to a state-changing action; execute must refuse.
-    out = _call("route", {"task": "search for the string TODO in the code", "repo": "x", "execute": True})
+    out = _call(
+        "route",
+        {
+            "task": "search for the string TODO in the code",
+            "repo": "x",
+            "execute": True,
+        },
+    )
     # search_text is read-only and repo-scoped -> route should have executed it
     # (or returned a clean execute_error if args couldn't be shaped); never a crash.
     assert out["tool"] == "route"
@@ -166,17 +186,20 @@ def test_route_execute_blocks_state_changing_top_pick():
 def test_route_classify_intent_pure():
     names = server._catalog_names()
     recs = counter.classify_intent("find dead code in the project", names)
-    assert any(r["action"] in ("find_dead_code", "find_unused_paths") for r in recs)
+    assert any(r["action"] in ("find_dead_code", "get_dead_code_v2") for r in recs)
 
 
 # --- Charter CI gate: the Counter can never expose an exec/write action ----- #
+
 
 def test_no_catalog_action_trips_exec_tripwire():
     """jcm is read-only by charter. If a future tool ever names a write/exec
     verb, this fails loudly so order() can't silently become a mutation
     backdoor -- the safety-surface guarantee."""
     offenders = [n for n in server._catalog_names() if counter.forbidden_reason(n)]
-    assert offenders == [], f"exec/write-verb tools would be exposed by order: {offenders}"
+    assert offenders == [], (
+        f"exec/write-verb tools would be exposed by order: {offenders}"
+    )
 
 
 def test_state_changing_set_is_subset_of_catalog():

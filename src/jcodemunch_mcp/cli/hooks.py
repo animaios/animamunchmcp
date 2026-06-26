@@ -945,12 +945,12 @@ def run_subagentstart() -> int:
         "get_call_hierarchy, get_blast_radius, get_impact_preview, "
         "get_changed_symbols, get_dead_code_v2, get_untested_symbols, "
         "get_symbol_complexity, get_churn_rate, get_hotspots, get_repo_health, "
-        "get_coupling_metrics, get_extraction_candidates, check_rename_safe, "
+        "get_coupling_metrics, get_extraction_candidates, "
         "plan_refactoring, "
         "get_file_outline, get_file_tree, get_repo_outline, index_folder, "
         "index_repo, embed_repo, plan_turn, suggest_queries, "
         "get_session_context, "
-        "get_cross_repo_map, get_layer_violations, audit_agent_config, "
+        "get_layer_violations, "
         "get_dead_code_v2, search_columns"
     )
     parts.append("\nUse `plan_turn` to get recommended approach for your task.")

@@ -135,7 +135,6 @@ def _build_skill_content() -> str:
         '- "Is this identifier used anywhere?" → `check_references` (fast yes/no)',
         '- "What breaks if I change X?" → `get_blast_radius`',
         '- "Who calls this / what does this call?" → `get_call_hierarchy`',
-        '- "Is this safe to rename?" → `check_rename_safe`',
         '- "Is this safe to delete?" → `check_safe` (8 verdict tiers)',
         '- "What\'s similar to this in the codebase?" → `find_similar_symbols`',
         "",
@@ -169,13 +168,6 @@ def _build_skill_content() -> str:
         "  auto-reindexed.",
         '- Otherwise: `register_edit({"paths": [...]})` invalidates caches '
         "  and refreshes the index for those files.",
-        "",
-        "## Multi-process awareness (v1.106.0)",
-        "",
-        "If multiple agent sessions share this repo, `get_watch_status` "
-        "surfaces `watcher_holder` per repo (pid, client_id, started_at, "
-        "age_seconds). When `watched_by_another_process: true`, our watcher "
-        "is intentionally idle — another process is keeping the index fresh.",
         "",
         "## Tier model",
         "",

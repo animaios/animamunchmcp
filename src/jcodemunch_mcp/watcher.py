@@ -11,20 +11,18 @@ import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, IO, Optional
+from typing import IO, Callable, Optional
 
 from .hook_event import default_manifest_path, read_manifest
-from .tools.index_folder import index_folder
-from .tools.invalidate_cache import invalidate_cache
+from .path_map import parse_path_map, remap
 from .reindex_state import (
     WatcherChange,
-    mark_reindex_start,
     mark_reindex_done,
     mark_reindex_failed,
+    mark_reindex_start,
 )
-from .storage import IndexStore
-from .storage import process_locks
-from .path_map import parse_path_map, remap
+from .storage import IndexStore, process_locks
+from .tools.index_folder import index_folder
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +75,9 @@ except ImportError:
 _lock_fds: dict[str, int] = {}
 
 
-def _watcher_output(msg: str, *, quiet: bool, log_file_handle: Optional[IO] = None) -> None:
+def _watcher_output(
+    msg: str, *, quiet: bool, log_file_handle: Optional[IO] = None
+) -> None:
     """Route watcher output to stderr, a log file, or nowhere."""
     if log_file_handle is not None:
         print(msg, file=log_file_handle, flush=True)
@@ -134,7 +134,9 @@ def _release_lock(folder_path: str, storage_path: Optional[str]) -> None:
 
 def _watcher_signal_path(folder_path: str, storage_path: Optional[str]) -> Path:
     """Return the per-folder watcher release signal path."""
-    return process_locks.lock_path(_WATCHER_SCOPE, folder_path, storage_path).with_suffix(".signal")
+    return process_locks.lock_path(
+        _WATCHER_SCOPE, folder_path, storage_path
+    ).with_suffix(".signal")
 
 
 def _touch_watcher_signal(folder_path: str, storage_path: Optional[str]) -> None:
@@ -151,7 +153,9 @@ def _touch_watcher_signal(folder_path: str, storage_path: Optional[str]) -> None
         tmp_path.write_text(json.dumps(payload), encoding="utf-8")
         tmp_path.replace(signal_path)
     except OSError:
-        logger.debug("Failed to touch watcher signal for %s", folder_path, exc_info=True)
+        logger.debug(
+            "Failed to touch watcher signal for %s", folder_path, exc_info=True
+        )
         try:
             tmp_path.unlink()
         except OSError:
@@ -161,6 +165,7 @@ def _touch_watcher_signal(folder_path: str, storage_path: Optional[str]) -> None
 # ---------------------------------------------------------------------------
 # Idle timeout watchdog
 # ---------------------------------------------------------------------------
+
 
 async def _idle_timeout_watchdog(
     stop_event: asyncio.Event,
@@ -175,7 +180,10 @@ async def _idle_timeout_watchdog(
             break
         idle_seconds = idle_minutes * 60
         if time.monotonic() - get_last_reindex() > idle_seconds:
-            logger.info("No re-indexing activity for %s minute(s) — shutting down.", idle_minutes)
+            logger.info(
+                "No re-indexing activity for %s minute(s) — shutting down.",
+                idle_minutes,
+            )
             stop_event.set()
             break
 
@@ -183,6 +191,7 @@ async def _idle_timeout_watchdog(
 # ---------------------------------------------------------------------------
 # Core watching
 # ---------------------------------------------------------------------------
+
 
 async def _watch_single(
     folder_path: str,
@@ -196,7 +205,11 @@ async def _watch_single(
     log_file_handle: Optional[IO] = None,
 ) -> None:
     """Watch a single folder and re-index on changes."""
-    _watcher_output(f"Watching {folder_path} (debounce={debounce_ms}ms)", quiet=quiet, log_file_handle=log_file_handle)
+    _watcher_output(
+        f"Watching {folder_path} (debounce={debounce_ms}ms)",
+        quiet=quiet,
+        log_file_handle=log_file_handle,
+    )
 
     # Compute repo identifier for memory hash cache and reindex state.
     # _local_repo_id returns "local/name-hash" — the full identifier for reindex_state.
@@ -233,7 +246,11 @@ async def _watch_single(
             _hash_cache.update(idx.file_hashes)
 
     # Do an initial incremental index to ensure the index is current
-    _watcher_output(f"  Initial index for {folder_path}...", quiet=quiet, log_file_handle=log_file_handle)
+    _watcher_output(
+        f"  Initial index for {folder_path}...",
+        quiet=quiet,
+        log_file_handle=log_file_handle,
+    )
     mark_reindex_start(repo_id)
     try:
         result = await asyncio.to_thread(
@@ -247,22 +264,33 @@ async def _watch_single(
         )
         if result.get("success"):
             msg = result.get("message", f"{result.get('symbol_count', '?')} symbols")
-            _watcher_output(f"  Indexed {folder_path}: {msg} ({result.get('duration_seconds', '?')}s)", quiet=quiet, log_file_handle=log_file_handle)
+            _watcher_output(
+                f"  Indexed {folder_path}: {msg} ({result.get('duration_seconds', '?')}s)",
+                quiet=quiet,
+                log_file_handle=log_file_handle,
+            )
             # Build hash cache from the index we just created/updated
             _build_hash_cache()
             mark_reindex_done(repo_id, result)
             # Count initial index as activity (only if it actually did work)
-            if on_reindex is not None and result.get("message") != "No changes detected":
+            if (
+                on_reindex is not None
+                and result.get("message") != "No changes detected"
+            ):
                 on_reindex()
         else:
-            _watcher_output(f"  WARNING: initial index failed for {folder_path}: {result.get('error')}", quiet=quiet, log_file_handle=log_file_handle)
+            _watcher_output(
+                f"  WARNING: initial index failed for {folder_path}: {result.get('error')}",
+                quiet=quiet,
+                log_file_handle=log_file_handle,
+            )
             mark_reindex_failed(repo_id, result.get("error", "unknown error"))
     except Exception as exc:
         mark_reindex_failed(repo_id, str(exc))
         raise
 
     try:
-        from watchfiles import awatch, Change
+        from watchfiles import Change, awatch
     except ImportError as exc:
         raise ImportError(
             "watchfiles is required for the watch subcommand. "
@@ -295,18 +323,25 @@ async def _watch_single(
         _watcher_output(
             f"  Changes detected in {folder_path}: "
             f"+{n_added} ~{n_modified} -{n_deleted}",
-            quiet=quiet, log_file_handle=log_file_handle,
+            quiet=quiet,
+            log_file_handle=log_file_handle,
         )
 
         try:
             # Map watchfiles Change enum to WatcherChange objects with old_hash from memory cache
-            _change_map = {Change.added: "added", Change.modified: "modified", Change.deleted: "deleted"}
+            _change_map = {
+                Change.added: "added",
+                Change.modified: "modified",
+                Change.deleted: "deleted",
+            }
             watcher_changes: list[WatcherChange] = []
             for ct, p in relevant:
                 change_type_str = _change_map[ct]
                 if ct == Change.deleted:
                     # For deletions, old_hash comes from our memory cache
-                    old_hash = _hash_cache.get(Path(p).relative_to(folder_path).as_posix(), "")
+                    old_hash = _hash_cache.get(
+                        Path(p).relative_to(folder_path).as_posix(), ""
+                    )
                 elif ct == Change.modified:
                     # Use memory cache as the source of truth for old_hash.
                     # Do NOT fall back to reading the file: by the time watchfiles
@@ -337,7 +372,11 @@ async def _watch_single(
             if result.get("success"):
                 duration = result.get("duration_seconds", "?")
                 if result.get("message") == "No changes detected":
-                    _watcher_output(f"  Re-indexed {folder_path}: no indexable changes ({duration}s)", quiet=quiet, log_file_handle=log_file_handle)
+                    _watcher_output(
+                        f"  Re-indexed {folder_path}: no indexable changes ({duration}s)",
+                        quiet=quiet,
+                        log_file_handle=log_file_handle,
+                    )
                     mark_reindex_done(repo_id, result)
                 else:
                     changed = result.get("changed", 0)
@@ -346,7 +385,8 @@ async def _watch_single(
                     _watcher_output(
                         f"  Re-indexed {folder_path}: "
                         f"changed={changed} new={new} deleted={deleted} ({duration}s)",
-                        quiet=quiet, log_file_handle=log_file_handle,
+                        quiet=quiet,
+                        log_file_handle=log_file_handle,
                     )
                     mark_reindex_done(repo_id, result)
                     # Rebuild hash cache from the index that index_folder just wrote.
@@ -362,18 +402,24 @@ async def _watch_single(
             else:
                 _watcher_output(
                     f"  WARNING: re-index failed for {folder_path}: {result.get('error')}",
-                    quiet=quiet, log_file_handle=log_file_handle,
+                    quiet=quiet,
+                    log_file_handle=log_file_handle,
                 )
                 mark_reindex_failed(repo_id, result.get("error", "unknown error"))
         except Exception as e:
             logger.exception("Re-index error for %s: %s", folder_path, e)
-            _watcher_output(f"  ERROR: re-index failed for {folder_path}: {e}", quiet=quiet, log_file_handle=log_file_handle)
+            _watcher_output(
+                f"  ERROR: re-index failed for {folder_path}: {e}",
+                quiet=quiet,
+                log_file_handle=log_file_handle,
+            )
             mark_reindex_failed(repo_id, str(e))
 
 
 # ---------------------------------------------------------------------------
 # WatcherManager — dynamic folder watching with race-safe ensure_indexed
 # ---------------------------------------------------------------------------
+
 
 class WatcherManager:
     """Manages dynamic folder watching with race-safe reindexing.
@@ -496,7 +542,9 @@ class WatcherManager:
                 fatal=isinstance(exc, WatcherDependencyError),
             )
         except Exception:
-            logger.debug("Failed to record watcher task crash for %s", folder, exc_info=True)
+            logger.debug(
+                "Failed to record watcher task crash for %s", folder, exc_info=True
+            )
 
     def _start_watch_task(self, folder: str) -> asyncio.Task:
         task = asyncio.create_task(
@@ -708,7 +756,11 @@ class WatcherManager:
                                 # reporting healthy while tasks crash-loop (#353).
                                 self._record_task_crash(folder, exc)
                                 fatal = isinstance(exc, WatcherDependencyError)
-                                verb = "not restarting (fatal)" if fatal else "restarting..."
+                                verb = (
+                                    "not restarting (fatal)"
+                                    if fatal
+                                    else "restarting..."
+                                )
                                 _watcher_output(
                                     f"WatcherManager: task crashed for {folder}: {exc}, {verb}",
                                     quiet=self._quiet,
@@ -728,7 +780,9 @@ class WatcherManager:
                     # Retry standby folders on fallback interval
                     for folder in list(self._standby):
                         await self.maybe_takeover(folder)
-                    sleep_seconds = self._takeover_retry_seconds if self._standby else 5.0
+                    sleep_seconds = (
+                        self._takeover_retry_seconds if self._standby else 5.0
+                    )
                     await asyncio.sleep(sleep_seconds)
                 # Inner loop exited normally — reset restart counter
                 _restart_count = 0
@@ -774,6 +828,7 @@ class WatcherManager:
 # watch_folders — thin wrapper that creates a WatcherManager
 # ---------------------------------------------------------------------------
 
+
 async def watch_folders(
     paths: list[str],
     debounce_ms: int = DEFAULT_DEBOUNCE_MS,
@@ -791,12 +846,18 @@ async def watch_folders(
     for p in paths:
         folder = Path(p).expanduser().resolve()
         if not folder.is_dir():
-            _watcher_output(f"WARNING: skipping {p} — not a directory", quiet=quiet, log_file_handle=None)
+            _watcher_output(
+                f"WARNING: skipping {p} — not a directory",
+                quiet=quiet,
+                log_file_handle=None,
+            )
             continue
         resolved.append(str(folder))
 
     if not resolved:
-        _watcher_output("ERROR: no valid directories to watch", quiet=quiet, log_file_handle=None)
+        _watcher_output(
+            "ERROR: no valid directories to watch", quiet=quiet, log_file_handle=None
+        )
         if stop_event is not None:
             # Embedded mode: raise exception instead of killing the server process
             raise WatcherError("No valid directories to watch")
@@ -836,7 +897,11 @@ async def watch_folders(
         _this_handlers.append(_nh)
         _watcher_logger.propagate = False
 
-    _watcher_output(f"jcodemunch-mcp watcher: monitoring {len(resolved)} folder(s)", quiet=quiet, log_file_handle=_watcher_output_stream)
+    _watcher_output(
+        f"jcodemunch-mcp watcher: monitoring {len(resolved)} folder(s)",
+        quiet=quiet,
+        log_file_handle=_watcher_output_stream,
+    )
 
     # Handle graceful shutdown
     _external_stop = stop_event is not None
@@ -883,7 +948,11 @@ async def watch_folders(
 
     # Early exit if no folders were successfully locked
     if not manager._watched:
-        _watcher_output("All folders already have active watchers.", quiet=quiet, log_file_handle=_watcher_output_stream)
+        _watcher_output(
+            "All folders already have active watchers.",
+            quiet=quiet,
+            log_file_handle=_watcher_output_stream,
+        )
         return
 
     # Create manager run task for monitoring crashed tasks
@@ -920,7 +989,11 @@ async def watch_folders(
 
     # Clean up
     try:
-        _watcher_output("\nShutting down watchers...", quiet=quiet, log_file_handle=_watcher_output_stream)
+        _watcher_output(
+            "\nShutting down watchers...",
+            quiet=quiet,
+            log_file_handle=_watcher_output_stream,
+        )
         manager.stop()
         # Cancel all individual watch tasks
         watch_tasks = list(manager._active.values())
@@ -936,13 +1009,18 @@ async def watch_folders(
             watchdog_task.cancel()
         # Await all tasks for clean shutdown
         await asyncio.gather(
-            *watch_tasks, manager_task,
+            *watch_tasks,
+            manager_task,
             *([] if watchdog_task is None else [watchdog_task]),
             return_exceptions=True,
         )
     finally:
         # Print "Done." before closing handlers (stream is still open)
-        _watcher_output("Done.", quiet=quiet, log_file_handle=_watcher_output_stream if log_file else None)
+        _watcher_output(
+            "Done.",
+            quiet=quiet,
+            log_file_handle=_watcher_output_stream if log_file else None,
+        )
         # Clean up only handlers THIS invocation added
         _wl = logging.getLogger("jcodemunch_mcp.watcher")
         for h in _this_handlers:
@@ -954,6 +1032,7 @@ async def watch_folders(
 # ---------------------------------------------------------------------------
 # One-shot sync (watch --once)
 # ---------------------------------------------------------------------------
+
 
 async def sync_folders(
     paths: list[str],
@@ -994,7 +1073,9 @@ async def sync_folders(
                 incremental=True,
             )
             if result.get("success"):
-                msg = result.get("message", f"{result.get('symbol_count', '?')} symbols")
+                msg = result.get(
+                    "message", f"{result.get('symbol_count', '?')} symbols"
+                )
                 duration = result.get("duration_seconds", "?")
                 print(f"  {folder}: {msg} ({duration}s)", file=sys.stderr)
                 mark_reindex_done(repo_id, result)
@@ -1016,6 +1097,7 @@ async def sync_folders(
 # ---------------------------------------------------------------------------
 # worktree helpers
 # ---------------------------------------------------------------------------
+
 
 def _local_repo_id(folder_path: str, store: Optional[IndexStore] = None) -> str:
     """Compute the repo identifier that index_folder would use for a local path."""
@@ -1054,7 +1136,7 @@ def parse_git_worktrees(repo_path: str) -> set[str]:
             # Flush previous entry
             if current_path and current_path != first_path and not is_prunable:
                 worktrees.add(current_path)
-            current_path = line[len("worktree "):]
+            current_path = line[len("worktree ") :]
             if first_path is None:
                 first_path = current_path
             is_prunable = False
@@ -1151,18 +1233,19 @@ async def watch_claude_worktrees(
         store = IndexStore(base_path=storage_path)
         repo_id = _local_repo_id(remap(folder, _pairs, reverse=True), store=store)
         try:
-            result = await asyncio.to_thread(
-                invalidate_cache, repo=repo_id, storage_path=storage_path,
-            )
-            if result.get("success"):
-                print(f"  Cleaned up index for {repo_id}", file=sys.stderr)
-            else:
-                print(
-                    f"  WARNING: could not clean up index for {repo_id}: {result.get('error')}",
-                    file=sys.stderr,
-                )
+            parts = repo_id.split("/", 1)
+            owner, name = (parts[0], parts[1]) if len(parts) == 2 else ("", parts[0])
+            deleted = store.delete_index(owner, name)
         except Exception as e:
-            logger.warning("Failed to invalidate cache for %s: %s", repo_id, e)
+            logger.warning("Failed to delete index for %s: %s", repo_id, e)
+            deleted = False
+        if deleted:
+            print(f"  Cleaned up index for {repo_id}", file=sys.stderr)
+        else:
+            print(
+                f"  WARNING: could not clean up index for {repo_id}",
+                file=sys.stderr,
+            )
 
     def _ensure_watching(folder: str) -> None:
         if folder not in active and Path(folder).is_dir():
@@ -1245,7 +1328,8 @@ async def watch_claude_worktrees(
             # Only manage worktrees discovered via repos mode — don't touch
             # manifest-discovered ones. We track repos-discovered paths via task names.
             repos_known = {
-                folder for folder in active
+                folder
+                for folder in active
                 if active[folder].get_name().startswith("watch:")
             }
 
@@ -1263,7 +1347,10 @@ async def watch_claude_worktrees(
                 if task.done() and not task.cancelled():
                     exc = task.exception() if not task.cancelled() else None
                     if exc:
-                        print(f"  Watcher crashed for {folder}: {exc}, restarting...", file=sys.stderr)
+                        print(
+                            f"  Watcher crashed for {folder}: {exc}, restarting...",
+                            file=sys.stderr,
+                        )
                         active[folder] = _start_watching(folder)
 
     # --- Launch tasks ---

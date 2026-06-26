@@ -1,18 +1,26 @@
 """End-to-end server tests."""
 
-import pytest
 import json
 import threading
 from unittest.mock import AsyncMock, patch
 
-from jcodemunch_mcp.server import server, list_tools, call_tool, _coerce_arguments, _ensure_tool_schemas
+import pytest
+
+from jcodemunch_mcp.server import (
+    _coerce_arguments,
+    _ensure_tool_schemas,
+    call_tool,
+    list_tools,
+    server,
+)
 
 
 @pytest.mark.asyncio
 async def test_server_lists_all_tools():
     """Test that server lists all enabled tools (test_summarizer disabled by default)."""
-    from jcodemunch_mcp import config as config_module
     from copy import deepcopy
+
+    from jcodemunch_mcp import config as config_module
 
     orig_config = config_module._GLOBAL_CONFIG.copy()
     config_module._GLOBAL_CONFIG.clear()
@@ -21,36 +29,80 @@ async def test_server_lists_all_tools():
     try:
         tools = await list_tools()
 
-        assert len(tools) == 84  # +1: get_delivery_metrics (durable-change delivery, v1.108.69)
+        assert len(tools) == 70
 
         names = {t.name for t in tools}
         expected = {
-            "index_repo", "index_folder", "index_file", "summarize_repo", "list_repos", "resolve_repo",
-            "get_file_tree", "get_file_outline", "get_file_content", "get_symbol_source",
-            "search_symbols", "invalidate_cache", "search_text", "get_repo_outline",
-            "find_importers", "find_references", "check_references", "search_columns", "get_context_bundle",
-            "get_session_stats", "get_session_context", "get_session_snapshot", "plan_turn", "register_edit",
-            "get_dependency_graph", "get_blast_radius",
-            "get_symbol_diff", "get_class_hierarchy", "get_related_symbols", "suggest_queries",
-            "get_symbol_importance", "get_repo_map", "find_similar_symbols", "find_dead_code",
-            "get_changed_symbols", "get_ranked_context", "assemble_task_context", "embed_repo",
-            "get_cross_repo_map", "get_group_contracts",
-            "get_call_hierarchy", "get_impact_preview",
-            "get_dependency_cycles", "get_coupling_metrics", "get_layer_violations",
-            "check_rename_safe", "check_delete_safe", "check_edit_safe", "find_implementations",
-            "get_dead_code_v2", "get_extraction_candidates",
+            "index_repo",
+            "index_folder",
+            "index_file",
+            "summarize_repo",
+            "list_repos",
+            "resolve_repo",
+            "get_file_tree",
+            "get_file_outline",
+            "get_file_content",
+            "get_symbol_source",
+            "search_symbols",
+            "search_text",
+            "get_repo_outline",
+            "find_importers",
+            "find_references",
+            "check_references",
+            "search_columns",
+            "get_context_bundle",
+            "get_session_stats",
+            "get_session_context",
+            "get_session_snapshot",
+            "plan_turn",
+            "register_edit",
+            "get_dependency_graph",
+            "get_blast_radius",
+            "get_symbol_diff",
+            "get_class_hierarchy",
+            "get_related_symbols",
+            "suggest_queries",
+            "get_symbol_importance",
+            "get_repo_map",
+            "find_similar_symbols",
+            "find_dead_code",
+            "get_changed_symbols",
+            "get_ranked_context",
+            "assemble_task_context",
+            "embed_repo",
+            "get_cross_repo_map",
+            "get_group_contracts",
+            "get_call_hierarchy",
+            "get_impact_preview",
+            "get_dependency_cycles",
+            "get_coupling_metrics",
+            "get_layer_violations",
+            "check_delete_safe",
+            "check_edit_safe",
+            "find_implementations",
+            "get_dead_code_v2",
+            "get_extraction_candidates",
             "plan_refactoring",
-            "get_symbol_complexity", "get_churn_rate", "get_delivery_metrics", "get_hotspots", "get_repo_health",
-            "audit_agent_config", "get_untested_symbols", "search_ast",
-            "get_tectonic_map", "get_signal_chains", "render_diagram",
-            "get_project_intel", "list_workspaces",
-            "get_symbol_provenance", "get_pr_risk_profile",
-            "winnow_symbols", "get_watch_status", "analyze_perf", "tune_weights",
-            "check_embedding_drift", "suggest_corrections",
-            "set_tool_tier", "announce_model", "jcodemunch_guide",
-            "digest", "diff_health_radar", "get_file_risk",
-            "import_runtime_signal", "get_runtime_coverage", "find_hot_paths", "find_unused_paths",
-            "get_redaction_log",
+            "get_symbol_complexity",
+            "get_churn_rate",
+            "get_hotspots",
+            "get_repo_health",
+            "get_untested_symbols",
+            "search_ast",
+            "get_tectonic_map",
+            "get_signal_chains",
+            "render_diagram",
+            "get_project_intel",
+            "list_workspaces",
+            "get_symbol_provenance",
+            "get_pr_risk_profile",
+            "winnow_symbols",
+            "set_tool_tier",
+            "announce_model",
+            "jcodemunch_guide",
+            "digest",
+            "import_runtime_signal",
+            "find_hot_paths",
         }
         assert names == expected
         assert "test_summarizer" not in names  # disabled by default in DEFAULTS
@@ -87,7 +139,15 @@ async def test_search_symbols_tool_schema():
 
     # kind should have enum
     assert "enum" in props["kind"]
-    assert set(props["kind"]["enum"]) == {"function", "class", "method", "constant", "type", "template", "import"}
+    assert set(props["kind"]["enum"]) == {
+        "function",
+        "class",
+        "method",
+        "constant",
+        "type",
+        "template",
+        "import",
+    }
     assert "enum" in props["language"]
     assert "cpp" in props["language"]["enum"]
     assert "razor" in props["language"]["enum"]
@@ -126,7 +186,10 @@ async def test_get_file_content_tool_schema():
 @pytest.mark.asyncio
 async def test_call_tool_defaults_index_repo_incremental_true():
     """Omitted MCP args should preserve the tool's incremental default."""
-    with patch("jcodemunch_mcp.tools.index_repo.index_repo", new=AsyncMock(return_value={"success": True})) as mock_index_repo:
+    with patch(
+        "jcodemunch_mcp.tools.index_repo.index_repo",
+        new=AsyncMock(return_value={"success": True}),
+    ) as mock_index_repo:
         await call_tool("index_repo", {"url": "owner/repo"})
 
     mock_index_repo.assert_awaited_once_with(
@@ -142,7 +205,9 @@ async def test_call_tool_defaults_index_repo_incremental_true():
 @pytest.mark.asyncio
 async def test_call_tool_defaults_index_folder_incremental_true():
     """Local folder tool should also default incremental indexing to True."""
-    with patch("jcodemunch_mcp.tools.index_folder.index_folder", return_value={"success": True}) as mock_index_folder:
+    with patch(
+        "jcodemunch_mcp.tools.index_folder.index_folder", return_value={"success": True}
+    ) as mock_index_folder:
         await call_tool("index_folder", {"path": "/tmp/project"})
 
     mock_index_folder.assert_called_once_with(
@@ -161,8 +226,12 @@ async def test_call_tool_defaults_index_folder_incremental_true():
 @pytest.mark.asyncio
 async def test_call_tool_forwards_search_text_context_lines():
     """Dispatcher should pass through grouped search options unchanged."""
-    with patch("jcodemunch_mcp.tools.search_text.search_text", return_value={"result_count": 1}) as mock_search_text:
-        await call_tool("search_text", {"repo": "owner/repo", "query": "TODO", "context_lines": 3})
+    with patch(
+        "jcodemunch_mcp.tools.search_text.search_text", return_value={"result_count": 1}
+    ) as mock_search_text:
+        await call_tool(
+            "search_text", {"repo": "owner/repo", "query": "TODO", "context_lines": 3}
+        )
 
     mock_search_text.assert_called_once_with(
         repo="owner/repo",
@@ -188,7 +257,9 @@ async def test_index_folder_dispatched_via_to_thread():
         thread_used.append(threading.current_thread())
         return {"success": True}
 
-    with patch("jcodemunch_mcp.tools.index_folder.index_folder", recording_index_folder):
+    with patch(
+        "jcodemunch_mcp.tools.index_folder.index_folder", recording_index_folder
+    ):
         await call_tool("index_folder", {"path": "/tmp/project"})
 
     assert thread_used, "index_folder was never called"
@@ -200,10 +271,18 @@ async def test_index_folder_dispatched_via_to_thread():
 @pytest.mark.asyncio
 async def test_call_tool_forwards_get_file_content_bounds():
     """Dispatcher should route file-content lookups with optional bounds."""
-    with patch("jcodemunch_mcp.tools.get_file_content.get_file_content", return_value={"file": "src/main.py"}) as mock_get_file_content:
+    with patch(
+        "jcodemunch_mcp.tools.get_file_content.get_file_content",
+        return_value={"file": "src/main.py"},
+    ) as mock_get_file_content:
         await call_tool(
             "get_file_content",
-            {"repo": "owner/repo", "file_path": "src/main.py", "start_line": 5, "end_line": 8},
+            {
+                "repo": "owner/repo",
+                "file_path": "src/main.py",
+                "start_line": 5,
+                "end_line": 8,
+            },
         )
 
     mock_get_file_content.assert_called_once_with(
@@ -218,6 +297,7 @@ async def test_call_tool_forwards_get_file_content_bounds():
 # ---------------------------------------------------------------------------
 # Tests for _coerce_arguments
 # ---------------------------------------------------------------------------
+
 
 def test_coerce_boolean_strings():
     """String booleans are coerced to real booleans."""
@@ -235,7 +315,14 @@ def test_coerce_boolean_strings():
 
 def test_coerce_boolean_strings_variant_forms():
     """Boolean coercion handles '1', '0', 'yes', 'no', 'on', 'off' variants."""
-    schema = {"properties": {"a": {"type": "boolean"}, "b": {"type": "boolean"}, "c": {"type": "boolean"}, "d": {"type": "boolean"}}}
+    schema = {
+        "properties": {
+            "a": {"type": "boolean"},
+            "b": {"type": "boolean"},
+            "c": {"type": "boolean"},
+            "d": {"type": "boolean"},
+        }
+    }
     args = {"a": "1", "b": "0", "c": "yes", "d": "no"}
     result = _coerce_arguments(args, schema)
     assert result == {"a": True, "b": False, "c": True, "d": False}
@@ -277,7 +364,9 @@ def test_coerce_number_strings():
 
 def test_coerce_leaves_non_string_values_unchanged():
     """Already-typed values pass through without modification."""
-    schema = {"properties": {"enabled": {"type": "boolean"}, "count": {"type": "integer"}}}
+    schema = {
+        "properties": {"enabled": {"type": "boolean"}, "count": {"type": "integer"}}
+    }
     args = {"enabled": True, "count": 42}
     result = _coerce_arguments(args, schema)
     assert result == {"enabled": True, "count": 42}
@@ -343,10 +432,13 @@ def test_coerce_mixed_types_in_single_call():
 # Integration tests for call_tool coercion
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_call_tool_coerces_string_boolean_to_true():
     """call_tool coerces string 'true' to boolean True before dispatching."""
-    with patch("jcodemunch_mcp.tools.index_folder.index_folder", return_value={"success": True}) as mock_index_folder:
+    with patch(
+        "jcodemunch_mcp.tools.index_folder.index_folder", return_value={"success": True}
+    ) as mock_index_folder:
         # "true" as a string — how Claude Code serialises booleans
         await call_tool("index_folder", {"path": "/tmp", "follow_symlinks": "true"})
 
@@ -358,7 +450,9 @@ async def test_call_tool_coerces_string_boolean_to_true():
 @pytest.mark.asyncio
 async def test_call_tool_coerces_string_boolean_to_false():
     """call_tool coerces string 'false' to boolean False before dispatching."""
-    with patch("jcodemunch_mcp.tools.index_folder.index_folder", return_value={"success": True}) as mock_index_folder:
+    with patch(
+        "jcodemunch_mcp.tools.index_folder.index_folder", return_value={"success": True}
+    ) as mock_index_folder:
         await call_tool("index_folder", {"path": "/tmp", "incremental": "false"})
 
     mock_index_folder.assert_called_once()
@@ -369,7 +463,9 @@ async def test_call_tool_coerces_string_boolean_to_false():
 @pytest.mark.asyncio
 async def test_call_tool_coerces_string_integer():
     """call_tool coerces string integers to int before dispatching."""
-    with patch("jcodemunch_mcp.tools.search_symbols.search_symbols", return_value={}) as mock_search:
+    with patch(
+        "jcodemunch_mcp.tools.search_symbols.search_symbols", return_value={}
+    ) as mock_search:
         await call_tool(
             "search_symbols",
             {"repo": "owner/repo", "query": "foo", "max_results": "20"},
@@ -384,9 +480,13 @@ async def test_call_tool_coerces_string_integer():
 @pytest.mark.asyncio
 async def test_call_tool_validation_error_returns_json_error():
     """call_tool returns a JSON error when coerced arguments still fail validation."""
-    result = await call_tool("search_symbols", {"repo": "owner/repo", "query": "foo", "max_results": "not_an_int"})
+    result = await call_tool(
+        "search_symbols",
+        {"repo": "owner/repo", "query": "foo", "max_results": "not_an_int"},
+    )
 
     from mcp.types import CallToolResult
+
     assert isinstance(result, CallToolResult)  # errors now carry isError (F-P01)
     assert result.isError is True
     payload = json.loads(result.content[0].text)
@@ -397,10 +497,13 @@ async def test_call_tool_validation_error_returns_json_error():
 @pytest.mark.asyncio
 async def test_call_tool_unexpected_coerce_error_returns_json():
     """Unexpected errors return a generic error plus a short client-facing summary."""
-    with patch("jcodemunch_mcp.server._ensure_tool_schemas", side_effect=RuntimeError("boom")):
+    with patch(
+        "jcodemunch_mcp.server._ensure_tool_schemas", side_effect=RuntimeError("boom")
+    ):
         result = await call_tool("index_folder", {"path": "/tmp"})
 
     from mcp.types import CallToolResult
+
     assert isinstance(result, CallToolResult)
     assert result.isError is True
     payload = json.loads(result.content[0].text)
@@ -415,12 +518,16 @@ async def test_call_tool_unexpected_coerce_error_returns_json():
 async def test_call_tool_uses_our_schema_cache_not_sdk():
     """call_tool uses _ensure_tool_schemas, not the private SDK method."""
     with patch("jcodemunch_mcp.server._ensure_tool_schemas") as mock_ensure:
-        mock_ensure.return_value = {"index_folder": {"properties": {"path": {"type": "string"}}}}
-        with patch("jcodemunch_mcp.tools.index_folder.index_folder", return_value={"success": True}):
+        mock_ensure.return_value = {
+            "index_folder": {"properties": {"path": {"type": "string"}}}
+        }
+        with patch(
+            "jcodemunch_mcp.tools.index_folder.index_folder",
+            return_value={"success": True},
+        ):
             await call_tool("index_folder", {"path": "/tmp"})
 
     mock_ensure.assert_called_once()
-
 
 
 @pytest.mark.asyncio
@@ -433,9 +540,7 @@ async def test_descriptions_shared_applied_to_all_tools(monkeypatch):
 
     try:
         config_module._GLOBAL_CONFIG["descriptions"] = {
-            "_shared": {
-                "repo": "Custom shared repo description"
-            }
+            "_shared": {"repo": "Custom shared repo description"}
         }
         config_module._GLOBAL_CONFIG["disabled_tools"] = []
 
@@ -446,7 +551,9 @@ async def test_descriptions_shared_applied_to_all_tools(monkeypatch):
             if tool:
                 repo_param = tool.inputSchema.get("properties", {}).get("repo", {})
                 if repo_param:
-                    assert "Custom shared repo description" in repo_param.get("description", "")
+                    assert "Custom shared repo description" in repo_param.get(
+                        "description", ""
+                    )
     finally:
         config_module._GLOBAL_CONFIG.clear()
         config_module._GLOBAL_CONFIG.update(orig_config)
@@ -463,7 +570,7 @@ async def test_descriptions_tool_specific_overrides_shared(monkeypatch):
     try:
         config_module._GLOBAL_CONFIG["descriptions"] = {
             "_shared": {"repo": "Shared description"},
-            "search_symbols": {"repo": "search_symbols specific desc"}
+            "search_symbols": {"repo": "search_symbols specific desc"},
         }
         config_module._GLOBAL_CONFIG["disabled_tools"] = []
 
@@ -496,11 +603,9 @@ async def test_descriptions_config_overrides_tool_descriptions(monkeypatch):
         config_module._GLOBAL_CONFIG["descriptions"] = {
             "search_symbols": {
                 "_tool": "Custom search_symbols description",
-                "repo": "Custom repo description"
+                "repo": "Custom repo description",
             },
-            "_shared": {
-                "repo": "Shared custom repo desc"
-            }
+            "_shared": {"repo": "Shared custom repo desc"},
         }
         config_module._GLOBAL_CONFIG["disabled_tools"] = []
 
@@ -550,7 +655,9 @@ async def test_meta_fields_empty_list_removes_meta_envelope():
 
     try:
         config_module._GLOBAL_CONFIG["meta_fields"] = []
-        with patch("jcodemunch_mcp.tools.list_repos.list_repos", return_value={"repos": []}):
+        with patch(
+            "jcodemunch_mcp.tools.list_repos.list_repos", return_value={"repos": []}
+        ):
             result = await call_tool("list_repos", {})
         payload = json.loads(result[0].text)
         assert "_meta" not in payload
@@ -616,10 +723,14 @@ async def test_language_enum_reflects_config_limited(monkeypatch):
         config_module._GLOBAL_CONFIG["disabled_tools"] = []
 
         tools = await list_tools()
-        search_symbols_tool = next((t for t in tools if t.name == "search_symbols"), None)
+        search_symbols_tool = next(
+            (t for t in tools if t.name == "search_symbols"), None
+        )
         assert search_symbols_tool is not None
 
-        lang_param = search_symbols_tool.inputSchema.get("properties", {}).get("language", {})
+        lang_param = search_symbols_tool.inputSchema.get("properties", {}).get(
+            "language", {}
+        )
         enum_values = lang_param.get("enum", [])
 
         assert "python" in enum_values
@@ -647,8 +758,12 @@ async def test_language_enum_all_languages_when_config_none(monkeypatch):
         config_module._GLOBAL_CONFIG["disabled_tools"] = []
 
         tools = await list_tools()
-        search_symbols_tool = next((t for t in tools if t.name == "search_symbols"), None)
-        lang_param = search_symbols_tool.inputSchema.get("properties", {}).get("language", {})
+        search_symbols_tool = next(
+            (t for t in tools if t.name == "search_symbols"), None
+        )
+        lang_param = search_symbols_tool.inputSchema.get("properties", {}).get(
+            "language", {}
+        )
         enum_values = lang_param.get("enum", [])
 
         for lang in LANGUAGE_REGISTRY.keys():
@@ -668,7 +783,10 @@ async def test_disabled_tools_filtered_from_schema(monkeypatch):
     config_module._GLOBAL_CONFIG.clear()
 
     try:
-        config_module._GLOBAL_CONFIG["disabled_tools"] = ["index_repo", "search_columns"]
+        config_module._GLOBAL_CONFIG["disabled_tools"] = [
+            "index_repo",
+            "search_columns",
+        ]
 
         tools = await list_tools()
         tool_names = [t.name for t in tools]
@@ -697,7 +815,9 @@ async def test_disabled_tools_empty_all_tools_present(monkeypatch):
         config_module._GLOBAL_CONFIG["disabled_tools"] = []
 
         tools = await list_tools()
-        assert len(tools) == 85  # 84 + test_summarizer (config cleared, so disabled gate off)
+        assert (
+            len(tools) == 71
+        )  # 70 + test_summarizer (config cleared, so disabled gate off)
     finally:
         config_module._GLOBAL_CONFIG.clear()
         config_module._GLOBAL_CONFIG.update(orig_config)
@@ -712,7 +832,10 @@ async def test_tier_controls_undisableable_by_default():
     config_module._GLOBAL_CONFIG.clear()
 
     try:
-        config_module._GLOBAL_CONFIG["disabled_tools"] = ["set_tool_tier", "announce_model"]
+        config_module._GLOBAL_CONFIG["disabled_tools"] = [
+            "set_tool_tier",
+            "announce_model",
+        ]
         # allow_disabling_tier_controls not set; defaults False
 
         tools = await list_tools()
@@ -734,7 +857,10 @@ async def test_tier_controls_disableable_with_escape_hatch():
     config_module._GLOBAL_CONFIG.clear()
 
     try:
-        config_module._GLOBAL_CONFIG["disabled_tools"] = ["set_tool_tier", "announce_model"]
+        config_module._GLOBAL_CONFIG["disabled_tools"] = [
+            "set_tool_tier",
+            "announce_model",
+        ]
         config_module._GLOBAL_CONFIG["allow_disabling_tier_controls"] = True
 
         tools = await list_tools()
@@ -764,6 +890,7 @@ async def test_tier_controls_call_time_rejection_with_escape_hatch():
 
         result = await call_tool("set_tool_tier", {"tier": "core"})
         from mcp.types import CallToolResult
+
         assert isinstance(result, CallToolResult) and result.isError is True
         payload = json.loads(result.content[0].text)
         assert "error" in payload
@@ -810,7 +937,10 @@ async def test_meta_fields_null_keeps_meta_envelope():
 
     try:
         config_module._GLOBAL_CONFIG["meta_fields"] = None
-        with patch("jcodemunch_mcp.tools.list_repos.list_repos", return_value={"repos": [], "_meta": {"timing_ms": 1.0}}):
+        with patch(
+            "jcodemunch_mcp.tools.list_repos.list_repos",
+            return_value={"repos": [], "_meta": {"timing_ms": 1.0}},
+        ):
             result = await call_tool("list_repos", {})
         payload = json.loads(result[0].text)
         assert "_meta" in payload
@@ -830,7 +960,10 @@ async def test_meta_fields_empty_list_removes_meta():
 
     try:
         config_module._GLOBAL_CONFIG["meta_fields"] = []
-        with patch("jcodemunch_mcp.tools.list_repos.list_repos", return_value={"repos": [], "_meta": {"timing_ms": 5.0}}):
+        with patch(
+            "jcodemunch_mcp.tools.list_repos.list_repos",
+            return_value={"repos": [], "_meta": {"timing_ms": 5.0}},
+        ):
             result = await call_tool("list_repos", {})
         payload = json.loads(result[0].text)
         assert "_meta" not in payload
@@ -845,7 +978,9 @@ async def test_list_tools_no_suppress_meta_param():
     tools = await list_tools()
     for tool in tools:
         props = (tool.inputSchema or {}).get("properties", {})
-        assert "suppress_meta" not in props, f"{tool.name} should not have suppress_meta"
+        assert "suppress_meta" not in props, (
+            f"{tool.name} should not have suppress_meta"
+        )
 
 
 @pytest.mark.asyncio
@@ -983,19 +1118,22 @@ async def test_descriptions_flat_string_overrides_tool_description():
 @pytest.mark.asyncio
 async def test_meta_fields_partial_list_preserves_tool_fields():
     """Partial meta_fields list preserves tool-generated fields like timing_ms (E1)."""
-    import jcodemunch_mcp.tools.list_repos as list_repos_module
     import jcodemunch_mcp.server as server_module
+    import jcodemunch_mcp.tools.list_repos as list_repos_module
     from jcodemunch_mcp import config as config_module
 
     orig_config = config_module._GLOBAL_CONFIG.copy()
     orig_list_repos = list_repos_module.list_repos
 
     def fake_list_repos(storage_path=None):
-        return {"repos": [], "_meta": {
-            "timing_ms": 12.5,
-            "tokens_saved": 1000,
-            "candidates_scored": 50,
-        }}
+        return {
+            "repos": [],
+            "_meta": {
+                "timing_ms": 12.5,
+                "tokens_saved": 1000,
+                "candidates_scored": 50,
+            },
+        }
 
     try:
         config_module._GLOBAL_CONFIG.clear()
@@ -1049,12 +1187,16 @@ async def test_project_tool_disabled_rejected_in_call_tool():
         }
 
         # Attempting to call index_folder for the project should be rejected
-        result = await call_tool("index_folder", {
-            "path": "/fake/project/src",
-            "repo": project_root,
-        })
+        result = await call_tool(
+            "index_folder",
+            {
+                "path": "/fake/project/src",
+                "repo": project_root,
+            },
+        )
 
         from mcp.types import CallToolResult
+
         assert isinstance(result, CallToolResult)
         assert result.isError is True
         payload = json.loads(result.content[0].text)
@@ -1073,12 +1215,14 @@ async def test_project_tool_disabled_rejected_in_call_tool():
 # Tool profiles                                                                #
 # --------------------------------------------------------------------------- #
 
+
 @pytest.mark.asyncio
 async def test_tool_profile_core():
     """Core profile should only expose ~16 essential tools."""
+    from copy import deepcopy
+
     from jcodemunch_mcp import config as config_module
     from jcodemunch_mcp.server import _TOOL_TIER_CORE
-    from copy import deepcopy
 
     orig_config = config_module._GLOBAL_CONFIG.copy()
     config_module._GLOBAL_CONFIG.clear()
@@ -1090,14 +1234,27 @@ async def test_tool_profile_core():
         tools = await list_tools()
         names = {t.name for t in tools}
         # Core tier + force-included tools (set_tool_tier, announce_model, jcodemunch_guide)
-        assert names == _TOOL_TIER_CORE | {"set_tool_tier", "announce_model", "jcodemunch_guide"}
+        assert names == _TOOL_TIER_CORE | {
+            "set_tool_tier",
+            "announce_model",
+            "jcodemunch_guide",
+        }
         # Core must include the essentials
-        for essential in ("search_symbols", "get_symbol_source", "list_repos",
-                          "get_file_tree", "index_folder"):
+        for essential in (
+            "search_symbols",
+            "get_symbol_source",
+            "list_repos",
+            "get_file_tree",
+            "index_folder",
+        ):
             assert essential in names, f"{essential} missing from core profile"
         # Core must NOT include advanced tools
-        for excluded in ("plan_refactoring", "get_hotspots", "audit_agent_config",
-                         "get_session_stats", "plan_turn"):
+        for excluded in (
+            "plan_refactoring",
+            "get_hotspots",
+            "get_session_stats",
+            "plan_turn",
+        ):
             assert excluded not in names, f"{excluded} should not be in core profile"
     finally:
         config_module._GLOBAL_CONFIG.clear()
@@ -1107,9 +1264,10 @@ async def test_tool_profile_core():
 @pytest.mark.asyncio
 async def test_tool_profile_standard():
     """Standard profile should include core + analytics but not refactoring/session."""
+    from copy import deepcopy
+
     from jcodemunch_mcp import config as config_module
     from jcodemunch_mcp.server import _TOOL_TIER_STANDARD
-    from copy import deepcopy
 
     orig_config = config_module._GLOBAL_CONFIG.copy()
     config_module._GLOBAL_CONFIG.clear()
@@ -1121,14 +1279,18 @@ async def test_tool_profile_standard():
         tools = await list_tools()
         names = {t.name for t in tools}
         # Standard tier + force-included tools (set_tool_tier, announce_model, jcodemunch_guide)
-        assert names == _TOOL_TIER_STANDARD | {"set_tool_tier", "announce_model", "jcodemunch_guide"}
+        assert names == _TOOL_TIER_STANDARD | {
+            "set_tool_tier",
+            "announce_model",
+            "jcodemunch_guide",
+        }
         # Standard includes analytics
         assert "get_hotspots" in names
         assert "get_blast_radius" in names
         # Standard excludes power-user tools
         assert "plan_refactoring" not in names
         assert "get_session_stats" not in names
-        assert "audit_agent_config" not in names
+
     finally:
         config_module._GLOBAL_CONFIG.clear()
         config_module._GLOBAL_CONFIG.update(orig_config)
@@ -1137,8 +1299,9 @@ async def test_tool_profile_standard():
 @pytest.mark.asyncio
 async def test_tool_profile_full_is_default():
     """Full profile (default) should expose all tools minus disabled."""
-    from jcodemunch_mcp import config as config_module
     from copy import deepcopy
+
+    from jcodemunch_mcp import config as config_module
 
     orig_config = config_module._GLOBAL_CONFIG.copy()
     config_module._GLOBAL_CONFIG.clear()
@@ -1150,7 +1313,7 @@ async def test_tool_profile_full_is_default():
         # Full profile includes everything except default-disabled test_summarizer
         assert "plan_refactoring" in names
         assert "get_session_stats" in names
-        assert "audit_agent_config" in names
+
         assert "test_summarizer" not in names  # disabled by default, not by profile
     finally:
         config_module._GLOBAL_CONFIG.clear()
@@ -1160,8 +1323,9 @@ async def test_tool_profile_full_is_default():
 @pytest.mark.asyncio
 async def test_tool_profile_combined_with_disabled_tools():
     """Profile + disabled_tools should stack: profile filters first, then disabled."""
-    from jcodemunch_mcp import config as config_module
     from copy import deepcopy
+
+    from jcodemunch_mcp import config as config_module
 
     orig_config = config_module._GLOBAL_CONFIG.copy()
     config_module._GLOBAL_CONFIG.clear()
@@ -1183,11 +1347,13 @@ async def test_tool_profile_combined_with_disabled_tools():
 # Compact schemas                                                              #
 # --------------------------------------------------------------------------- #
 
+
 @pytest.mark.asyncio
 async def test_compact_schemas_strips_advanced_params():
     """compact_schemas should remove advanced params from search_symbols schema."""
-    from jcodemunch_mcp import config as config_module
     from copy import deepcopy
+
+    from jcodemunch_mcp import config as config_module
 
     orig_config = config_module._GLOBAL_CONFIG.copy()
     config_module._GLOBAL_CONFIG.clear()
@@ -1219,8 +1385,9 @@ async def test_compact_schemas_strips_advanced_params():
 @pytest.mark.asyncio
 async def test_compact_schemas_off_preserves_all_params():
     """When compact_schemas is off (default), all params remain."""
-    from jcodemunch_mcp import config as config_module
     from copy import deepcopy
+
+    from jcodemunch_mcp import config as config_module
 
     orig_config = config_module._GLOBAL_CONFIG.copy()
     config_module._GLOBAL_CONFIG.clear()
@@ -1242,6 +1409,7 @@ async def test_compact_schemas_off_preserves_all_params():
 # --------------------------------------------------------------------------- #
 # Tool tier bundles + model tier map                                           #
 # --------------------------------------------------------------------------- #
+
 
 def test_tool_tier_bundles_default_present():
     """DEFAULTS must ship with tool_tier_bundles pre-populated for core and standard."""
@@ -1273,11 +1441,13 @@ def test_model_tier_map_default_present():
 
 def test_adaptive_tiering_defaults_false():
     from jcodemunch_mcp.config import DEFAULTS
+
     assert DEFAULTS["adaptive_tiering"] is False
 
 
 def test_adaptive_tiering_in_config_types():
     from jcodemunch_mcp.config import CONFIG_TYPES
+
     assert CONFIG_TYPES["adaptive_tiering"] is bool
 
 
@@ -1295,6 +1465,7 @@ def test_generate_template_includes_tier_bundles_and_model_map():
 
 def test_generate_template_includes_adaptive_tiering():
     from jcodemunch_mcp.config import generate_template
+
     text = generate_template()
     assert '"adaptive_tiering"' in text
     assert "opt-in" in text.lower()
@@ -1312,14 +1483,12 @@ def test_generate_template_disabled_tools_reference_includes_runtime_switch_tool
 def test_upgrade_config_adds_tier_bundle_keys(tmp_path):
     """upgrade_config must append tool_tier_bundles and model_tier_map to old configs."""
     from pathlib import Path
+
     from jcodemunch_mcp.config import upgrade_config
 
     old_config = tmp_path / "config.jsonc"
     old_config.write_text(
-        '{\n'
-        '  "tool_profile": "full",\n'
-        '  "disabled_tools": ["test_summarizer"]\n'
-        '}\n',
+        '{\n  "tool_profile": "full",\n  "disabled_tools": ["test_summarizer"]\n}\n',
         encoding="utf-8",
     )
     upgrade_config(old_config)
@@ -1332,7 +1501,9 @@ def test_upgrade_config_adds_tier_bundle_keys(tmp_path):
 
 def test_upgrade_config_adds_adaptive_tiering(tmp_path):
     from pathlib import Path
+
     from jcodemunch_mcp.config import upgrade_config
+
     old = tmp_path / "config.jsonc"
     old.write_text('{"tool_profile": "full"}\n', encoding="utf-8")
     upgrade_config(old)
@@ -1342,8 +1513,9 @@ def test_upgrade_config_adds_adaptive_tiering(tmp_path):
 @pytest.mark.asyncio
 async def test_tool_tier_bundles_config_override():
     """Editing tool_tier_bundles.core in config must change tools/list output."""
-    import jcodemunch_mcp.config as config_module
     from copy import deepcopy
+
+    import jcodemunch_mcp.config as config_module
 
     orig_config = config_module._GLOBAL_CONFIG.copy()
     config_module._GLOBAL_CONFIG.clear()
@@ -1355,6 +1527,7 @@ async def test_tool_tier_bundles_config_override():
 
     try:
         from jcodemunch_mcp.server import _build_tools_list
+
         tools = await list_tools()
         names = {t.name for t in tools}
         assert "search_symbols" in names
@@ -1374,8 +1547,8 @@ def test_all_canonical_tools_accounted_in_tier_bundles():
     any tier bundle — forcing the developer to consciously decide which tier
     it belongs to.
     """
-    from jcodemunch_mcp.server import _CANONICAL_TOOL_NAMES
     from jcodemunch_mcp.config import DEFAULTS
+    from jcodemunch_mcp.server import _CANONICAL_TOOL_NAMES
 
     bundles = DEFAULTS["tool_tier_bundles"]
     core_set = set(bundles.get("core", []))
@@ -1388,7 +1561,6 @@ def test_all_canonical_tools_accounted_in_tier_bundles():
     known_full_only = {
         # Power-user refactoring / session tools
         "plan_refactoring",
-        "audit_agent_config",
         "get_extraction_candidates",
         # Session state tools (rarely needed in constrained tiers)
         "get_session_stats",
@@ -1427,6 +1599,7 @@ def test_all_canonical_tools_accounted_in_tier_bundles():
 # jcodemunch_guide (issue #255): one-line CLAUDE.md pulls latest policy       #
 # --------------------------------------------------------------------------- #
 
+
 @pytest.mark.asyncio
 async def test_jcodemunch_guide_returns_current_snippet():
     """Tool content matches _generate_claude_md_snippet and embeds current version."""
@@ -1454,7 +1627,9 @@ async def test_jcodemunch_guide_honors_disabled_tools():
 
     try:
         config_module._GLOBAL_CONFIG["disabled_tools"] = [
-            "jcodemunch_guide", "set_tool_tier", "announce_model",
+            "jcodemunch_guide",
+            "set_tool_tier",
+            "announce_model",
         ]
         tools = await list_tools()
         names = {t.name for t in tools}
@@ -1469,8 +1644,9 @@ async def test_jcodemunch_guide_honors_disabled_tools():
 @pytest.mark.asyncio
 async def test_jcodemunch_guide_force_included_in_core_tier():
     """Core tier must still expose jcodemunch_guide even though it's not in the bundle."""
-    from jcodemunch_mcp import config as config_module
     from copy import deepcopy
+
+    from jcodemunch_mcp import config as config_module
 
     orig_config = config_module._GLOBAL_CONFIG.copy()
     config_module._GLOBAL_CONFIG.clear()

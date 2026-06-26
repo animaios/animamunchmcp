@@ -1,46 +1,64 @@
 """Index local folder tool - walk, parse, summarize, save."""
 
-from collections.abc import Generator
-from dataclasses import dataclass, field
 import hashlib
 import logging
 import os
+import re
 import threading
 import time
 from collections import defaultdict
+from collections.abc import Generator
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Optional
-import re
 
 import pathspec
 
 logger = logging.getLogger(__name__)
 
 from .. import config as _config
-from ..parser import cached_parse_file as parse_file, LANGUAGE_EXTENSIONS, get_language_for_path
-from ..parser.context import discover_providers, enrich_symbols, collect_metadata, collect_extra_imports
+from ..parser import LANGUAGE_EXTENSIONS, get_language_for_path
+from ..parser import cached_parse_file as parse_file
+from ..parser.context import (
+    collect_extra_imports,
+    collect_metadata,
+    discover_providers,
+    enrich_symbols,
+)
 from ..parser.context.framework_profiles import detect_framework, profile_to_meta
-from ..parser.imports import extract_imports, _alias_map_cache as _imap_cache, _LANGUAGE_EXTRACTORS as _IMPORT_EXTRACTORS
+from ..parser.imports import _LANGUAGE_EXTRACTORS as _IMPORT_EXTRACTORS
+from ..parser.imports import _alias_map_cache as _imap_cache
+from ..parser.imports import extract_imports
+from ..path_map import parse_path_map, remap
+from ..reindex_state import WatcherChange
 from ..security import (
-    validate_path,
-    is_symlink_escape,
-    is_secret_file,
-    is_binary_file,
     DEFAULT_MAX_FILE_SIZE,
-    get_max_folder_files,
+    SKIP_FILES,
     get_extra_ignore_patterns,
+    get_max_folder_files,
     get_skip_directories,
-    SKIP_FILES
+    is_binary_file,
+    is_secret_file,
+    is_symlink_escape,
+    validate_path,
 )
 from ..storage import IndexStore
-from ..storage.git_root import IdentityModeAmbiguous, IdentityModeConflict, resolve_index_identity
-from ..storage.index_store import _file_hash, _file_hash_bytes, _get_git_head, _get_git_branch
+from ..storage.git_root import (
+    IdentityModeAmbiguous,
+    IdentityModeConflict,
+    resolve_index_identity,
+)
+from ..storage.index_store import (
+    _file_hash,
+    _file_hash_bytes,
+    _get_git_branch,
+    _get_git_head,
+)
 from ..summarizer import summarize_symbols
-from ..reindex_state import WatcherChange
-from ..path_map import parse_path_map, remap
 
 SKIP_FILES_REGEX = re.compile("(" + "|".join(re.escape(p) for p in SKIP_FILES) + ")$")
+
 
 def _build_skip_dirs_regex() -> re.Pattern:
     """Build regex from config-filtered skip directories (called per-index)."""
@@ -57,6 +75,7 @@ def _maybe_apply_adaptive(folder_path: str, result: dict) -> None:
         return
     try:
         from ..config import apply_adaptive_languages
+
         apply_adaptive_languages(str(folder_path), detected)
     except Exception:
         logger.debug("adaptive language update skipped", exc_info=True)
@@ -165,7 +184,10 @@ def _is_trusted(
 
     return is_in_list if whitelist_mode else not is_in_list
 
-def _is_gitignored(file_path: Path, gitignore_specs: dict[Path, pathspec.PathSpec]) -> bool:
+
+def _is_gitignored(
+    file_path: Path, gitignore_specs: dict[Path, pathspec.PathSpec]
+) -> bool:
     """Check if a file is excluded by any .gitignore in its ancestor chain.
 
     Each spec is applied relative to its own directory, matching standard git behaviour.
@@ -180,7 +202,9 @@ def _is_gitignored(file_path: Path, gitignore_specs: dict[Path, pathspec.PathSpe
     return False
 
 
-def _is_gitignored_fast(resolved_str: str, specs: list[tuple[str, "pathspec.PathSpec"]]) -> bool:
+def _is_gitignored_fast(
+    resolved_str: str, specs: list[tuple[str, "pathspec.PathSpec"]]
+) -> bool:
     """String-based gitignore check — avoids Path.relative_to() overhead.
 
     Same semantics as _is_gitignored but uses string prefix matching instead
@@ -191,7 +215,7 @@ def _is_gitignored_fast(resolved_str: str, specs: list[tuple[str, "pathspec.Path
     for dir_prefix, spec in specs:
         if not resolved_norm.startswith(os.path.normcase(dir_prefix)):
             continue
-        rel = resolved_str[len(dir_prefix):].replace("\\", "/")
+        rel = resolved_str[len(dir_prefix) :].replace("\\", "/")
         if spec.match_file(rel):
             return True
     return False
@@ -213,10 +237,11 @@ class _IndexFilters:
     one piece that may grow during a walk and is passed alongside the
     bundle rather than baked into it.
     """
+
     root: Path
-    root_prefix: str         # str(root) + os.sep
-    root_str_norm: str       # os.path.normcase(str(root))
-    root_prefix_norm: str    # os.path.normcase(root_prefix)
+    root_prefix: str  # str(root) + os.sep
+    root_str_norm: str  # os.path.normcase(str(root))
+    root_prefix_norm: str  # os.path.normcase(root_prefix)
     follow_symlinks: bool = False
     max_size: int = DEFAULT_MAX_FILE_SIZE
     extra_spec: Optional["pathspec.PathSpec"] = None
@@ -323,7 +348,7 @@ def _should_index_file(
 
     # 6. Relative path (posix-style)
     rel_path = (
-        resolved_str[len(cfg.root_prefix):].replace("\\", "/")
+        resolved_str[len(cfg.root_prefix) :].replace("\\", "/")
         if resolved_norm != cfg.root_str_norm
         else ""
     )
@@ -395,8 +420,15 @@ class _CarriedSymbol:
             # Defaults that match Symbol dataclass field types.
             if name in ("decorators", "keywords", "call_references"):
                 return []
-            if name in ("line", "end_line", "byte_offset", "byte_length",
-                         "cyclomatic", "max_nesting", "param_count"):
+            if name in (
+                "line",
+                "end_line",
+                "byte_offset",
+                "byte_length",
+                "cyclomatic",
+                "max_nesting",
+                "param_count",
+            ):
                 return 0
             return ""
 
@@ -435,8 +467,7 @@ def _merge_subdir_into_existing(
     the merged state, suitable for splat into ``save_index`` keyword args.
     """
     carry_files = [
-        f for f in existing.source_files
-        if _file_outside_walk_prefix(f, walk_prefix)
+        f for f in existing.source_files if _file_outside_walk_prefix(f, walk_prefix)
     ]
     carry_set = set(carry_files)
 
@@ -444,7 +475,8 @@ def _merge_subdir_into_existing(
 
     new_file_set = set(s.file for s in new_symbols)
     carried_symbols = [
-        _CarriedSymbol(s) for s in existing.symbols
+        _CarriedSymbol(s)
+        for s in existing.symbols
         if s.get("file") in carry_set and s.get("file") not in new_file_set
     ]
 
@@ -452,8 +484,14 @@ def _merge_subdir_into_existing(
         return {k: v for k, v in (d or {}).items() if k in carry_set}
 
     merged_file_hashes = {**_carry_dict(existing.file_hashes), **new_file_hashes}
-    merged_file_summaries = {**_carry_dict(existing.file_summaries), **new_file_summaries}
-    merged_file_languages = {**_carry_dict(existing.file_languages), **new_file_languages}
+    merged_file_summaries = {
+        **_carry_dict(existing.file_summaries),
+        **new_file_summaries,
+    }
+    merged_file_languages = {
+        **_carry_dict(existing.file_languages),
+        **new_file_languages,
+    }
     merged_file_mtimes = {**_carry_dict(existing.file_mtimes), **new_file_mtimes}
     merged_imports = {**_carry_dict(existing.imports or {}), **(new_file_imports or {})}
 
@@ -466,10 +504,15 @@ def _merge_subdir_into_existing(
     # data that's per-file inside walk_prefix may be lost on overlap; an
     # acceptable trade for v1.96 MVP.  Revisit if specific providers
     # surface bugs.
-    merged_context_metadata = {**(existing.context_metadata or {}), **(new_context_metadata or {})}
+    merged_context_metadata = {
+        **(existing.context_metadata or {}),
+        **(new_context_metadata or {}),
+    }
 
     # Package names: union (manifest files in either subdir contribute).
-    merged_pkg_names = sorted(set((existing.package_names or []) + (new_pkg_names or [])))
+    merged_pkg_names = sorted(
+        set((existing.package_names or []) + (new_pkg_names or []))
+    )
 
     # source_roots: a full-root walk (walk_prefix == "") supersedes every
     # earlier subdir slice — the new walk covers everything, so subdir
@@ -524,9 +567,15 @@ def _resolve_repo_identity(
 
 
 from ._indexing_pipeline import (
-    file_languages_for_paths as _file_languages_for_paths,
-    language_counts as _language_counts,
     complete_file_summaries as _complete_file_summaries,
+)
+from ._indexing_pipeline import (
+    file_languages_for_paths as _file_languages_for_paths,
+)
+from ._indexing_pipeline import (
+    language_counts as _language_counts,
+)
+from ._indexing_pipeline import (
     parse_and_prepare_incremental,
     parse_immediate,
 )
@@ -543,6 +592,7 @@ def _scan_package_json_forced_paths(folder_path: Path) -> set[str]:
     invisible to dead-code analysis).
     """
     import json as _json
+
     forced: set[str] = set()
     try:
         for pkg in folder_path.rglob("package.json"):
@@ -565,19 +615,20 @@ def _scan_package_json_forced_paths(folder_path: Path) -> set[str]:
             if isinstance(exports, str):
                 candidates.append(exports)
             elif isinstance(exports, dict):
+
                 def _walk_exports(node):
                     if isinstance(node, str):
                         candidates.append(node)
                     elif isinstance(node, dict):
                         for v in node.values():
                             _walk_exports(v)
+
                 _walk_exports(exports)
             bins = data.get("bin")
             if isinstance(bins, str):
                 candidates.append(bins)
             elif isinstance(bins, dict):
-                candidates.extend(v for v in bins.values()
-                                  if isinstance(v, str))
+                candidates.extend(v for v in bins.values() if isinstance(v, str))
             pkg_dir = pkg.parent
             for cand in candidates:
                 cand = cand.lstrip("./")
@@ -593,8 +644,7 @@ def _scan_package_json_forced_paths(folder_path: Path) -> set[str]:
                         forced.add(str(trial.resolve()))
                         break
                 else:
-                    for sub in ("/index.js", "/index.ts", "/index.mjs",
-                                "/index.cjs"):
+                    for sub in ("/index.js", "/index.ts", "/index.mjs", "/index.cjs"):
                         trial = pkg_dir / f"{cand}{sub}"
                         if trial.is_file():
                             forced.add(str(trial.resolve()))
@@ -629,14 +679,20 @@ def _refresh_git_head_if_advanced(store, owner, name, folder_path, stored_head):
         return ""
     try:
         store.incremental_save(
-            owner=owner, name=name,
-            changed_files=[], new_files=[], deleted_files=[],
-            new_symbols=[], raw_files={},
+            owner=owner,
+            name=name,
+            changed_files=[],
+            new_files=[],
+            deleted_files=[],
+            new_symbols=[],
+            raw_files={},
             git_head=current_head,
         )
         return current_head
     except Exception:
-        logger.debug("git_head metadata refresh failed for %s/%s", owner, name, exc_info=True)
+        logger.debug(
+            "git_head metadata refresh failed for %s/%s", owner, name, exc_info=True
+        )
         return ""
 
 
@@ -685,7 +741,7 @@ def resolve_explicit_paths(
             continue
         p = Path(raw).expanduser()
         if not p.is_absolute():
-            p = (walk_root / p)
+            p = walk_root / p
         try:
             p = p.resolve()
         except OSError as e:
@@ -736,9 +792,14 @@ def resolve_explicit_paths(
             skip_counts["symlink"] = skip_counts.get("symlink", 0) + 1
             continue
 
-        if get_language_for_path(str(p)) is None and p.suffix not in LANGUAGE_EXTENSIONS:
+        if (
+            get_language_for_path(str(p)) is None
+            and p.suffix not in LANGUAGE_EXTENSIONS
+        ):
             warnings.append(f"Skipped unsupported extension: {raw!r}")
-            skip_counts["unknown_extension"] = skip_counts.get("unknown_extension", 0) + 1
+            skip_counts["unknown_extension"] = (
+                skip_counts.get("unknown_extension", 0) + 1
+            )
             continue
 
         try:
@@ -883,8 +944,10 @@ def discover_local_files(
                 if warning is not None:
                     warnings.append(warning)
                 logger.debug(
-                    "SKIP %s: %s", reason,
-                    rel_path or os.path.join(os.path.relpath(dirpath, root_str), filename),
+                    "SKIP %s: %s",
+                    reason,
+                    rel_path
+                    or os.path.join(os.path.relpath(dirpath, root_str), filename),
                 )
                 continue
 
@@ -1079,6 +1142,7 @@ def index_folder(
     if _identity_decision.mode == "git" and _identity_decision.git_root:
         try:
             from ..storage.git_root import GitRootIdentity
+
             _gr = GitRootIdentity(
                 git_root=_identity_decision.git_root,
                 owner=_identity_decision.owner,
@@ -1090,7 +1154,9 @@ def index_folder(
     if _gr is not None:
         _gr_path = Path(_gr.git_root).resolve()
         try:
-            _is_subdir = folder_path != _gr_path and folder_path.is_relative_to(_gr_path)
+            _is_subdir = folder_path != _gr_path and folder_path.is_relative_to(
+                _gr_path
+            )
         except AttributeError:
             # Python < 3.9 fallback (shouldn't trigger; project requires 3.10+)
             try:
@@ -1136,11 +1202,14 @@ def index_folder(
             if _get_state(repo_full).deferred_generation != gen:
                 logger.debug(
                     "Deferred summarize gen=%d abandoned for %s (generation advanced before summarize)",
-                    gen, repo_full,
+                    gen,
+                    repo_full,
                 )
                 return
 
-            summarized = deferred_summarize(symbols, file_contents, use_ai_summaries=True, repo=repo_full)
+            summarized = deferred_summarize(
+                symbols, file_contents, use_ai_summaries=True, repo=repo_full
+            )
             if not summarized:
                 return
 
@@ -1153,24 +1222,32 @@ def index_folder(
                 if _get_state(repo_full).deferred_generation != gen:
                     logger.debug(
                         "Deferred summarize gen=%d abandoned for %s (generation advanced before save)",
-                        gen, repo_full,
+                        gen,
+                        repo_full,
                     )
                     return
 
                 # Update only the symbol summaries (empty change lists → INSERT OR REPLACE updates existing rows)
                 try:
                     store.incremental_save(
-                        owner=owner, name=repo_name,
-                        changed_files=[], new_files=[], deleted_files=[],
+                        owner=owner,
+                        name=repo_name,
+                        changed_files=[],
+                        new_files=[],
+                        deleted_files=[],
                         new_symbols=summarized,
                         raw_files={},
                     )
                     logger.info(
                         "Deferred AI summarization gen=%d saved %d symbols for %s",
-                        gen, len(summarized), repo_full,
+                        gen,
+                        len(summarized),
+                        repo_full,
                     )
                 except Exception as e:
-                    logger.warning("Deferred summarization failed for %s: %s", repo_full, e)
+                    logger.warning(
+                        "Deferred summarization failed for %s: %s", repo_full, e
+                    )
 
         # ── Fast path: watcher-driven incremental reindex ──
         # When the watcher provides the exact change set, skip full directory
@@ -1237,7 +1314,9 @@ def index_folder(
             # Branch detection for watcher fast-path
             _fast_branch = _get_git_branch(folder_path)
             _fast_is_branch_delta = False
-            _fast_base_index = store.load_index(owner, repo_name)  # always load base for branch check
+            _fast_base_index = store.load_index(
+                owner, repo_name
+            )  # always load base for branch check
             if _fast_base_index is not None and _fast_branch:
                 _fast_base_branch = getattr(_fast_base_index, "branch", "") or ""
                 if not _fast_base_branch:
@@ -1248,8 +1327,7 @@ def index_folder(
             # Determine if watcher provided old_hash via WatcherChange objects.
             # If so, we can skip loading the index and use the memory-cached hashes.
             watcher_changes_with_hashes = [
-                c for c in changed_paths
-                if isinstance(c, WatcherChange) and c.old_hash
+                c for c in changed_paths if isinstance(c, WatcherChange) and c.old_hash
             ]
             use_memory_hash_cache = bool(watcher_changes_with_hashes)
 
@@ -1319,7 +1397,8 @@ def index_folder(
                         if not _ok:
                             logger.debug(
                                 "SKIP %s (watcher fast path): %s",
-                                _reason, _hl_rel_path or rel_path,
+                                _reason,
+                                _hl_rel_path or rel_path,
                             )
                             continue
 
@@ -1328,10 +1407,15 @@ def index_folder(
                             # Memory cache path: the watcher confirmed this file was
                             # in the index (it was in the hash cache), so trust it.
                             deleted_files.append(rel_path)
-                        elif existing_index is not None and existing_index.has_source_file(rel_path):
+                        elif (
+                            existing_index is not None
+                            and existing_index.has_source_file(rel_path)
+                        ):
                             deleted_files.append(rel_path)
                     elif change_type == "added":
-                        if existing_index is None or not existing_index.has_source_file(rel_path):
+                        if existing_index is None or not existing_index.has_source_file(
+                            rel_path
+                        ):
                             new_files.append(rel_path)
                             rel_path_map_fast[rel_path] = abs_path
                         else:
@@ -1344,7 +1428,10 @@ def index_folder(
 
                 if not changed_files and not new_files and not deleted_files:
                     _refresh_git_head_if_advanced(
-                        store, owner, repo_name, folder_path,
+                        store,
+                        owner,
+                        repo_name,
+                        folder_path,
                         existing_index.git_head if existing_index else None,
                     )
                     return {
@@ -1352,7 +1439,9 @@ def index_folder(
                         "message": "No changes detected",
                         "repo": f"{owner}/{repo_name}",
                         "folder_path": _folder_display,
-                        "changed": 0, "new": 0, "deleted": 0,
+                        "changed": 0,
+                        "new": 0,
+                        "deleted": 0,
                         "duration_seconds": round(time.monotonic() - t0, 2),
                     }
 
@@ -1378,7 +1467,13 @@ def index_folder(
                 for rel_path in set(changed_files) | set(new_files):
                     abs_path = rel_path_map_fast[rel_path]
                     try:
-                        with open(abs_path, "r", encoding="utf-8", errors="replace", newline="") as f:
+                        with open(
+                            abs_path,
+                            "r",
+                            encoding="utf-8",
+                            errors="replace",
+                            newline="",
+                        ) as f:
                             content = f.read()
                     except Exception as e:
                         fast_warnings.append(f"Failed to read {abs_path}: {e}")
@@ -1390,7 +1485,9 @@ def index_folder(
                         cur_mtime = None
 
                     # Content unchanged — skip parse, just record new mtime
-                    if rel_path in changed_files and new_hash == old_hashes.get(rel_path, ""):
+                    if rel_path in changed_files and new_hash == old_hashes.get(
+                        rel_path, ""
+                    ):
                         if cur_mtime is not None:
                             mtime_only_updates[rel_path] = cur_mtime
                         continue
@@ -1418,9 +1515,13 @@ def index_folder(
                         # FreshnessProbe does not keep flagging unchanged symbols
                         # stale_index after a no-op source-index run (#330).
                         store.incremental_save(
-                            owner=owner, name=repo_name,
-                            changed_files=[], new_files=[], deleted_files=[],
-                            new_symbols=[], raw_files={},
+                            owner=owner,
+                            name=repo_name,
+                            changed_files=[],
+                            new_files=[],
+                            deleted_files=[],
+                            new_symbols=[],
+                            raw_files={},
                             file_mtimes=mtime_only_updates,
                             git_head=_new_head if _head_advanced else "",
                         )
@@ -1430,24 +1531,32 @@ def index_folder(
                         "repo": f"{owner}/{repo_name}",
                         "folder_path": _folder_display,
                         "fast_path": True,
-                        "changed": 0, "new": 0, "deleted": 0,
+                        "changed": 0,
+                        "new": 0,
+                        "deleted": 0,
                         "duration_seconds": round(time.monotonic() - t0, 2),
                     }
 
                 files_to_parse = set(changed_files) | set(new_files)
                 # Split pipeline: parse immediately (no AI), fire summarization thread.
-                new_symbols, incr_file_summaries, incr_file_languages, incr_file_imports, incremental_no_symbols = (
-                    parse_immediate(
-                        files_to_parse=files_to_parse,
-                        file_contents=raw_files_subset,
-                        active_providers=active_providers,
-                        warnings=fast_warnings,
-                        repo=str(folder_path),
-                    )
+                (
+                    new_symbols,
+                    incr_file_summaries,
+                    incr_file_languages,
+                    incr_file_imports,
+                    incremental_no_symbols,
+                ) = parse_immediate(
+                    files_to_parse=files_to_parse,
+                    file_contents=raw_files_subset,
+                    active_providers=active_providers,
+                    warnings=fast_warnings,
+                    repo=str(folder_path),
                 )
 
                 git_head = _get_git_head(folder_path) or ""
-                incr_context_metadata = collect_metadata(active_providers) if active_providers else None
+                incr_context_metadata = (
+                    collect_metadata(active_providers) if active_providers else None
+                )
 
                 # Merge mtime-only updates so they're persisted alongside real changes
                 all_mtimes = {**mtime_only_updates, **fast_mtimes}
@@ -1457,12 +1566,16 @@ def index_folder(
                 # would incorrectly think it belongs to the newer generation.
                 _repo_full = f"{owner}/{repo_name}"
                 from ..reindex_state import _get_state
+
                 _deferred_gen = _get_state(_repo_full).deferred_generation
 
                 if _fast_is_branch_delta:
                     store.save_branch_delta(
-                        owner=owner, name=repo_name, branch=_fast_branch,
-                        changed_files=changed_files, new_files=new_files,
+                        owner=owner,
+                        name=repo_name,
+                        branch=_fast_branch,
+                        changed_files=changed_files,
+                        new_files=new_files,
                         deleted_files=deleted_files,
                         new_symbols=new_symbols,
                         raw_files=raw_files_subset,
@@ -1477,8 +1590,11 @@ def index_folder(
                     updated = store.load_index(owner, repo_name, branch=_fast_branch)
                 else:
                     updated = store.incremental_save(
-                        owner=owner, name=repo_name,
-                        changed_files=changed_files, new_files=new_files, deleted_files=deleted_files,
+                        owner=owner,
+                        name=repo_name,
+                        changed_files=changed_files,
+                        new_files=new_files,
+                        deleted_files=deleted_files,
                         new_symbols=new_symbols,
                         raw_files=raw_files_subset,
                         git_head=git_head,
@@ -1497,8 +1613,16 @@ def index_folder(
                     _summaries_copy = list(new_symbols)
                     _contents_copy = dict(raw_files_subset)
                     _daemon = threading.Thread(
-                        target=lambda _g=_deferred_gen, _s=_summaries_copy, _c=_contents_copy: _run_deferred_summarize(
-                            _g, _repo_full, _s, _c, store, owner, repo_name,
+                        target=lambda _g=_deferred_gen, _s=_summaries_copy, _c=_contents_copy: (
+                            _run_deferred_summarize(
+                                _g,
+                                _repo_full,
+                                _s,
+                                _c,
+                                store,
+                                owner,
+                                repo_name,
+                            )
                         ),
                         daemon=True,
                         name="deferred-summarizer",
@@ -1507,7 +1631,9 @@ def index_folder(
                     _summarization_deferred = True
                     logger.info(
                         "Deferred AI summarization started for %s/%s (%d symbols)",
-                        owner, repo_name, len(new_symbols),
+                        owner,
+                        repo_name,
+                        len(new_symbols),
                     )
 
                 result = {
@@ -1516,7 +1642,9 @@ def index_folder(
                     "folder_path": _folder_display,
                     "incremental": True,
                     "fast_path": True,
-                    "changed": len(changed_files), "new": len(new_files), "deleted": len(deleted_files),
+                    "changed": len(changed_files),
+                    "new": len(new_files),
+                    "deleted": len(deleted_files),
                     "symbol_count": len(updated.symbols) if updated else 0,
                     "indexed_at": updated.indexed_at if updated else "",
                     "duration_seconds": round(time.monotonic() - t0, 2),
@@ -1561,11 +1689,13 @@ def index_folder(
         # symlink-escape, oversize, unsupported-extension all warn-and-skip).
         requested_rels: Optional[list[str]] = None
         if paths is not None:
-            source_files, discover_warnings, skip_counts, requested_rels = resolve_explicit_paths(
-                walk_root,
-                list(paths),
-                max_files=max_files,
-                follow_symlinks=follow_symlinks,
+            source_files, discover_warnings, skip_counts, requested_rels = (
+                resolve_explicit_paths(
+                    walk_root,
+                    list(paths),
+                    max_files=max_files,
+                    follow_symlinks=follow_symlinks,
+                )
             )
         else:
             source_files, discover_warnings, skip_counts = discover_local_files(
@@ -1624,7 +1754,9 @@ def index_folder(
         # Gate SQL-dependent providers: when SQL is removed from languages config,
         # filter out the dbt provider to avoid unnecessary detection overhead.
         # Project-overridable (#301): `languages` is the canonical per-project gate.
-        if active_providers and not _config.is_language_enabled("sql", repo=str(folder_path)):
+        if active_providers and not _config.is_language_enabled(
+            "sql", repo=str(folder_path)
+        ):
             active_providers = [p for p in active_providers if p.name != "dbt"]
             if active_providers:
                 names = ", ".join(p.name for p in active_providers)
@@ -1667,7 +1799,9 @@ def index_folder(
             and getattr(_existing_for_collision, "git_root", "")
         ):
             _existing_git_root = _existing_for_collision.git_root
-            _existing_source_root = getattr(_existing_for_collision, "source_root", "") or ""
+            _existing_source_root = (
+                getattr(_existing_for_collision, "source_root", "") or ""
+            )
             if _existing_git_root != _git_root:
                 return {
                     "success": False,
@@ -1700,7 +1834,9 @@ def index_folder(
                     "Existing index for %s/%s was created by v1.95 with "
                     "subdir-relative paths (source_root=%s); rebuilding "
                     "fresh under v1.96 git-root-relative format.",
-                    owner, repo_name, _existing_source_root,
+                    owner,
+                    repo_name,
+                    _existing_source_root,
                 )
                 warnings.append(
                     "Existing v1.95 index detected with subdir-relative file "
@@ -1730,16 +1866,20 @@ def index_folder(
                 # We're on a non-base branch — use branch delta mode.
                 # Load the branch-composed index for incremental comparison.
                 _is_branch_delta = True
-                existing_index = store.load_index(owner, repo_name, branch=_current_branch)
+                existing_index = store.load_index(
+                    owner, repo_name, branch=_current_branch
+                )
                 logger.info(
                     "Branch-aware indexing: current='%s', base='%s' → delta mode",
-                    _current_branch, _base_branch,
+                    _current_branch,
+                    _base_branch,
                 )
 
         if existing_index is None and store.has_index(owner, repo_name):
             logger.warning(
                 "index_folder version_mismatch — %s/%s: on-disk index is a newer version; full re-index required",
-                owner, repo_name,
+                owner,
+                repo_name,
             )
             warnings.append(
                 "Existing index was created by a newer version of jcodemunch-mcp "
@@ -1761,7 +1901,10 @@ def index_folder(
             except ValueError:
                 continue
             ext = file_path.suffix
-            if ext not in LANGUAGE_EXTENSIONS and get_language_for_path(str(file_path)) is None:
+            if (
+                ext not in LANGUAGE_EXTENSIONS
+                and get_language_for_path(str(file_path)) is None
+            ):
                 continue
             try:
                 file_mtimes[rel_path] = os.stat(file_path).st_mtime_ns
@@ -1774,7 +1917,9 @@ def index_folder(
             """Re-read a file by its rel_path. Returns content or None on error."""
             abs_path = rel_path_map[rel_path]
             try:
-                with open(abs_path, "r", encoding="utf-8", errors="replace", newline="") as f:
+                with open(
+                    abs_path, "r", encoding="utf-8", errors="replace", newline=""
+                ) as f:
                     return f.read()
             except Exception as e:
                 warnings.append(f"Failed to read {abs_path}: {e}")
@@ -1785,26 +1930,12 @@ def index_folder(
         def _hash_file(rel_path: str) -> str:
             """Read and hash a single file on demand; cache content for parse step."""
             abs_path = rel_path_map[rel_path]
-            with open(abs_path, "r", encoding="utf-8", errors="replace", newline="") as f:
+            with open(
+                abs_path, "r", encoding="utf-8", errors="replace", newline=""
+            ) as f:
                 content = f.read()
             _hash_file_cache[rel_path] = content
             return _file_hash(content)
-
-        # Force full reindex if invalidate_cache was called for this repo.
-        # Handles cases where the DB deletion failed (e.g. Windows WAL
-        # file-locking) and load_index still returns the old index.
-        _repo_full = f"{owner}/{repo_name}"
-        try:
-            from .invalidate_cache import _force_full_reindex
-            if _repo_full in _force_full_reindex:
-                _force_full_reindex.discard(_repo_full)
-                incremental = False
-                logger.info(
-                    "index_folder: forcing full reindex for %s (post-invalidation)",
-                    _repo_full,
-                )
-        except ImportError:
-            pass
 
         # Incremental path: detect changes using mtime fast-path.  Disabled
         # when v1.96 subdir-merge mode is active (`_merge_with_existing`)
@@ -1830,20 +1961,28 @@ def index_folder(
             if requested_rels is not None:
                 old_files = (
                     set((existing_index.file_hashes or {}).keys())
-                    if existing_index is not None else set()
+                    if existing_index is not None
+                    else set()
                 )
                 if any(req in ("", ".") for req in requested_rels):
                     covered = old_files
                 else:
                     covered = {
-                        fp for fp in old_files
-                        if any(fp == req or fp.startswith(req + "/") for req in requested_rels)
+                        fp
+                        for fp in old_files
+                        if any(
+                            fp == req or fp.startswith(req + "/")
+                            for req in requested_rels
+                        )
                     }
                 deleted = sorted(covered - set(file_mtimes))
 
             if not changed and not new and not deleted:
                 _refresh_git_head_if_advanced(
-                    store, owner, repo_name, folder_path,
+                    store,
+                    owner,
+                    repo_name,
+                    folder_path,
                     existing_index.git_head if existing_index else None,
                 )
                 return {
@@ -1851,7 +1990,9 @@ def index_folder(
                     "message": "No changes detected",
                     "repo": f"{owner}/{repo_name}",
                     "folder_path": _folder_display,
-                    "changed": 0, "new": 0, "deleted": 0,
+                    "changed": 0,
+                    "new": 0,
+                    "deleted": 0,
                     "duration_seconds": round(time.monotonic() - t0, 2),
                 }
 
@@ -1868,28 +2009,41 @@ def index_folder(
                 if content is None:
                     continue
                 raw_files_subset[rel_path] = content
-                subset_hashes[rel_path] = computed_hashes.get(rel_path, _file_hash(content))
+                subset_hashes[rel_path] = computed_hashes.get(
+                    rel_path, _file_hash(content)
+                )
             if progress_cb and _incr_total > 0:
                 progress_cb(_incr_total, _incr_total, "Parsing complete")
 
             # Shared pipeline: parse, enrich, summarize, extract metadata
-            new_symbols, incr_file_summaries, incr_file_languages, incr_file_imports, incremental_no_symbols = (
-                parse_and_prepare_incremental(
-                    files_to_parse=files_to_parse,
-                    file_contents=raw_files_subset,
-                    active_providers=active_providers,
-                    use_ai_summaries=use_ai_summaries,
-                    warnings=warnings,
-                    repo=str(folder_path),
-                )
+            (
+                new_symbols,
+                incr_file_summaries,
+                incr_file_languages,
+                incr_file_imports,
+                incremental_no_symbols,
+            ) = parse_and_prepare_incremental(
+                files_to_parse=files_to_parse,
+                file_contents=raw_files_subset,
+                active_providers=active_providers,
+                use_ai_summaries=use_ai_summaries,
+                warnings=warnings,
+                repo=str(folder_path),
             )
 
             git_head = _get_git_head(folder_path) or ""
-            incr_context_metadata = collect_metadata(active_providers) if active_providers else None
+            incr_context_metadata = (
+                collect_metadata(active_providers) if active_providers else None
+            )
 
             # ── Optional LSP enrichment (incremental path) ──
             try:
-                from ..enrichment.lsp_bridge import is_lsp_enabled, enrich_call_graph_with_lsp, enrich_dispatch_edges
+                from ..enrichment.lsp_bridge import (
+                    enrich_call_graph_with_lsp,
+                    enrich_dispatch_edges,
+                    is_lsp_enabled,
+                )
+
                 if is_lsp_enabled(repo=str(folder_path)):
                     lsp_edges = enrich_call_graph_with_lsp(
                         root_path=str(folder_path),
@@ -1902,7 +2056,10 @@ def index_folder(
                         if incr_context_metadata is None:
                             incr_context_metadata = {}
                         incr_context_metadata["lsp_edges"] = lsp_edges
-                        logger.info("LSP enrichment added %d edges (incremental)", len(lsp_edges))
+                        logger.info(
+                            "LSP enrichment added %d edges (incremental)",
+                            len(lsp_edges),
+                        )
 
                     dispatch_edges = enrich_dispatch_edges(
                         root_path=str(folder_path),
@@ -1915,7 +2072,10 @@ def index_folder(
                         if incr_context_metadata is None:
                             incr_context_metadata = {}
                         incr_context_metadata["dispatch_edges"] = dispatch_edges
-                        logger.info("LSP dispatch enrichment added %d edges (incremental)", len(dispatch_edges))
+                        logger.info(
+                            "LSP dispatch enrichment added %d edges (incremental)",
+                            len(dispatch_edges),
+                        )
             except Exception:
                 logger.debug("LSP enrichment skipped (incremental)", exc_info=True)
 
@@ -1923,8 +2083,12 @@ def index_folder(
                 # Save as branch delta instead of overwriting the base index
                 base_index = store.load_index(owner, repo_name)  # base (no branch)
                 store.save_branch_delta(
-                    owner=owner, name=repo_name, branch=_current_branch,
-                    changed_files=changed, new_files=new, deleted_files=deleted,
+                    owner=owner,
+                    name=repo_name,
+                    branch=_current_branch,
+                    changed_files=changed,
+                    new_files=new,
+                    deleted_files=deleted,
                     new_symbols=new_symbols,
                     raw_files=raw_files_subset,
                     git_head=git_head,
@@ -1939,8 +2103,11 @@ def index_folder(
                 updated = store.load_index(owner, repo_name, branch=_current_branch)
             else:
                 updated = store.incremental_save(
-                    owner=owner, name=repo_name,
-                    changed_files=changed, new_files=new, deleted_files=deleted,
+                    owner=owner,
+                    name=repo_name,
+                    changed_files=changed,
+                    new_files=new,
+                    deleted_files=deleted,
                     new_symbols=new_symbols,
                     raw_files=raw_files_subset,
                     git_head=git_head,
@@ -1957,7 +2124,9 @@ def index_folder(
                 "repo": f"{owner}/{repo_name}",
                 "folder_path": _folder_display,
                 "incremental": True,
-                "changed": len(changed), "new": len(new), "deleted": len(deleted),
+                "changed": len(changed),
+                "new": len(new),
+                "deleted": len(deleted),
                 "symbol_count": len(updated.symbols) if updated else 0,
                 "indexed_at": updated.indexed_at if updated else "",
                 "duration_seconds": round(time.monotonic() - t0, 2),
@@ -2010,7 +2179,13 @@ def index_folder(
                 # content eligible for GC after this iteration
                 continue
             try:
-                symbols = parse_file(content, rel_path, language, source_bytes=content_bytes, repo=str(folder_path))
+                symbols = parse_file(
+                    content,
+                    rel_path,
+                    language,
+                    source_bytes=content_bytes,
+                    repo=str(folder_path),
+                )
                 if symbols:
                     all_symbols.extend(symbols)
                     symbols_by_file[rel_path].extend(symbols)
@@ -2055,7 +2230,8 @@ def index_folder(
                 and existing_index.symbols
             ):
                 _folder_unchanged_files = {
-                    f for f, h in file_hashes.items()
+                    f
+                    for f, h in file_hashes.items()
                     if existing_index.file_hashes.get(f) == h
                 }
                 if _folder_unchanged_files:
@@ -2066,19 +2242,31 @@ def index_folder(
                     }
                     logger.info(
                         "index_folder full — %d/%d files unchanged, %d summaries preserved",
-                        len(_folder_unchanged_files), len(file_hashes),
-                        len(_folder_existing_summaries) if _folder_existing_summaries else 0,
+                        len(_folder_unchanged_files),
+                        len(file_hashes),
+                        len(_folder_existing_summaries)
+                        if _folder_existing_summaries
+                        else 0,
                     )
 
             if _folder_existing_summaries and _folder_unchanged_files:
                 from ._indexing_pipeline import _split_for_summarization
+
                 _needs_summary, _already_summarized = _split_for_summarization(
                     all_symbols, _folder_existing_summaries, _folder_unchanged_files
                 )
-                _summarized = summarize_symbols(_needs_summary, use_ai=use_ai_summaries, repo=str(folder_path)) if _needs_summary else []
+                _summarized = (
+                    summarize_symbols(
+                        _needs_summary, use_ai=use_ai_summaries, repo=str(folder_path)
+                    )
+                    if _needs_summary
+                    else []
+                )
                 all_symbols = _summarized + _already_summarized
             else:
-                all_symbols = summarize_symbols(all_symbols, use_ai=use_ai_summaries, repo=str(folder_path))
+                all_symbols = summarize_symbols(
+                    all_symbols, use_ai=use_ai_summaries, repo=str(folder_path)
+                )
 
         # Generate file-level summaries (single-pass grouping) using shared helpers
         file_symbols_map = defaultdict(list)
@@ -2086,10 +2274,14 @@ def index_folder(
             file_symbols_map[s.file].append(s)
         file_languages = _file_languages_for_paths(source_file_list, file_symbols_map)
         languages = _language_counts(file_languages)
-        file_summaries = _complete_file_summaries(source_file_list, file_symbols_map, context_providers=active_providers)
+        file_summaries = _complete_file_summaries(
+            source_file_list, file_symbols_map, context_providers=active_providers
+        )
 
         # Collect structured metadata from providers
-        full_context_metadata = collect_metadata(active_providers) if active_providers else None
+        full_context_metadata = (
+            collect_metadata(active_providers) if active_providers else None
+        )
 
         # Merge framework profile metadata into context_metadata
         if _framework_profile:
@@ -2104,13 +2296,20 @@ def index_folder(
         try:
             _pkg_names = _extract_package_names(str(folder_path))
         except Exception:
-            logger.debug("extract_package_names failed for %s", folder_path, exc_info=True)
+            logger.debug(
+                "extract_package_names failed for %s", folder_path, exc_info=True
+            )
 
         # ── Optional LSP enrichment ──
         # When enabled, resolve unqualified call sites via language servers.
         # Results are stored in context_metadata["lsp_edges"] for the call graph.
         try:
-            from ..enrichment.lsp_bridge import is_lsp_enabled, enrich_call_graph_with_lsp, enrich_dispatch_edges
+            from ..enrichment.lsp_bridge import (
+                enrich_call_graph_with_lsp,
+                enrich_dispatch_edges,
+                is_lsp_enabled,
+            )
+
             if is_lsp_enabled(repo=str(folder_path)):
                 lsp_edges = enrich_call_graph_with_lsp(
                     root_path=str(folder_path),
@@ -2136,7 +2335,9 @@ def index_folder(
                     if full_context_metadata is None:
                         full_context_metadata = {}
                     full_context_metadata["dispatch_edges"] = dispatch_edges
-                    logger.info("LSP dispatch enrichment added %d edges", len(dispatch_edges))
+                    logger.info(
+                        "LSP dispatch enrichment added %d edges", len(dispatch_edges)
+                    )
         except Exception:
             logger.debug("LSP enrichment skipped", exc_info=True)
 
@@ -2154,7 +2355,8 @@ def index_folder(
                 delta_new = sorted(current_files_set - base_files)
                 delta_deleted = sorted(base_files - current_files_set)
                 delta_changed = sorted(
-                    f for f in (current_files_set & base_files)
+                    f
+                    for f in (current_files_set & base_files)
                     if file_hashes.get(f, "") != base_index.file_hashes.get(f, "")
                 )
 
@@ -2163,18 +2365,31 @@ def index_folder(
                 delta_symbols = [s for s in all_symbols if s.file in delta_files]
 
                 store.save_branch_delta(
-                    owner=owner, name=repo_name, branch=_current_branch,
-                    changed_files=delta_changed, new_files=delta_new,
+                    owner=owner,
+                    name=repo_name,
+                    branch=_current_branch,
+                    changed_files=delta_changed,
+                    new_files=delta_new,
                     deleted_files=delta_deleted,
                     new_symbols=delta_symbols,
                     raw_files={},  # already written to content dir
                     git_head=git_head,
                     base_head=base_index.git_head,
-                    file_hashes={f: file_hashes[f] for f in delta_files if f in file_hashes},
-                    file_mtimes={f: file_mtimes[f] for f in delta_files if f in file_mtimes},
-                    file_languages={f: file_languages[f] for f in delta_files if f in file_languages},
-                    file_summaries={f: file_summaries[f] for f in delta_files if f in file_summaries},
-                    file_imports={f: file_imports[f] for f in delta_files if f in file_imports},
+                    file_hashes={
+                        f: file_hashes[f] for f in delta_files if f in file_hashes
+                    },
+                    file_mtimes={
+                        f: file_mtimes[f] for f in delta_files if f in file_mtimes
+                    },
+                    file_languages={
+                        f: file_languages[f] for f in delta_files if f in file_languages
+                    },
+                    file_summaries={
+                        f: file_summaries[f] for f in delta_files if f in file_summaries
+                    },
+                    file_imports={
+                        f: file_imports[f] for f in delta_files if f in file_imports
+                    },
                 )
                 index = store.load_index(owner, repo_name, branch=_current_branch)
                 if index is None:
@@ -2182,14 +2397,23 @@ def index_folder(
             else:
                 # No base index — save as full (becomes the base)
                 index = store.save_index(
-                    owner=owner, name=repo_name,
-                    source_files=source_file_list, symbols=all_symbols,
-                    raw_files={}, languages=languages, file_hashes=file_hashes,
-                    file_summaries=file_summaries, git_head=git_head,
-                    source_root=str(folder_path), file_languages=file_languages,
-                    display_name=folder_path.name, imports=file_imports,
-                    context_metadata=full_context_metadata, file_mtimes=file_mtimes,
-                    package_names=_pkg_names, git_root=_git_root,
+                    owner=owner,
+                    name=repo_name,
+                    source_files=source_file_list,
+                    symbols=all_symbols,
+                    raw_files={},
+                    languages=languages,
+                    file_hashes=file_hashes,
+                    file_summaries=file_summaries,
+                    git_head=git_head,
+                    source_root=str(folder_path),
+                    file_languages=file_languages,
+                    display_name=folder_path.name,
+                    imports=file_imports,
+                    context_metadata=full_context_metadata,
+                    file_mtimes=file_mtimes,
+                    package_names=_pkg_names,
+                    git_root=_git_root,
                 )
         else:
             # v1.96: when an existing v1.96-format index covers the same
@@ -2270,8 +2494,7 @@ def index_folder(
 
         # Identify languages that were indexed (symbols found) but have no import extractor
         _missing_import_extractors = sorted(
-            lang for lang in _languages_with_symbols
-            if lang not in _IMPORT_EXTRACTORS
+            lang for lang in _languages_with_symbols if lang not in _IMPORT_EXTRACTORS
         )
 
         result = {

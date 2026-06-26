@@ -35,24 +35,39 @@ except ImportError:
 
 PRESETS = {
     "explore": [
-        "list_repos", "resolve_repo", "get_repo_outline",
-        "get_file_tree", "get_file_outline",
-        "search_symbols", "get_symbol_source",
+        "list_repos",
+        "resolve_repo",
+        "get_repo_outline",
+        "get_file_tree",
+        "get_file_outline",
+        "search_symbols",
+        "get_symbol_source",
     ],
     "deep": [
-        "list_repos", "resolve_repo", "get_repo_outline",
-        "get_file_tree", "get_file_outline",
-        "search_symbols", "get_symbol_source",
-        "get_ranked_context", "get_context_bundle",
-        "get_blast_radius", "get_call_hierarchy",
-        "find_importers", "find_references",
+        "list_repos",
+        "resolve_repo",
+        "get_repo_outline",
+        "get_file_tree",
+        "get_file_outline",
+        "search_symbols",
+        "get_symbol_source",
+        "get_ranked_context",
+        "get_context_bundle",
+        "get_blast_radius",
+        "get_call_hierarchy",
+        "find_importers",
+        "find_references",
     ],
     "review": [
-        "list_repos", "resolve_repo",
-        "search_symbols", "get_symbol_source",
-        "get_ranked_context", "get_context_bundle",
-        "get_changed_symbols", "get_blast_radius",
-        "get_impact_preview", "check_rename_safe",
+        "list_repos",
+        "resolve_repo",
+        "search_symbols",
+        "get_symbol_source",
+        "get_ranked_context",
+        "get_context_bundle",
+        "get_changed_symbols",
+        "get_blast_radius",
+        "get_impact_preview",
     ],
     "full": None,  # None = no filter, all tools available
 }
@@ -93,6 +108,7 @@ TESTS = [
 
 
 # ── Runner ───────────────────────────────────────────────────────────────────
+
 
 def build_mcp_tool(url: str, token: str, preset: str) -> dict:
     """Build the Groq MCP tool configuration."""
@@ -162,15 +178,25 @@ def run_test(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Validate Groq x jCodeMunch MCP integration")
-    parser.add_argument("--repo", default="jgravelle/jcodemunch-mcp",
-                        help="Repo to test against (must be indexed on the MCP server)")
-    parser.add_argument("--model", default="llama-3.3-70b-versatile",
-                        help="Groq model to use")
-    parser.add_argument("--verbose", "-v", action="store_true",
-                        help="Print full responses")
-    parser.add_argument("--preset", choices=list(PRESETS.keys()),
-                        help="Override allowed_tools preset for all tests")
+    parser = argparse.ArgumentParser(
+        description="Validate Groq x jCodeMunch MCP integration"
+    )
+    parser.add_argument(
+        "--repo",
+        default="jgravelle/jcodemunch-mcp",
+        help="Repo to test against (must be indexed on the MCP server)",
+    )
+    parser.add_argument(
+        "--model", default="llama-3.3-70b-versatile", help="Groq model to use"
+    )
+    parser.add_argument(
+        "--verbose", "-v", action="store_true", help="Print full responses"
+    )
+    parser.add_argument(
+        "--preset",
+        choices=list(PRESETS.keys()),
+        help="Override allowed_tools preset for all tests",
+    )
     args = parser.parse_args()
 
     # Config from env

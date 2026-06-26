@@ -224,7 +224,7 @@ def _extract_anchors_from_task(task: str, index) -> list[str]:
 _INTENT_STRATEGY = {
     "explore": ("orientation", "hotspots", "tectonic"),
     "debug": ("anchor", "callers", "callees", "blast", "runtime"),
-    "refactor": ("anchor", "rename_safe", "delete_safe", "implementations", "similar"),
+    "refactor": ("anchor", "delete_safe", "implementations", "similar"),
     "extend": ("anchor", "implementations", "similar", "decorators"),
     "audit": ("anchor", "risk", "blast", "dead_code_hint", "untested"),
     "review": ("changed", "blast", "risk", "similar_changed"),
@@ -240,7 +240,6 @@ _STAGE_BUDGET_WEIGHT = {
     "callees": 0.15,
     "blast": 0.15,
     "runtime": 0.10,
-    "rename_safe": 0.05,
     "delete_safe": 0.10,
     "implementations": 0.15,
     "similar": 0.15,
@@ -638,23 +637,6 @@ def assemble_task_context(
                 "assemble_task_context: hot_paths skipped: %s", exc, exc_info=True
             )
 
-    def _stage_rename_safe() -> None:
-        # Only meaningful when caller has indicated a rename target — skip
-        # without a clear rename hint. Surface as a hint instead.
-        if not anchor_syms:
-            return
-        _add_entry(
-            "rename_safe",
-            "check_rename_safe",
-            {
-                "hint": (
-                    f"Call check_rename_safe(repo, '{anchor_syms[0]['id']}', new_name=...) "
-                    f"before renaming to detect collisions."
-                ),
-            },
-            tokens_est=40,
-        )
-
     def _stage_delete_safe() -> None:
         try:
             from .check_safe import check_safe  # noqa: PLC0415
@@ -943,7 +925,6 @@ def assemble_task_context(
         "callees": _stage_callees,
         "blast": _stage_blast,
         "runtime": _stage_runtime,
-        "rename_safe": _stage_rename_safe,
         "delete_safe": _stage_delete_safe,
         "implementations": _stage_implementations,
         "similar": _stage_similar,
@@ -964,36 +945,9 @@ def assemble_task_context(
         handler()
         stages_run.append(stage)
 
-    # ── Optional cross-repo layer ──────────────────────────────────────
-    if cross_repo:
-        try:
-            from .get_cross_repo_map import get_cross_repo_map  # noqa: PLC0415
-
-            xr_out = get_cross_repo_map(repo=repo_id, storage_path=storage_path)
-            if isinstance(xr_out, dict) and "error" not in xr_out:
-                repos = xr_out.get("repos", []) or []
-                if repos and total_tokens < token_budget:
-                    _add_entry(
-                        "cross_repo",
-                        "get_cross_repo_map",
-                        {
-                            "depends_on": [
-                                r for r in repos if r.get("repo") == repo_id
-                            ][:1]
-                            + [
-                                {
-                                    "repo": e.get("to_repo", ""),
-                                    "package": e.get("package_name", ""),
-                                }
-                                for e in (xr_out.get("cross_repo_edges", []) or [])[:5]
-                            ],
-                        },
-                    )
-                    stages_run.append("cross_repo")
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(
-                "assemble_task_context: cross_repo skipped: %s", exc, exc_info=True
-            )
+    # ── Optional cross-repo layer (removed in v1.80.8) ────────────────
+    # get_cross_repo_map tool was removed; cross_repo flag is accepted
+    # but this stage now silently skips.
 
     # Token-savings ledger
     raw_bytes = sum(int(s.get("byte_length", 0) or 0) for s in index.symbols)

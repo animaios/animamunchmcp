@@ -23,8 +23,8 @@ from ..storage import IndexStore
 from ._utils import resolve_repo
 from .get_dead_code_v2 import get_dead_code_v2
 from .get_dependency_cycles import get_dependency_cycles
-from .get_hotspots import get_hotspots
 from .get_dependency_graph import _build_adjacency
+from .get_hotspots import get_hotspots
 
 
 def _avg_complexity(index) -> float:
@@ -44,9 +44,15 @@ def _avg_complexity(index) -> float:
 # would otherwise dominate the coupling axis for any well-tested project.
 # Exclusion applies to both the iteration AND the denominator — see
 # _count_unstable_modules below.
-_NON_PRODUCTION_DIR_NAMES = frozenset({
-    "tests", "test", "benchmarks", "examples", "scripts",
-})
+_NON_PRODUCTION_DIR_NAMES = frozenset(
+    {
+        "tests",
+        "test",
+        "benchmarks",
+        "examples",
+        "scripts",
+    }
+)
 
 # Filename suffixes for ecosystems that co-locate tests with source rather
 # than placing them under a tests/ directory:
@@ -89,7 +95,9 @@ def _count_unstable_modules(index) -> tuple[int, int]:
         return 0, 0
     source_files = frozenset(index.source_files)
     alias_map = getattr(index, "alias_map", None)
-    fwd = _build_adjacency(index.imports, source_files, alias_map, getattr(index, "psr4_map", None))
+    fwd = _build_adjacency(
+        index.imports, source_files, alias_map, getattr(index, "psr4_map", None)
+    )
 
     # Build reverse (importers per file). The graph still includes test
     # imports — they credit production Ca and that's the correct shape.
@@ -202,6 +210,7 @@ def get_repo_health(
     untested_pct: Optional[float] = None
     try:
         from .get_untested_symbols import get_untested_symbols
+
         untested = get_untested_symbols(
             repo=f"{owner}/{name}",
             min_confidence=0.5,
@@ -221,26 +230,11 @@ def get_repo_health(
         except (TypeError, ValueError):
             top_hotspot_score = None
 
-    # Phase 7: optional 7th radar axis — runtime_coverage. Sourced from
-    # get_runtime_coverage so the same coverage_pct that a caller would
-    # see via the dedicated tool is what feeds the radar. Failures
-    # (missing index column, no traces, pre-v14 DB) just leave the axis
-    # omitted — the composite then aggregates over the existing 6.
-    runtime_coverage_pct: Optional[float] = None
-    try:
-        from .get_runtime_coverage import get_runtime_coverage
-        rc = get_runtime_coverage(
-            repo=f"{owner}/{name}",
-            storage_path=storage_path,
-        )
-        if "error" not in rc:
-            sources = rc.get("sources") or []
-            if sources:
-                runtime_coverage_pct = float(rc.get("coverage_pct", 0))
-    except Exception:
-        pass
+    # Phase 7: runtime_coverage axis removed (tool purged). Failures
+    # just leave the axis omitted.
 
     from .health_radar import compute_radar
+
     radar = compute_radar(
         avg_complexity=avg_complexity,
         dead_code_pct=dead_code_pct,
@@ -249,7 +243,7 @@ def get_repo_health(
         total_files=coupling_total,  # production-code denominator
         untested_pct=untested_pct,
         top_hotspot_score=top_hotspot_score,
-        runtime_coverage_pct=runtime_coverage_pct,
+        runtime_coverage_pct=None,
     )
 
     elapsed = (time.perf_counter() - t0) * 1000
