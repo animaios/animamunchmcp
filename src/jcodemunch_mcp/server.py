@@ -15,6 +15,9 @@ import time
 from pathlib import Path
 from typing import IO, Any, Optional
 
+# IO type for text file handles
+TextIO = IO[str]
+
 import jsonschema
 from mcp.server import Server
 from mcp.types import (
@@ -3892,7 +3895,7 @@ async def _run_server_with_watcher(
     _log_path = log_path
 
     # Open log file handle if provided
-    _log_file_handle: Optional[IO] = None
+    _log_file_handle: Optional[TextIO] = None
     if _log_path:
         try:
             _log_file_handle = open(_log_path, "a", encoding="utf-8")
@@ -4242,7 +4245,7 @@ async def run_streamable_http_server(host: str, port: int):
     # Session registry: session_id -> (transport, background_task)
     # Keeps server.run() alive across multiple HTTP requests from the same client.
     _sessions: dict[str, StreamableHTTPServerTransport] = {}
-    _session_tasks: dict[str, asyncio.Task] = {}  # type: ignore[type-arg]
+    _session_tasks: dict[str, asyncio.Task[Any]] = {}
     _session_last_seen: dict[str, float] = {}
 
     # Resource caps. A misbehaving or hostile client must not be able to

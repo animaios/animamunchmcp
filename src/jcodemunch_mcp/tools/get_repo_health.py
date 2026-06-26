@@ -26,7 +26,7 @@ import math
 import re
 import time
 from collections import defaultdict
-from typing import Optional
+from typing import Any, Optional
 
 from ..storage import IndexStore
 from ._graph_utils import build_adjacency
@@ -128,7 +128,7 @@ def _count_unstable_modules(index) -> tuple[int, int]:
 
     # Build reverse (importers per file). The graph still includes test
     # imports — they credit production Ca and that's the correct shape.
-    rev: dict[str, list] = {}
+    rev: dict[str, list[str]] = {}
     for src, targets in fwd.items():
         for tgt in targets:
             rev.setdefault(tgt, []).append(src)
@@ -168,11 +168,11 @@ def _find_cycles(adj: dict[str, list[str]]) -> list[list[str]]:
         if start in visited:
             continue
         visited.add(start)
-        stack: list[tuple[str, object]] = [(start, iter(adj.get(start, [])))]
+        stack: list[tuple[str, Any]] = [(start, iter(adj.get(start, [])))]
         while stack:
             node, it = stack[-1]
             try:
-                w = next(it)  # type: ignore[call-overload]
+                w = next(it)
                 if w not in visited:
                     visited.add(w)
                     stack.append((w, iter(adj.get(w, []))))
@@ -222,7 +222,7 @@ def _get_hotspots(
     top_n: int,
     min_complexity: int,
     storage_path,
-) -> dict:
+) -> dict[str, Any]:
     """Compute hotspots inline (absorbed from get_hotspots)."""
     t0 = time.perf_counter()
     git_available = False
@@ -235,7 +235,7 @@ def _get_hotspots(
 
     file_churn_norm = {k.replace("\\", "/"): v for k, v in file_churn.items()}
 
-    candidates: list[dict] = []
+    candidates: list[dict[str, Any]] = []
     for sym in index.symbols:
         if sym.get("kind") not in ("function", "method"):
             continue
@@ -282,7 +282,7 @@ def _get_hotspots(
             "to populate cyclomatic complexity metrics."
         )
 
-    result: dict = {
+    result: dict[str, Any] = {
         "repo": f"{owner}/{name}",
         "top_n": top_n,
         "days": days,
@@ -346,7 +346,7 @@ def _resolve_layers(
 # ---------------------------------------------------------------------------
 
 
-def _coupling_metrics(index, module_path: str, owner: str, name: str) -> dict:
+def _coupling_metrics(index, module_path: str, owner: str, name: str) -> dict[str, Any]:
     """Return coupling metrics for a single module (absorbed from get_coupling_metrics)."""
     start = time.perf_counter()
 
@@ -422,7 +422,7 @@ def _extraction_candidates(
     file_path: str,
     min_complexity: int,
     min_callers: int,
-) -> dict:
+) -> dict[str, Any]:
     """Find extraction candidates (absorbed from get_extraction_candidates)."""
     from ..parser.imports import resolve_specifier
     from ._call_graph import _word_match
@@ -483,7 +483,7 @@ def _extraction_candidates(
 
     importer_files = list(dict.fromkeys(rev.get(file_path, [])))
 
-    candidates: list[dict] = []
+    candidates: list[dict[str, Any]] = []
     for sym in target_syms:
         sym_name = sym.get("name", "")
         caller_files: list[str] = []
@@ -527,7 +527,7 @@ def _extraction_candidates(
 # ---------------------------------------------------------------------------
 
 
-def _churn_rate(index, target: str, days: int, owner: str, name: str) -> dict:
+def _churn_rate(index, target: str, days: int, owner: str, name: str) -> dict[str, Any]:
     """Return git churn metrics for a file or symbol (absorbed from get_churn_rate)."""
     t0 = time.perf_counter()
     days = max(1, days)
@@ -606,7 +606,7 @@ def _churn_rate(index, target: str, days: int, owner: str, name: str) -> dict:
     else:
         assessment = "volatile"
 
-    result: dict = {
+    result: dict[str, Any] = {
         "repo": f"{owner}/{name}",
         "target": target,
         "target_type": target_type,
@@ -642,7 +642,7 @@ def _test_files_that_import(file_path: str, rev: dict[str, list[str]]) -> list[s
 
 
 def _symbol_reached_by_tests(
-    sym: dict,
+    sym: dict[str, Any],
     test_importers: list[str],
     index,
     store: IndexStore,
@@ -685,7 +685,7 @@ def _get_untested_symbols(
     file_pattern: Optional[str] = None,
     min_confidence: float = 0.5,
     max_results: int = 100,
-) -> dict:
+) -> dict[str, Any]:
     """Find untested symbols (absorbed from get_untested_symbols)."""
     import fnmatch
 
@@ -713,7 +713,7 @@ def _get_untested_symbols(
     test_file_set = frozenset(f for f in index.source_files if _is_test_file(f))
     test_importers_cache: dict[str, list[str]] = {}
 
-    symbols: list[dict] = []
+    symbols: list[dict[str, Any]] = []
     total_non_test = 0
 
     for sym in index.symbols:
@@ -779,7 +779,7 @@ def _get_untested_symbols(
     )
 
     elapsed = (time.perf_counter() - start) * 1000
-    result: dict = {
+    result: dict[str, Any] = {
         "repo": f"{owner}/{name}",
         "untested_count": untested_count,
         "total_non_test_symbols": total_non_test,
@@ -802,8 +802,8 @@ def _get_layer_violations(
     index,
     owner: str,
     name: str,
-    rules: Optional[list[dict]],
-) -> dict:
+    rules: Optional[list[dict[str, Any]]],
+) -> dict[str, Any]:
     """Check layer boundary violations (absorbed from get_layer_violations)."""
     start = time.perf_counter()
 
@@ -848,7 +848,7 @@ def _get_layer_violations(
         expand_barrels=True,
     )
 
-    violations: list[dict] = []
+    violations: list[dict[str, Any]] = []
 
     for src_file, targets in fwd.items():
         src_layer = _file_to_layer(src_file, layers)
@@ -888,12 +888,12 @@ def get_repo_health(
     days: int = 90,
     detailed: bool = False,
     file_path: Optional[str] = None,
-    rules: Optional[list[dict]] = None,
+    rules: Optional[list[dict[str, Any]]] = None,
     top_n: int = 5,
     min_confidence: float = 0.5,
     max_results: int = 100,
     storage_path: Optional[str] = None,
-) -> dict:
+) -> dict[str, Any]:
     """Return a one-call triage snapshot of the repository.
 
     Aggregates: symbol counts, dead code %, avg complexity, top hotspots,
@@ -1046,7 +1046,7 @@ def get_repo_health(
     )
 
     # Build base response
-    result: dict = {
+    result: dict[str, Any] = {
         "repo": repo_id,
         "summary": summary,
         "total_files": total_files,
@@ -1066,8 +1066,8 @@ def get_repo_health(
     # Detailed mode: expand with full sub-tool outputs
     # ------------------------------------------------------------------
     if detailed:
-        details: dict = {}
-        detail_errors: list[dict] = []
+        details: dict[str, Any] = {}
+        detail_errors: list[dict[str, Any]] = []
 
         # Full cycles list
         details["cycles"] = cycles
@@ -1194,10 +1194,12 @@ def get_repo_health(
         # Time budget check after untested symbols
         if _check_time_budget(t0):
             details["_timeout"] = True
-            details["_errors"] = detail_errors + [{
-                "sub_tool": "timeout",
-                "error": "Time budget exceeded, aborting remaining detailed checks"
-            }]
+            details["_errors"] = detail_errors + [
+                {
+                    "sub_tool": "timeout",
+                    "error": "Time budget exceeded, aborting remaining detailed checks",
+                }
+            ]
             result["details"] = details
             elapsed = (time.perf_counter() - t0) * 1000
             result["_meta"] = {
@@ -1205,7 +1207,7 @@ def get_repo_health(
                 "days": days,
                 "detailed": detailed,
                 "methodology": "aggregate",
-                "confidence_level": "medium"
+                "confidence_level": "medium",
             }
             return result
 

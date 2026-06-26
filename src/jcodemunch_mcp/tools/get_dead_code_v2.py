@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """get_dead_code_v2 — multi-signal dead code detection with confidence scores.
 
 Three independent evidence signals per symbol:
@@ -11,13 +13,11 @@ Only symbols with kind ``function`` or ``method`` are analysed (classes and
 constants are excluded to reduce noise).
 """
 
-from __future__ import annotations
-
 import json
 import re
 import time
 from collections import deque
-from typing import Optional
+from typing import Any, Optional
 
 from ..parser.context._route_utils import ENTRY_POINT_DECORATOR_RE
 from ..parser.imports import resolve_specifier
@@ -131,9 +131,9 @@ def _barrel_exports(
     store,
     owner,
     repo_name,
-    source_files: frozenset,
-    alias_map: dict,
-    psr4_map: Optional[dict] = None,
+    source_files: frozenset[str],
+    alias_map: dict[str, Any],
+    psr4_map: Optional[dict[str, Any]] = None,
 ) -> set[str]:
     """Return symbol names exported from any barrel / __init__ file.
 
@@ -273,7 +273,7 @@ def get_dead_code_v2(
     max_results: int = 100,
     file_pattern: Optional[str] = None,
     storage_path: Optional[str] = None,
-) -> dict:
+) -> dict[str, Any]:
     """Find likely-dead functions and methods using three independent signals.
 
     Args:
@@ -423,7 +423,7 @@ def get_dead_code_v2(
                     callee_has_caller.add(sym["id"])
                     break
 
-    dead_symbols: list[dict] = []
+    dead_symbols: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
 
     for sym in index.symbols:
@@ -494,7 +494,7 @@ def get_dead_code_v2(
         truncated = True
 
     timing_ms = round((time.monotonic() - t0) * 1000, 1)
-    result: dict = {
+    result: dict[str, Any] = {
         "repo": f"{owner}/{name}",
         "dead_symbols": dead_symbols,
         "total_analysed": sum(
@@ -543,7 +543,7 @@ def _call_graph_only_dead_code(
     include_tests: bool = False,
     max_results: int = 100,
     file_pattern: Optional[str] = None,
-) -> dict:
+) -> dict[str, Any]:
     """Fallback dead-code detection when ``index.imports`` is empty.
 
     Single-file libraries (pre-bundled lodash 4.x, monolithic IIFEs,
@@ -581,7 +581,7 @@ def _call_graph_only_dead_code(
     # Names that have at least one caller in the indexed call graph.
     called_names: set[str] = {ref for (_caller_file, ref) in callers_by_name.keys()}
 
-    dead_symbols: list[dict] = []
+    dead_symbols: list[dict[str, Any]] = []
     seen: set[str] = set()
     total_analysed = 0
 

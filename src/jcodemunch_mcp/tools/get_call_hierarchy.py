@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """get_call_hierarchy: callers and callees for any indexed symbol, N levels deep.
 
 Optionally includes signal chain discovery (``chains=True``) — the former
@@ -10,7 +12,7 @@ import logging
 import re
 import time
 from collections import defaultdict, deque
-from typing import Optional
+from typing import Any, Optional
 
 from ..storage import IndexStore
 from ._call_graph import (
@@ -46,7 +48,7 @@ def _compute_impact(
     reverse_adj,
     symbols_by_file,
     include_decisions: bool = False,
-) -> dict:
+) -> dict[str, Any]:
     """Walk the call graph transitively from callers — the get_impact_preview logic.
 
     Returns the impact sub-dict (affected_files, affected_symbol_count,
@@ -54,16 +56,16 @@ def _compute_impact(
     decisions).
     """
     sym_id = sym.get("id", "")
-    symbol_index: dict[str, dict] = getattr(index, "_symbol_index", {})
+    symbol_index: dict[str, dict[str, Any]] = getattr(index, "_symbol_index", {})
 
     # DFS collecting call chains.
     # visited maps symbol_id → chain that reached it (shortest first-seen).
     # chain = [sym_id (target), ..., caller_id]
     visited: dict[str, list[str]] = {sym_id: [sym_id]}
-    affected_symbols: list[dict] = []
+    affected_symbols: list[dict[str, Any]] = []
 
     # Stack entries: (sym_dict, chain_up_to_this_sym)
-    stack: list[tuple[dict, list[str]]] = [(sym, [sym_id])]
+    stack: list[tuple[dict[str, Any], list[str]]] = [(sym, [sym_id])]
 
     while stack:
         curr_sym, curr_chain = stack.pop()
@@ -98,7 +100,7 @@ def _compute_impact(
                 stack.append((caller_full, new_chain))
 
     # Group by file
-    by_file: dict[str, list[dict]] = defaultdict(list)
+    by_file: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for entry in affected_symbols:
         by_file[entry["file"]].append(entry)
 
@@ -125,7 +127,7 @@ def _compute_impact(
             "call_chain = [target_id, intermediate..., caller_id]."
         )
 
-    result: dict = {
+    result: dict[str, Any] = {
         "affected_files": len(by_file),
         "affected_symbol_count": len(affected_symbols),
         "affected_symbols": affected_symbols,
@@ -220,7 +222,7 @@ _KIND_ORDER = [
 
 
 def _chains_classify_gateway(
-    sym: dict, file_content: Optional[str] = None
+    sym: dict[str, Any], file_content: Optional[str] = None
 ) -> Optional[str]:
     """Return the gateway kind for a symbol, or None if it's not a gateway."""
     decorators = sym.get("decorators") or []
@@ -247,7 +249,7 @@ def _chains_classify_gateway(
     return None
 
 
-def _chains_extract_label(sym: dict, kind: str) -> str:
+def _chains_extract_label(sym: dict[str, Any], kind: str) -> str:
     """Build a human-readable label for a gateway symbol."""
     sym_name = sym.get("name", "")
     sym_file = sym.get("file", "")
@@ -335,10 +337,10 @@ def _chains_bfs(
     store: IndexStore,
     owner: str,
     repo_name: str,
-    gateway_sym: dict,
-    symbols_by_file: dict[str, list[dict]],
+    gateway_sym: dict[str, Any],
+    symbols_by_file: dict[str, list[dict[str, Any]]],
     max_depth: int,
-) -> tuple[list[dict], int]:
+) -> tuple[list[dict[str, Any]], int]:
     """BFS forward from a gateway through callees.
 
     Returns (chain_symbols, max_depth_reached) where each chain_symbol is
@@ -346,10 +348,10 @@ def _chains_bfs(
     """
     sym_id = gateway_sym.get("id", "")
     visited: set[str] = {sym_id}
-    queue: deque[tuple[dict, int]] = deque()
-    chain: list[dict] = []
+    queue: deque[tuple[dict[str, Any], int]] = deque()
+    chain: list[dict[str, Any]] = []
     depth_reached = 0
-    symbol_index: dict[str, dict] = getattr(index, "_symbol_index", {})
+    symbol_index: dict[str, dict[str, Any]] = getattr(index, "_symbol_index", {})
 
     # Depth-1 callees
     for c in find_direct_callees(
@@ -389,7 +391,7 @@ def _compute_signal_chains(
     kind: Optional[str],
     max_depth: int,
     include_flow_edges: bool = True,
-) -> dict:
+) -> dict[str, Any]:
     """Full signal chain discovery — the former get_signal_chains logic.
 
     Returns the discovery-mode result (all gateways, all chains, orphan stats).
@@ -418,7 +420,7 @@ def _compute_signal_chains(
     # ------------------------------------------------------------------
     # Phase 1: detect all gateways
     # ------------------------------------------------------------------
-    gateways: list[tuple[dict, str, str]] = []  # (sym, kind, label)
+    gateways: list[tuple[dict[str, Any], str, str]] = []  # (sym, kind, label)
 
     for sym in index.symbols:
         if sym.get("kind") not in ("function", "method"):
@@ -434,7 +436,7 @@ def _compute_signal_chains(
     # ------------------------------------------------------------------
     # Phase 1b: framework flow edges the call graph can't see.
     # ------------------------------------------------------------------
-    flow_edges: list[dict] = []
+    flow_edges: list[dict[str, Any]] = []
     renders_by_symbol: dict[str, list[str]] = {}
     flow_summary = {"route_gateways": 0, "unresolved_routes": 0, "render_views": 0}
     if include_flow_edges:
@@ -450,7 +452,7 @@ def _compute_signal_chains(
             logger.debug("flow-edge resolution failed", exc_info=True)
             flow_edges = []
 
-        symbol_index_fe: dict[str, dict] = getattr(index, "_symbol_index", {})
+        symbol_index_fe: dict[str, dict[str, Any]] = getattr(index, "_symbol_index", {})
         existing_gateway_ids = {gw_sym.get("id", "") for gw_sym, _, _ in gateways}
         seen_route_ids: set[str] = set()
         for e in flow_edges:
@@ -489,7 +491,7 @@ def _compute_signal_chains(
             "If your framework uses a different pattern, the call graph can "
             "still be explored with get_call_hierarchy."
         )
-        no_gw_meta: dict = {"timing_ms": round(elapsed, 1)}
+        no_gw_meta: dict[str, Any] = {"timing_ms": round(elapsed, 1)}
         if include_flow_edges:
             no_gw_meta["flow_edges"] = flow_summary
         return {
@@ -504,7 +506,7 @@ def _compute_signal_chains(
     # ------------------------------------------------------------------
     # Phase 2: trace BFS chains from each gateway
     # ------------------------------------------------------------------
-    chains: list[dict] = []
+    chains: list[dict[str, Any]] = []
     # Track which symbol IDs appear on any chain (for orphan detection)
     symbol_ids_on_chains: set[str] = set()
 
@@ -542,7 +544,7 @@ def _compute_signal_chains(
         for cs in chain_syms:
             sym_names.append(cs.get("name", ""))
 
-        chain_entry: dict = {
+        chain_entry: dict[str, Any] = {
             "gateway": gw_id,
             "gateway_name": gw_sym.get("name", ""),
             "kind": gw_kind,
@@ -625,7 +627,7 @@ def get_call_hierarchy(
     chains: bool = False,
     kind: Optional[str] = None,
     max_depth: int = 5,
-) -> dict:
+) -> dict[str, Any]:
     """Return incoming callers and outgoing callees for a symbol, N levels deep.
 
     Uses AST-derived call detection — no LSP required. Callers are found by
@@ -708,8 +710,8 @@ def get_call_hierarchy(
         direction="reverse",
     )
 
-    callers: list[dict] = []
-    callees: list[dict] = []
+    callers: list[dict[str, Any]] = []
+    callees: list[dict[str, Any]] = []
     depth_reached = 0
 
     if direction in ("callers", "both"):
@@ -729,10 +731,10 @@ def get_call_hierarchy(
     # Build dispatches section from dispatch edges
     ctx_meta = getattr(index, "context_metadata", None) or {}
     dispatch_edge_data = ctx_meta.get("dispatch_edges", [])
-    dispatches: list[dict] = []
+    dispatches: list[dict[str, Any]] = []
     if dispatch_edge_data:
         # Group by (interface_name, method_name)
-        grouped: dict[tuple[str, str], list[dict]] = {}
+        grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
         for de in dispatch_edge_data:
             key = (de.get("interface_name", ""), de.get("method_name", ""))
             grouped.setdefault(key, []).append(de)
@@ -809,7 +811,7 @@ def get_call_hierarchy(
         r = edge.get("resolution", "unknown")
         resolution_counts[r] = resolution_counts.get(r, 0) + 1
 
-    response: dict = {
+    response: dict[str, Any] = {
         "repo": f"{owner}/{name}",
         "symbol": {
             "id": sym.get("id", ""),
@@ -868,7 +870,7 @@ def get_call_hierarchy(
     from ..runtime.confidence import attach_runtime_confidence as _attach_runtime
 
     _db_path_str = str(store._sqlite._db_path(owner, name))
-    _stamped: list[dict] = [response["symbol"], *callers, *callees]
+    _stamped: list[dict[str, Any]] = [response["symbol"], *callers, *callees]
     _summary = _attach_runtime(_stamped, _db_path_str, id_field="id")
     if _summary:
         response["_meta"]["runtime_freshness"] = _summary

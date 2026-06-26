@@ -1,5 +1,9 @@
 """Compact encoder for find_references."""
 
+from __future__ import annotations
+
+from typing import Any
+
 from .. import schema_driven as sd
 
 TOOLS = ("find_references",)
@@ -58,7 +62,7 @@ _RELATED_NESTED = {"symbol": ["id", "name", "kind", "file", "line"]}
 LEGACY_ENCODING_IDS = ("fi2",)
 
 
-def _flatten(response: dict) -> dict:
+def _flatten(response: dict) -> dict[str, Any]:
     """Replace nested references[].matches[] with flat rows."""
     out = {k: v for k, v in response.items() if k != "references"}
     rows = []
@@ -88,11 +92,11 @@ def _flatten(response: dict) -> dict:
     return out
 
 
-def _regroup(decoded: dict) -> dict:
+def _regroup(decoded: dict) -> dict[str, Any]:
     """Inverse of _flatten: rebuild references list."""
     rows = decoded.pop(_ROWS_KEY, None) or []
     empty_groups = decoded.pop(_EMPTY_GROUPS_KEY, None) or []
-    groups: dict[str, list[dict]] = {}
+    groups: dict[str, list[dict[str, Any]]] = {}
     order: list[str] = []
     for file_path in empty_groups:
         if not isinstance(file_path, str):
@@ -116,7 +120,7 @@ def _regroup(decoded: dict) -> dict:
     return decoded
 
 
-def _flatten_importers(response: dict) -> dict:
+def _flatten_importers(response: dict) -> dict[str, Any]:
     """Replace nested importers[] with flat rows (former find_importers shape)."""
     out = {k: v for k, v in response.items() if k != "importers"}
     rows = []
@@ -134,7 +138,7 @@ def _flatten_importers(response: dict) -> dict:
     return out
 
 
-def _unflatten_importers(decoded: dict) -> dict:
+def _unflatten_importers(decoded: dict) -> dict[str, Any]:
     """Inverse of _flatten_importers: rebuild importers list."""
     rows = decoded.pop(_IMPORTERS_KEY, None) or []
     decoded["importers"] = [
@@ -148,7 +152,7 @@ def _unflatten_importers(decoded: dict) -> dict:
     return decoded
 
 
-def _flatten_related(response: dict) -> dict:
+def _flatten_related(response: dict) -> dict[str, Any]:
     """Replace nested related[] with flat rows."""
     out = {k: v for k, v in response.items() if k != "related"}
     rows = []
@@ -170,7 +174,7 @@ def _flatten_related(response: dict) -> dict:
     return out
 
 
-def _unflatten_related(decoded: dict) -> dict:
+def _unflatten_related(decoded: dict) -> dict[str, Any]:
     """Inverse of _flatten_related: rebuild related list."""
     rows = decoded.pop(_RELATED_KEY, None) or []
     decoded["related"] = [
@@ -188,7 +192,7 @@ def _unflatten_related(decoded: dict) -> dict:
     return decoded
 
 
-def encode(tool: str, response: dict) -> tuple[str, str]:
+def encode(tool: str, response: dict[str, Any]) -> tuple[str, str]:
     # Related mode (former get_related_symbols)
     if (
         "related" in response
@@ -238,7 +242,7 @@ def encode(tool: str, response: dict) -> tuple[str, str]:
     )
 
 
-def decode(payload: str) -> dict:
+def decode(payload: str) -> dict[str, Any]:
     # Decode with combined tables so both refs and importers rows are recovered
     combined_tables = _REFS_TABLES + _IMPORTERS_TABLES + _RELATED_TABLES
     combined_scalars = tuple(
