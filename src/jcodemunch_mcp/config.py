@@ -100,10 +100,7 @@ def _global_storage_path() -> Path:
     return Path(os.environ.get("CODE_INDEX_PATH", str(Path.home() / ".code-index")))
 
 
-_LANG_BLOCK_RE = re.compile(
-    r'("languages"\s*:\s*)(\[.*?\]|null)',
-    re.DOTALL
-)
+_LANG_BLOCK_RE = re.compile(r'("languages"\s*:\s*)(\[.*?\]|null)', re.DOTALL)
 # NOTE: The non-greedy \[.*?\] pattern will break if a ] character appears
 # inside a comment within the languages block (e.g., // see note [1]).
 # This cannot happen with auto-generated content but is a limitation for
@@ -138,6 +135,7 @@ def _parse_active_languages(content: str) -> set[str] | None:
 def _build_languages_block(detected: set[str]) -> str:
     """Build a languages array block with detected languages uncommented."""
     from .parser.languages import LANGUAGE_REGISTRY
+
     all_langs = sorted(LANGUAGE_REGISTRY.keys())
     lines = []
     for lang in all_langs:
@@ -145,7 +143,7 @@ def _build_languages_block(detected: set[str]) -> str:
             lines.append(f'     "{lang}",')
         else:
             lines.append(f'     // "{lang}",')
-    return '"languages": [\n' + '\n'.join(lines) + '\n  ]'
+    return '"languages": [\n' + "\n".join(lines) + "\n  ]"
 
 
 def invalidate_project_config_cache(source_root: str) -> None:
@@ -196,7 +194,7 @@ def _apply_languages_adaptation(content: str, detected: set[str]) -> str | None:
         logger.debug("No languages block found — cannot apply adaptation")
         return None
 
-    new_content = content[:m.start()] + new_block + content[m.end():]
+    new_content = content[: m.start()] + new_block + content[m.end() :]
     return new_content
 
 
@@ -277,6 +275,7 @@ def apply_adaptive_languages(source_root: str, detected: set[str]) -> bool:
     logger.info("Adaptive languages: %s → %s", local_path, sorted(detected))
     return True
 
+
 DEFAULTS = {
     "use_ai_summaries": "auto",
     "trusted_folders": [],
@@ -298,44 +297,97 @@ DEFAULTS = {
     "tool_profile": "full",  # "core", "standard", or "full"
     "tool_tier_bundles": {
         "core": [
-            "index_repo", "index_folder", "index_file",
-            "list_repos", "resolve_repo",
-            "get_repo_outline", "get_file_tree", "get_file_outline",
-            "search_symbols", "get_symbol_source", "get_file_content",
-            "search_text", "get_context_bundle", "get_ranked_context",
+            "index_repo",
+            "index_folder",
+            "index_file",
+            "list_repos",
+            "resolve_repo",
+            "get_repo_outline",
+            "get_file_tree",
+            "get_file_outline",
+            "search_symbols",
+            "get_symbol_source",
+            "get_file_content",
+            "search_text",
+            "get_context_bundle",
+            "get_ranked_context",
             "assemble_task_context",
-            "find_importers", "find_references",
+            "find_importers",
+            "find_references",
         ],
         "standard": [
             # core ∪ these additional tools
-            "index_repo", "index_folder", "index_file",
-            "list_repos", "resolve_repo",
-            "get_repo_outline", "get_file_tree", "get_file_outline",
-            "search_symbols", "get_symbol_source", "get_file_content",
-            "search_text", "get_context_bundle", "get_ranked_context",
+            "index_repo",
+            "index_folder",
+            "index_file",
+            "list_repos",
+            "resolve_repo",
+            "get_repo_outline",
+            "get_file_tree",
+            "get_file_outline",
+            "search_symbols",
+            "get_symbol_source",
+            "get_file_content",
+            "search_text",
+            "get_context_bundle",
+            "get_ranked_context",
             "assemble_task_context",
-            "find_importers", "find_references",
-            "summarize_repo", "embed_repo", "suggest_queries",
-            "search_columns", "check_references",
-            "get_dependency_graph", "get_class_hierarchy",
-            "get_related_symbols", "get_call_hierarchy",
-            "get_blast_radius", "check_rename_safe", "check_delete_safe", "check_edit_safe",
+            "find_importers",
+            "find_references",
+            "summarize_repo",
+            "embed_repo",
+            "suggest_queries",
+            "search_columns",
+            "check_references",
+            "get_dependency_graph",
+            "get_class_hierarchy",
+            "get_related_symbols",
+            "get_call_hierarchy",
+            "get_blast_radius",
+            "check_rename_safe",
+            "check_safe",
             "find_implementations",
-            "get_impact_preview", "get_changed_symbols",
-            "get_symbol_diff", "get_symbol_provenance",
-            "get_pr_risk_profile", "get_symbol_complexity",
-            "get_churn_rate", "get_delivery_metrics", "get_hotspots",
-            "get_symbol_importance", "get_repo_map", "find_dead_code",
-            "get_dead_code_v2", "get_untested_symbols", "find_similar_symbols",
-            "get_repo_health", "search_ast", "winnow_symbols",
-            "get_dependency_cycles", "get_coupling_metrics",
-            "get_layer_violations", "get_cross_repo_map", "get_group_contracts",
-            "get_tectonic_map", "get_signal_chains", "render_diagram",
-            "get_project_intel", "list_workspaces", "invalidate_cache", "get_watch_status",
-            "analyze_perf", "tune_weights", "check_embedding_drift", "suggest_corrections",
-            "digest", "diff_health_radar", "get_file_risk",
-            "import_runtime_signal", "get_runtime_coverage",
-            "find_hot_paths", "find_unused_paths", "get_redaction_log",
+            "get_impact_preview",
+            "get_changed_symbols",
+            "get_symbol_diff",
+            "get_symbol_provenance",
+            "get_pr_risk_profile",
+            "get_symbol_complexity",
+            "get_churn_rate",
+            "get_delivery_metrics",
+            "get_hotspots",
+            "get_symbol_importance",
+            "get_repo_map",
+            "get_dead_code_v2",
+            "get_untested_symbols",
+            "find_similar_symbols",
+            "get_repo_health",
+            "search_ast",
+            "winnow_symbols",
+            "get_dependency_cycles",
+            "get_coupling_metrics",
+            "get_layer_violations",
+            "get_cross_repo_map",
+            "get_group_contracts",
+            "get_tectonic_map",
+            "get_signal_chains",
+            "render_diagram",
+            "get_project_intel",
+            "list_workspaces",
+            "invalidate_cache",
+            "get_watch_status",
+            "analyze_perf",
+            "tune_weights",
+            "check_embedding_drift",
+            "suggest_corrections",
+            "digest",
+            "diff_health_radar",
+            "get_file_risk",
+            "import_runtime_signal",
+            "get_runtime_coverage",
+            "find_hot_paths",
+            "find_unused_paths",
+            "get_redaction_log",
         ],
     },
     "model_tier_map": {
@@ -353,10 +405,10 @@ DEFAULTS = {
     "server_output": "adaptive",  # "raw", "encoded", or "adaptive"
     "server_output_threshold": 0.15,  # Minimum savings ratio for adaptive mode
     "disabled_tools": ["test_summarizer"],
-    # When True, `disabled_tools` may include `set_tool_tier` and
-    # `announce_model`. Default False keeps the in-session tier-switch
-    # safety net intact; opt-in is for users who want to claw back two
-    # tool slots (e.g. against Antigravity's 50-tool cap) and accept that
+    # When True, `disabled_tools` may include `set_tool_tier`.
+    # Default False keeps the in-session tier-switch
+    # safety net intact; opt-in is for users who want to claw back one
+    # tool slot (e.g. against Antigravity's 50-tool cap) and accept that
     # they cannot switch tiers mid-session. Issue #299, requested by @kecsap.
     "allow_disabling_tier_controls": False,
     "descriptions": {},
@@ -523,7 +575,7 @@ def _strip_jsonc(text: str) -> str:
         ch = text[i]
         if in_str:
             result.append(ch)
-            if ch == '\\' and i + 1 < n:
+            if ch == "\\" and i + 1 < n:
                 result.append(text[i + 1])
                 i += 2
                 continue
@@ -534,31 +586,31 @@ def _strip_jsonc(text: str) -> str:
             in_str = True
             result.append(ch)
             i += 1
-        elif ch == '/' and i + 1 < n and text[i + 1] == '/':
+        elif ch == "/" and i + 1 < n and text[i + 1] == "/":
             # Line comment — strip trailing comma and spaces from previous content
-            if result and result[-1] == ',':
+            if result and result[-1] == ",":
                 result.pop()
-                while result and result[-1] in (' ', '\t'):
+                while result and result[-1] in (" ", "\t"):
                     result.pop()
-            end = text.find('\n', i)
+            end = text.find("\n", i)
             i = n if end == -1 else end
-        elif ch == '/' and i + 1 < n and text[i + 1] == '*':
+        elif ch == "/" and i + 1 < n and text[i + 1] == "*":
             # Block comment — skip to */
-            end = text.find('*/', i + 2)
+            end = text.find("*/", i + 2)
             if end == -1:
                 i = n
             else:
                 end_i = end + 2
-                if end_i < n and text[end_i] == ',':
+                if end_i < n and text[end_i] == ",":
                     # Comma immediately after */ — strip it
                     i = end_i + 1
-                elif end_i < n and text[end_i] == '\n':
+                elif end_i < n and text[end_i] == "\n":
                     # Newline after */ — strip trailing comma only
                     # Walk back to find the last non-whitespace character
                     j = len(result) - 1
-                    while j >= 0 and result[j] in (' ', '\t'):
+                    while j >= 0 and result[j] in (" ", "\t"):
                         j -= 1
-                    if j >= 0 and result[j] == ',':
+                    if j >= 0 and result[j] == ",":
                         result.pop()  # pop comma only
                     i = end_i
                 else:
@@ -567,7 +619,7 @@ def _strip_jsonc(text: str) -> str:
             result.append(ch)
             i += 1
 
-    output = ''.join(result)
+    output = "".join(result)
     final = []
     j = 0
     m = len(output)
@@ -576,7 +628,7 @@ def _strip_jsonc(text: str) -> str:
         if ch == '"':
             backslash_count = 0
             k = j - 1
-            while k >= 0 and output[k] == '\\':
+            while k >= 0 and output[k] == "\\":
                 backslash_count += 1
                 k -= 1
             if backslash_count % 2 == 1:
@@ -590,18 +642,18 @@ def _strip_jsonc(text: str) -> str:
                 if output[j] == '"':
                     backslash_count = 0
                     k = j - 1
-                    while k >= 0 and output[k] == '\\':
+                    while k >= 0 and output[k] == "\\":
                         backslash_count += 1
                         k -= 1
                     if backslash_count % 2 == 0:
                         j += 1
                         break
                 j += 1
-        elif ch in ('}', ']'):
+        elif ch in ("}", "]"):
             # Strip trailing whitespace and comma before this
-            while final and final[-1] in (' ', '\t', '\n', '\r'):
+            while final and final[-1] in (" ", "\t", "\n", "\r"):
                 final.pop()
-            if final and final[-1] == ',':
+            if final and final[-1] == ",":
                 final.pop()
             final.append(ch)
             j += 1
@@ -609,7 +661,7 @@ def _strip_jsonc(text: str) -> str:
             final.append(ch)
             j += 1
 
-    return ''.join(final)
+    return "".join(final)
 
 
 def _validate_type(key: str, value: Any, expected_type: type | tuple) -> bool:
@@ -652,7 +704,9 @@ def load_config(storage_path: str | None = None) -> None:
     _explicit_keys: set[str] = set()  # Track keys explicitly set in config file
     if config_path.exists():
         try:
-            content = config_path.read_text(encoding="utf-8-sig")  # utf-8-sig handles BOM
+            content = config_path.read_text(
+                encoding="utf-8-sig"
+            )  # utf-8-sig handles BOM
             stripped = _strip_jsonc(content)
             loaded = json.loads(stripped)
 
@@ -720,7 +774,9 @@ def load_config(storage_path: str | None = None) -> None:
     _apply_env_var_fallback(_explicit_keys)
 
 
-def _parse_env_value(value: str, expected_type: type | tuple, key: str | None = None) -> Any:
+def _parse_env_value(
+    value: str, expected_type: type | tuple, key: str | None = None
+) -> Any:
     """Parse env var string to expected type."""
     # use_ai_summaries accepts "auto", "true", "false" as strings;
     # generic bool parsing would coerce "auto" to False.
@@ -771,7 +827,9 @@ def _parse_env_value(value: str, expected_type: type | tuple, key: str | None = 
                         result[ext] = lang
                 return result
         else:
-            logger.warning("Unknown config type %s for env var value: %s", expected_type, value)
+            logger.warning(
+                "Unknown config type %s for env var value: %s", expected_type, value
+            )
             return None
     except (ValueError, json.JSONDecodeError):
         logger.warning("Failed to parse env var value: %s", value)
@@ -830,6 +888,7 @@ def _resolve_repo_key(repo: str) -> str | None:
     # Miss: query store without holding the lock (I/O)
     try:
         from .storage.index_store import IndexStore
+
         store = IndexStore(base_path=str(_global_storage_path()))
         repos = store.list_repos()
         result = None
@@ -874,8 +933,12 @@ def _type_label(t: Any) -> str:
     if isinstance(t, tuple):
         t = next((x for x in t if x is not type(None)), t[0])
     return {
-        bool: "bool", int: "int", float: "float",
-        str: "string", list: "list", dict: "dict",
+        bool: "bool",
+        int: "int",
+        float: "float",
+        str: "string",
+        list: "list",
+        dict: "dict",
     }.get(t, "string")
 
 
@@ -884,7 +947,10 @@ def _raw_jsonc_keys(path: Path) -> set[str]:
     try:
         if path.is_file():
             import json
-            return set(json.loads(_strip_jsonc(path.read_text(encoding="utf-8-sig"))).keys())
+
+            return set(
+                json.loads(_strip_jsonc(path.read_text(encoding="utf-8-sig"))).keys()
+            )
     except (OSError, ValueError):
         pass
     return set()
@@ -905,14 +971,17 @@ def _config_meta(template: str) -> dict[str, tuple[str | None, str]]:
     off-by-one that mis-described several keys.) Powers grouped config UIs (the
     Console) and self-documenting dashboards."""
     import re
+
     header_re = re.compile(r"^\s*//\s*=+\s*(.+?)\s*=+\s*$")
     key_re = re.compile(r'^  (?:// *)?"(\w+)" *:')
     section: str | None = None
-    pending: list[str] = []            # lead comments awaiting the next key (above-style)
-    parts: dict[str, list[str]] = {}   # key -> description fragments (mutable; below-style appends)
+    pending: list[str] = []  # lead comments awaiting the next key (above-style)
+    parts: dict[
+        str, list[str]
+    ] = {}  # key -> description fragments (mutable; below-style appends)
     sections: dict[str, str | None] = {}  # key -> section, first occurrence wins
-    last_key: str | None = None        # most recent key, for below-style comments
-    after_key = False                  # True between a key line and the next blank/value/header
+    last_key: str | None = None  # most recent key, for below-style comments
+    after_key = False  # True between a key line and the next blank/value/header
     for line in template.splitlines():
         hm = header_re.match(line)
         if hm:  # === Section === header ends any open block
@@ -924,7 +993,9 @@ def _config_meta(template: str) -> dict[str, tuple[str | None, str]]:
         km = key_re.match(line)
         if km:  # a key entry (active or commented-out)
             k = km.group(1)
-            if k not in sections:  # first occurrence wins (commented example vs active key)
+            if (
+                k not in sections
+            ):  # first occurrence wins (commented example vs active key)
                 sections[k] = section
                 parts[k] = list(pending)  # above-style lead block (may be empty)
             pending = []
@@ -936,7 +1007,9 @@ def _config_meta(template: str) -> dict[str, tuple[str | None, str]]:
             c = s[2:].strip()
             if c and "===" not in c:
                 if after_key and last_key is not None:
-                    parts[last_key].append(c)  # below-style comment for the key just seen
+                    parts[last_key].append(
+                        c
+                    )  # below-style comment for the key just seen
                 else:
                     pending.append(c)  # lead comment for the next key
         else:  # blank line / value continuation closes the current comment block
@@ -975,15 +1048,17 @@ def config_report(repo: str | None = None) -> list[dict[str, Any]]:
         else:
             source = "default"
         group, description = meta.get(key, (None, ""))
-        report.append({
-            "key": key,
-            "type": _type_label(CONFIG_TYPES.get(key)),
-            "value": get(key, default, repo=repo),
-            "default": default,
-            "source": source,
-            "group": group or "Other",
-            "description": description,
-        })
+        report.append(
+            {
+                "key": key,
+                "type": _type_label(CONFIG_TYPES.get(key)),
+                "value": get(key, default, repo=repo),
+                "default": default,
+                "source": source,
+                "group": group or "Other",
+                "description": description,
+            }
+        )
     return report
 
 
@@ -1098,6 +1173,7 @@ def _list_repos_for_config() -> list[dict]:
     Deferred import to avoid circular dependency at module load time.
     """
     from .storage.index_store import IndexStore
+
     storage_path = os.environ.get("CODE_INDEX_PATH", str(Path.home() / ".code-index"))
     store = IndexStore(base_path=storage_path)
     return store.list_repos()
@@ -1204,11 +1280,12 @@ def _extract_template_keys(template: str) -> list[str]:
     Returns them in order of first appearance.
     """
     import re
+
     seen: set[str] = set()
     result: list[str] = []
     # Match lines with exactly 2 leading spaces (top-level in the outer {})
     # Handles both active keys and commented-out keys.
-    for m in re.finditer(r'^  (?:// *)?\"(\w+)\" *:', template, re.MULTILINE):
+    for m in re.finditer(r"^  (?:// *)?\"(\w+)\" *:", template, re.MULTILINE):
         key = m.group(1)
         if key not in seen:
             seen.add(key)
@@ -1224,6 +1301,7 @@ def _extract_section_for_key(template: str, key: str) -> str | None:
     the key is not found.
     """
     import re
+
     lines = template.splitlines()
 
     # Find the line index where this key appears (active or commented-out)
@@ -1319,9 +1397,12 @@ def upgrade_config(config_path: "Path") -> tuple[list[str], list[str]]:
     return added, warnings
 
 
-def _update_version_field(content: str, version: str, config_path: "Path | None") -> str:
+def _update_version_field(
+    content: str, version: str, config_path: "Path | None"
+) -> str:
     """Update the version field in config content. Writes to disk if config_path given."""
     import re
+
     updated = re.sub(
         r'("version"\s*:\s*)"[^"]*"',
         rf'\g<1>"{version}"',
@@ -1351,7 +1432,9 @@ def set_bool_key(content: str, key: str, value: bool) -> str:
 
     new_literal = "true" if value else "false"
     pattern = re.compile(
-        r'^(?P<indent>[ \t]*)(?://[ \t]*)?"' + re.escape(key) + r'"[ \t]*:[ \t]*(?:true|false)[ \t]*,?[ \t]*$',
+        r'^(?P<indent>[ \t]*)(?://[ \t]*)?"'
+        + re.escape(key)
+        + r'"[ \t]*:[ \t]*(?:true|false)[ \t]*,?[ \t]*$',
         re.MULTILINE,
     )
 
@@ -1362,7 +1445,9 @@ def set_bool_key(content: str, key: str, value: bool) -> str:
     return _inject_blocks_before_closing_brace(content, [f'  "{key}": {new_literal},'])
 
 
-def apply_share_savings(value: bool, storage_path: "Path | str | None" = None) -> "Path":
+def apply_share_savings(
+    value: bool, storage_path: "Path | str | None" = None
+) -> "Path":
     """Apply an explicit share_savings setting to the user's config.jsonc.
 
     Creates the config from the current template if it doesn't exist yet, then sets
@@ -1415,8 +1500,10 @@ def _inject_blocks_before_closing_brace(content: str, blocks: list[str]) -> str:
 
     separator = "\n\n  // === Added by config --upgrade ===\n"
     injection = separator + "\n\n".join(
-        "\n".join("  " + line if line and not line.startswith("  ") else line
-                  for line in block.splitlines())
+        "\n".join(
+            "  " + line if line and not line.startswith("  ") else line
+            for line in block.splitlines()
+        )
         for block in blocks
     )
     return before + injection + "\n" + content[last_brace:]
@@ -1603,7 +1690,9 @@ def coerce_config_value(key: str, raw: Any) -> Any:
     )
 
 
-def set_config_value(key: str, raw: Any, storage_path: "Path | str | None" = None) -> Any:
+def set_config_value(
+    key: str, raw: Any, storage_path: "Path | str | None" = None
+) -> Any:
     """Validate + persist one config key to the global (or given) config.jsonc.
 
     Returns the coerced value actually written. Creates the file from the
@@ -1646,9 +1735,7 @@ def unset_key(content: str, key: str) -> str:
     """
     import re
 
-    pattern = re.compile(
-        r"^([ \t]*)\"" + re.escape(key) + r"\"[ \t]*:", re.MULTILINE
-    )
+    pattern = re.compile(r"^([ \t]*)\"" + re.escape(key) + r"\"[ \t]*:", re.MULTILINE)
     m = pattern.search(content)
     if not m:
         return content
@@ -1702,106 +1789,103 @@ def generate_template() -> str:
 
     # All available tools (for disabled_tools reference) - sorted alphabetically
     # Removed: wait_for_fresh (v1.12.0 - check_freshness and wait_for_fresh tools removed)
-    all_tools = sorted([
-        "analyze_perf",
-        "announce_model",
-        "audit_agent_config",
-        "check_embedding_drift",
-        "tune_weights",
-        "check_delete_safe",
-        "check_edit_safe",
-        "check_references",
-        "check_rename_safe",
-        "diff_health_radar",
-        "digest",
-        "embed_repo",
-        "find_dead_code",
-        "find_implementations",
-        "find_hot_paths",
-        "find_importers",
-        "find_references",
-        "find_unused_paths",
-        "get_blast_radius",
-        "get_call_hierarchy",
-        "get_changed_symbols",
-        "get_churn_rate",
-        "get_class_hierarchy",
-        "get_context_bundle",
-        "get_coupling_metrics",
-        "get_cross_repo_map",
-        "get_group_contracts",
-        "get_dead_code_v2",
-        "get_delivery_metrics",
-        "get_dependency_cycles",
-        "get_dependency_graph",
-        "get_extraction_candidates",
-        "get_file_content",
-        "get_file_outline",
-        "get_file_risk",
-        "get_file_tree",
-        "get_hotspots",
-        "get_impact_preview",
-        "get_layer_violations",
-        "get_pr_risk_profile",
-        "get_project_intel",
-        "get_ranked_context",
-        "assemble_task_context",
-        "get_redaction_log",
-        "get_related_symbols",
-        "get_repo_health",
-        "get_repo_outline",
-        "get_runtime_coverage",
-        "get_session_context",
-        "get_session_snapshot",
-        "get_session_stats",
-        "get_signal_chains",
-        "get_symbol_complexity",
-        "get_symbol_diff",
-        "get_symbol_importance",
-        "get_repo_map",
-        "find_similar_symbols",
-        "get_symbol_provenance",
-        "get_symbol_source",
-        "get_tectonic_map",
-        "get_untested_symbols",
-        "get_watch_status",
-        "import_runtime_signal",
-        "index_file",
-        "index_folder",
-        "index_repo",
-        "invalidate_cache",
-        "jcodemunch_guide",
-        "list_repos",
-        "list_workspaces",
-        "plan_refactoring",
-        "plan_turn",
-        "register_edit",
-        "render_diagram",
-        "resolve_repo",
-        "search_ast",
-        "search_columns",
-        "search_symbols",
-        "search_text",
-        "set_tool_tier",
-        "suggest_corrections",
-        "suggest_queries",
-        "summarize_repo",
-        "test_summarizer",
-        "winnow_symbols",
-    ])
+    all_tools = sorted(
+        [
+            "analyze_perf",
+            "audit_agent_config",
+            "check_embedding_drift",
+            "tune_weights",
+            "check_references",
+            "check_rename_safe",
+            "diff_health_radar",
+            "digest",
+            "embed_repo",
+            "find_implementations",
+            "find_hot_paths",
+            "find_importers",
+            "find_references",
+            "find_unused_paths",
+            "get_blast_radius",
+            "get_call_hierarchy",
+            "get_changed_symbols",
+            "get_churn_rate",
+            "get_class_hierarchy",
+            "get_context_bundle",
+            "get_coupling_metrics",
+            "get_cross_repo_map",
+            "get_group_contracts",
+            "get_dead_code_v2",
+            "get_delivery_metrics",
+            "get_dependency_cycles",
+            "get_dependency_graph",
+            "get_extraction_candidates",
+            "get_file_content",
+            "get_file_outline",
+            "get_file_risk",
+            "get_file_tree",
+            "get_hotspots",
+            "get_impact_preview",
+            "get_layer_violations",
+            "get_pr_risk_profile",
+            "get_project_intel",
+            "get_ranked_context",
+            "assemble_task_context",
+            "get_redaction_log",
+            "get_related_symbols",
+            "get_repo_health",
+            "get_repo_outline",
+            "get_runtime_coverage",
+            "get_session_context",
+            "get_signal_chains",
+            "get_symbol_complexity",
+            "get_symbol_diff",
+            "get_symbol_importance",
+            "get_repo_map",
+            "find_similar_symbols",
+            "get_symbol_provenance",
+            "get_symbol_source",
+            "get_tectonic_map",
+            "get_untested_symbols",
+            "get_watch_status",
+            "import_runtime_signal",
+            "index_file",
+            "index_folder",
+            "index_repo",
+            "invalidate_cache",
+            "jcodemunch_guide",
+            "list_repos",
+            "list_workspaces",
+            "plan_refactoring",
+            "plan_turn",
+            "register_edit",
+            "render_diagram",
+            "resolve_repo",
+            "search_ast",
+            "search_columns",
+            "search_symbols",
+            "search_text",
+            "set_tool_tier",
+            "suggest_corrections",
+            "suggest_queries",
+            "summarize_repo",
+            "winnow_symbols",
+        ]
+    )
     tools_str = "\n  // ".join(f'"{t}",' for t in all_tools)
 
     # All available meta_fields (for template documentation)
     # Removed (v1.12.0): index_stale, reindex_in_progress, stale_since_ms,
     #   reindex_error, reindex_failures (staleness fields removed with check_freshness)
-    meta_fields_list = sorted([
-        "candidates_scored",
-        "powered_by",
-        "timing_ms",
-        "token_budget",
-        "tokens_remaining",
-        "tokens_used",
-    ])
+    meta_fields_list = sorted(
+        [
+            "candidates_scored",
+            "powered_by",
+            "timing_ms",
+            "token_budget",
+            "tokens_remaining",
+            "tokens_used",
+        ]
+    )
     # Commented-out meta_fields list (each field on its own line, like disabled_tools)
     meta_str = "\n  // ".join(f'"{mf}",' for mf in meta_fields_list)
 
@@ -1964,16 +2048,16 @@ def generate_template() -> str:
   ],
 
   // === Tier-control escape hatch (issue #299) ===
-  // By default, `set_tool_tier` and `announce_model` survive `disabled_tools`
+  // By default, `set_tool_tier` survives `disabled_tools`
   // so users can't lock themselves out of in-session tier switching. Set this
   // to true to opt out of that safety net — useful when you're at a hard tool
-  // cap (e.g. Antigravity's 50-tool limit) and want to claw back two slots,
+  // cap (e.g. Antigravity's 50-tool limit) and want to claw back one slot,
   // and you accept that you can't switch tiers mid-session.
   // "allow_disabling_tier_controls": false,
 
   // === Tool Tier Bundles ===
   // Which tools belong to each tier. Edit freely. Both tool_profile (below)
-  // and the runtime set_tool_tier / announce_model tools read from here.
+  // and the runtime set_tool_tier read from here.
   // NOTE: disabled_tools applies AFTER tier filtering — a tool listed both
   // in a bundle and in disabled_tools will not be exposed regardless of tier.
   "tool_tier_bundles": {{
@@ -1998,13 +2082,13 @@ def generate_template() -> str:
       "search_columns", "check_references",
       "get_dependency_graph", "get_class_hierarchy",
       "get_related_symbols", "get_call_hierarchy",
-      "get_blast_radius", "check_rename_safe", "check_delete_safe", "check_edit_safe",
+      "get_blast_radius", "check_rename_safe", "check_safe",
       "find_implementations",
       "get_impact_preview", "get_changed_symbols",
       "get_symbol_diff", "get_symbol_provenance",
       "get_pr_risk_profile", "get_symbol_complexity",
       "get_churn_rate", "get_delivery_metrics", "get_hotspots",
-      "get_symbol_importance", "get_repo_map", "find_dead_code",
+      "get_symbol_importance", "get_repo_map",
       "get_dead_code_v2", "get_untested_symbols", "find_similar_symbols",
       "get_repo_health", "search_ast", "winnow_symbols",
       "get_dependency_cycles", "get_coupling_metrics",
@@ -2015,8 +2099,8 @@ def generate_template() -> str:
   }},
 
   // === Model → Tier Map ===
-  // Maps model identifiers (self-reported by the agent via plan_turn(model=...)
-  // or announce_model) to a tier. Matching is fuzzy: normalize (lowercase,
+  // Maps model identifiers (self-reported by the agent via
+  // plan_turn(model=...)) to a tier. Matching is fuzzy: normalize (lowercase,
   // strip provider prefix / date suffix / bracket suffix), then try exact,
   // glob, substring, "*", hardcoded "full" fallback in that order.
   // Keep keys specific where possible: very short substrings (e.g. "o1") can
@@ -2034,8 +2118,7 @@ def generate_template() -> str:
 
   // === Adaptive Tiering (opt-in) ===
   // When true, the exposed tool list narrows at runtime based on the model
-  // identifier self-reported by the agent via plan_turn(model=...) or
-  // announce_model(). When false (default), the static tool_profile above
+  // identifier self-reported by the agent via plan_turn(model=...). When false (default), the static tool_profile above
   // controls the exposed tools for the whole session — the runtime tools
   // accept their arguments but do not switch tiers. set_tool_tier is always
   // honored regardless of this flag (explicit user override, not automatic
@@ -2219,7 +2302,7 @@ def generate_template() -> str:
   // "perf_telemetry_enabled": false,
   //   Persist per-tool latency rows (tool, duration_ms, ok, repo) to
   //   ~/.code-index/telemetry.db. The in-memory ring (queryable via
-  //   analyze_perf and get_session_stats) is always tracked; this flag
+  //   analyze_perf) is always tracked; this flag
   //   only controls durable persistence.
   // "perf_telemetry_max_rows": 100000,
   //   Rolling cap on persisted perf rows; oldest rows trimmed in 1k batches

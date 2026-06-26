@@ -15,46 +15,82 @@ import os
 import subprocess
 import sys
 
-
 # Extensions that benefit from jCodemunch structural navigation.
 # Kept intentionally broad — mirrors languages.py LANGUAGE_REGISTRY.
 _CODE_EXTENSIONS: set[str] = {
-    ".py", ".pyi",
-    ".js", ".jsx", ".mjs", ".cjs",
-    ".ts", ".tsx", ".mts", ".cts",
+    ".py",
+    ".pyi",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+    ".ts",
+    ".tsx",
+    ".mts",
+    ".cts",
     ".go",
     ".rs",
     ".java",
     ".php",
     ".rb",
-    ".cs", ".cshtml", ".razor",
-    ".cpp", ".c", ".h", ".hpp", ".cc", ".cxx", ".ino", ".pde",
-    ".vhd", ".vhdl", ".vho", ".vhs",
-    ".v", ".vh", ".sv", ".svh",
+    ".cs",
+    ".cshtml",
+    ".razor",
+    ".cpp",
+    ".c",
+    ".h",
+    ".hpp",
+    ".cc",
+    ".cxx",
+    ".ino",
+    ".pde",
+    ".vhd",
+    ".vhdl",
+    ".vho",
+    ".vhs",
+    ".v",
+    ".vh",
+    ".sv",
+    ".svh",
     ".swift",
-    ".kt", ".kts",
+    ".kt",
+    ".kts",
     ".scala",
     ".dart",
-    ".lua", ".luau",
-    ".ex", ".exs",
-    ".erl", ".hrl",
-    ".vue", ".astro", ".svelte",
+    ".lua",
+    ".luau",
+    ".ex",
+    ".exs",
+    ".erl",
+    ".hrl",
+    ".vue",
+    ".astro",
+    ".svelte",
     ".sql",
-    ".gd",       # GDScript
-    ".al",       # AL (Business Central)
+    ".gd",  # GDScript
+    ".al",  # AL (Business Central)
     ".gleam",
     ".nix",
-    ".hcl", ".tf",
+    ".hcl",
+    ".tf",
     ".proto",
-    ".graphql", ".gql",
+    ".graphql",
+    ".gql",
     ".verse",
-    ".jl",       # Julia
-    ".r", ".R",
-    ".hs",       # Haskell
-    ".f90", ".f95", ".f03", ".f08",  # Fortran
+    ".jl",  # Julia
+    ".r",
+    ".R",
+    ".hs",  # Haskell
+    ".f90",
+    ".f95",
+    ".f03",
+    ".f08",  # Fortran
     ".groovy",
-    ".pl", ".pm",  # Perl
-    ".bash", ".sh", ".zsh",
+    ".pl",
+    ".pm",  # Perl
+    ".bash",
+    ".sh",
+    ".zsh",
 }
 
 # Minimum file size to trigger jCodemunch suggestion.
@@ -91,13 +127,17 @@ def _emit_pretooluse_deny(reason: str) -> int:
     The deny lives in the JSON decision channel; stderr stays free for advisory
     hints, and exit code stays 0 so the harness reads the decision, not a crash.
     """
-    print(json.dumps({
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
-            "permissionDecisionReason": reason,
-        }
-    }))
+    print(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": reason,
+                }
+            }
+        )
+    )
     return 0
 
 
@@ -200,11 +240,15 @@ def run_pretooluse() -> int:
 # Grep → jCodemunch nudge (PreToolUse, matcher "Grep")
 # ---------------------------------------------------------------------------
 
+
 def _grep_nudge_enabled() -> bool:
     """Whether the Grep→jcm nudge is active. Set JCODEMUNCH_HOOK_GREP_NUDGE=0
     (or false/no/off) to silence it."""
     return os.environ.get("JCODEMUNCH_HOOK_GREP_NUDGE", "1").strip().lower() not in {
-        "0", "false", "no", "off",
+        "0",
+        "false",
+        "no",
+        "off",
     }
 
 
@@ -217,6 +261,7 @@ def _indexed_source_roots() -> list[str]:
     """
     try:
         from ..storage import IndexStore
+
         roots: list[str] = []
         for entry in IndexStore().list_repos():
             sr = (entry.get("source_root") or "").strip()
@@ -432,7 +477,8 @@ def run_precompact() -> int:
     snapshot_text = ""
     live_context = None
     try:
-        from jcodemunch_mcp.tools.get_session_snapshot import snapshot_from_live
+        from jcodemunch_mcp.tools.get_session_context import snapshot_from_live
+
         live = snapshot_from_live()
         if live:
             snapshot_text = live.get("snapshot", "")
@@ -442,10 +488,13 @@ def run_precompact() -> int:
 
     if not snapshot_text:
         try:
-            from jcodemunch_mcp.tools.get_session_snapshot import get_session_snapshot
-            snap = get_session_snapshot()
+            from jcodemunch_mcp.tools.get_session_context import get_session_context
+
+            snap = get_session_context(format="compact")
             structured = snap.get("structured", {})
-            if structured.get("total_files_explored") or structured.get("total_searches"):
+            if structured.get("total_files_explored") or structured.get(
+                "total_searches"
+            ):
                 snapshot_text = snap.get("snapshot", "")
         except Exception:
             snapshot_text = ""
@@ -499,6 +548,7 @@ def _precompact_no_journal_message() -> str:
 # Landmark enrichment helpers (Gap 4A — Structural Landmarks)
 # ---------------------------------------------------------------------------
 
+
 def _build_landmark_section(top_n: int = 20, context: "dict | None" = None) -> str:
     """Build a compact landmarks + recently-changed section for PreCompact.
 
@@ -512,6 +562,7 @@ def _build_landmark_section(top_n: int = 20, context: "dict | None" = None) -> s
     data.
     """
     import logging
+
     logger = logging.getLogger(__name__)
 
     try:
@@ -566,7 +617,8 @@ def _build_landmark_section(top_n: int = 20, context: "dict | None" = None) -> s
         # Compute PageRank
         try:
             pr_scores, _ = compute_pagerank(
-                index.imports, index.source_files,
+                index.imports,
+                index.source_files,
                 alias_map=getattr(index, "alias_map", None),
                 psr4_map=getattr(index, "psr4_map", None),
             )
@@ -578,7 +630,9 @@ def _build_landmark_section(top_n: int = 20, context: "dict | None" = None) -> s
             continue
 
         # Rank files by PageRank, then pick top symbols from those files
-        top_files = sorted(pr_scores.items(), key=lambda x: x[1], reverse=True)[:top_n * 2]
+        top_files = sorted(pr_scores.items(), key=lambda x: x[1], reverse=True)[
+            : top_n * 2
+        ]
         top_file_set = {f for f, _ in top_files}
 
         # Collect symbols from top-ranked files
@@ -637,12 +691,13 @@ def _build_landmark_section(top_n: int = 20, context: "dict | None" = None) -> s
 # Post-task diagnostics hook (Gap 4B)
 # ---------------------------------------------------------------------------
 
+
 def run_taskcomplete() -> int:
     """TaskCompleted hook: surface dead code, untested symbols, and dangling refs.
 
     Reads hook JSON from stdin. Inspects files modified during the session
     and runs three diagnostic checks scoped to those files:
-      1. find_dead_code — newly-orphaned symbols
+      1. get_dead_code_v2 — newly-orphaned symbols
       2. get_untested_symbols — new code with no test reachability
       3. check_references — dangling references to deleted/renamed symbols
 
@@ -655,6 +710,7 @@ def run_taskcomplete() -> int:
 
     try:
         from ..tools.session_journal import get_journal
+
         journal = get_journal()
         context = journal.get_context(max_files=50, max_queries=0, max_edits=50)
     except Exception:
@@ -667,6 +723,7 @@ def run_taskcomplete() -> int:
     # Find which repos contain these files
     try:
         from ..storage import IndexStore
+
         store = IndexStore()
         repos = store.list_repos()
     except Exception:
@@ -698,11 +755,13 @@ def run_taskcomplete() -> int:
 
         # 1. Dead code scoped to edited files
         try:
-            from ..tools.find_dead_code import find_dead_code
-            dead_result = find_dead_code(repo_id, granularity="symbol")
+            from ..tools.get_dead_code_v2 import get_dead_code_v2
+
+            dead_result = get_dead_code_v2(repo_id)
             if dead_result and not dead_result.get("error"):
                 dead_in_session = [
-                    s for s in dead_result.get("dead_symbols", [])
+                    s
+                    for s in dead_result.get("dead_symbols", [])
                     if s.get("file") in set(session_files)
                 ]
                 if dead_in_session:
@@ -713,10 +772,13 @@ def run_taskcomplete() -> int:
         # 2. Untested symbols in edited files
         try:
             from ..tools.get_untested_symbols import get_untested_symbols
+
             for sf in session_files[:5]:  # Limit to avoid slow scans
                 # Convert file path to a glob pattern
                 pattern = sf.replace("\\", "/")
-                untested = get_untested_symbols(repo_id, file_pattern=pattern, max_results=5)
+                untested = get_untested_symbols(
+                    repo_id, file_pattern=pattern, max_results=5
+                )
                 if untested and not untested.get("error"):
                     syms = untested.get("untested_symbols", [])
                     if syms:
@@ -727,13 +789,17 @@ def run_taskcomplete() -> int:
         # 3. Dangling references — check symbols that were in edited files
         try:
             from ..tools.check_references import check_references
+
             edited_syms = [
-                sym["name"] for sym in idx.symbols
+                sym["name"]
+                for sym in idx.symbols
                 if sym.get("file") in set(session_files)
             ][:10]
             if edited_syms:
                 for sym_name in edited_syms:
-                    ref_result = check_references(repo_id, identifier=sym_name, max_content_results=3)
+                    ref_result = check_references(
+                        repo_id, identifier=sym_name, max_content_results=3
+                    )
                     if ref_result and not ref_result.get("error"):
                         if ref_result.get("total_references", 0) == 0:
                             diag.setdefault("unreferenced_symbols", []).append(sym_name)
@@ -751,15 +817,23 @@ def run_taskcomplete() -> int:
     for diag in diagnostics:
         parts.append(f"\n### {diag['repo']} ({diag['files_checked']} files checked)")
         if "dead_symbols" in diag:
-            parts.append(f"**Possibly orphaned:** {len(diag['dead_symbols'])} symbol(s)")
+            parts.append(
+                f"**Possibly orphaned:** {len(diag['dead_symbols'])} symbol(s)"
+            )
             for s in diag["dead_symbols"][:5]:
-                parts.append(f"  - `{s.get('name', '?')}` ({s.get('file', '?')}:{s.get('line', 0)})")
+                parts.append(
+                    f"  - `{s.get('name', '?')}` ({s.get('file', '?')}:{s.get('line', 0)})"
+                )
         if "untested_symbols" in diag:
-            parts.append(f"**No test coverage:** {len(diag['untested_symbols'])} symbol(s)")
+            parts.append(
+                f"**No test coverage:** {len(diag['untested_symbols'])} symbol(s)"
+            )
             for s in diag["untested_symbols"][:5]:
                 parts.append(f"  - `{s.get('name', '?')}` ({s.get('file', '?')})")
         if "unreferenced_symbols" in diag:
-            parts.append(f"**Unreferenced:** {', '.join(f'`{s}`' for s in diag['unreferenced_symbols'][:5])}")
+            parts.append(
+                f"**Unreferenced:** {', '.join(f'`{s}`' for s in diag['unreferenced_symbols'][:5])}"
+            )
 
     result = {"systemMessage": "\n".join(parts)}
     json.dump(result, sys.stdout)
@@ -769,6 +843,7 @@ def run_taskcomplete() -> int:
 # ---------------------------------------------------------------------------
 # Subagent briefing hook (Gap 4C)
 # ---------------------------------------------------------------------------
+
 
 def run_subagentstart() -> int:
     """SubagentStart hook: inject condensed repo orientation for spawned agents.
@@ -787,6 +862,7 @@ def run_subagentstart() -> int:
 
     try:
         from ..storage import IndexStore
+
         store = IndexStore()
         repos = store.list_repos()
     except Exception:
@@ -822,29 +898,41 @@ def run_subagentstart() -> int:
         lang_str = ", ".join(sorted(langs)[:8]) if langs else "unknown"
 
         parts.append(f"\n### {repo_id}")
-        parts.append(f"- **Files:** {n_files} | **Symbols:** {n_symbols} | **Languages:** {lang_str}")
+        parts.append(
+            f"- **Files:** {n_files} | **Symbols:** {n_symbols} | **Languages:** {lang_str}"
+        )
 
         # Top central symbols via PageRank
         if idx.imports and idx.source_files:
             try:
                 from ..tools.pagerank import compute_pagerank
+
                 pr_scores, _ = compute_pagerank(
-                    idx.imports, idx.source_files,
+                    idx.imports,
+                    idx.source_files,
                     alias_map=getattr(idx, "alias_map", None),
                     psr4_map=getattr(idx, "psr4_map", None),
                 )
                 if pr_scores:
-                    top_files = sorted(pr_scores.items(), key=lambda x: x[1], reverse=True)[:30]
+                    top_files = sorted(
+                        pr_scores.items(), key=lambda x: x[1], reverse=True
+                    )[:30]
                     top_file_set = {f for f, _ in top_files}
                     sym_pr = sorted(
-                        [(sym, pr_scores.get(sym.get("file", ""), 0.0)) for sym in idx.symbols if sym.get("file", "") in top_file_set],
+                        [
+                            (sym, pr_scores.get(sym.get("file", ""), 0.0))
+                            for sym in idx.symbols
+                            if sym.get("file", "") in top_file_set
+                        ],
                         key=lambda x: x[1],
                         reverse=True,
                     )[:15]
                     if sym_pr:
                         parts.append("- **Key symbols:**")
                         for sym, _ in sym_pr:
-                            parts.append(f"  - `{sym.get('name', '?')}` ({sym.get('kind', '')}, {sym.get('file', '')}:{sym.get('line', 0)})")
+                            parts.append(
+                                f"  - `{sym.get('name', '?')}` ({sym.get('kind', '')}, {sym.get('file', '')}:{sym.get('line', 0)})"
+                            )
             except Exception:
                 pass
 
@@ -855,13 +943,13 @@ def run_subagentstart() -> int:
         "search_text, get_ranked_context, find_importers, find_references, "
         "check_references, get_dependency_graph, get_class_hierarchy, "
         "get_call_hierarchy, get_blast_radius, get_impact_preview, "
-        "get_changed_symbols, find_dead_code, get_untested_symbols, "
+        "get_changed_symbols, get_dead_code_v2, get_untested_symbols, "
         "get_symbol_complexity, get_churn_rate, get_hotspots, get_repo_health, "
         "get_coupling_metrics, get_extraction_candidates, check_rename_safe, "
         "plan_refactoring, "
         "get_file_outline, get_file_tree, get_repo_outline, index_folder, "
         "index_repo, embed_repo, plan_turn, suggest_queries, "
-        "get_session_context, get_session_snapshot, get_session_stats, "
+        "get_session_context, "
         "get_cross_repo_map, get_layer_violations, audit_agent_config, "
         "get_dead_code_v2, search_columns"
     )

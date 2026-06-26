@@ -10,7 +10,7 @@ Design properties:
     symbol_id the agent can immediately query, names a tool to call, or
     flags a regression worth investigating.
   - **Composes existing tools, doesn't recompute.** Reuses
-    ``get_changed_symbols``, ``get_hotspots``, ``find_dead_code`` so the
+    ``get_changed_symbols``, ``get_hotspots``, ``get_dead_code_v2`` so the
     briefing tracks tool improvements automatically.
   - **State-aware.** Tracks the SHA the agent last saw per repo at
     ``~/.code-index/digest_state/<repo>.json``; on next call surfaces
@@ -70,6 +70,7 @@ def _write_state(path: Path, payload: dict) -> None:
 def _git_head(source_root: str) -> Optional[str]:
     """Return current HEAD SHA, or None if not a git repo."""
     import subprocess
+
     try:
         r = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -93,7 +94,7 @@ def _short_sha(sha: str) -> str:
 def _truncate_symbol_id(sym_id: str, max_len: int = 60) -> str:
     if len(sym_id) <= max_len:
         return sym_id
-    return "..." + sym_id[-(max_len - 3):]
+    return "..." + sym_id[-(max_len - 3) :]
 
 
 def compose_digest(
@@ -157,7 +158,12 @@ def compose_digest(
     delta = {}
     if prior_sha and current_head and prior_sha != current_head and index.source_root:
         delta = _compose_delta(
-            owner, name, prior_sha, current_head, max_changed_files, storage_path,
+            owner,
+            name,
+            prior_sha,
+            current_head,
+            max_changed_files,
+            storage_path,
         )
         structured["delta"] = delta
 
@@ -177,10 +183,13 @@ def compose_digest(
     briefing = _render_markdown(structured)
 
     # Persist current state so the next call computes a fresh delta.
-    _write_state(state_path, {
-        "git_head": current_head,
-        "session_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
-    })
+    _write_state(
+        state_path,
+        {
+            "git_head": current_head,
+            "session_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        },
+    )
 
     elapsed_ms = (time.perf_counter() - start) * 1000.0
     return {
@@ -214,6 +223,7 @@ def _compose_delta(
     """Compose changed-symbols delta. Failures degrade silently."""
     try:
         from .get_changed_symbols import get_changed_symbols
+
         result = get_changed_symbols(
             f"{owner}/{name}",
             since_sha=since_sha,
@@ -242,11 +252,15 @@ def _compose_delta(
 
 
 def _compose_hotspots(
-    owner: str, name: str, max_n: int, storage_path: Optional[str],
+    owner: str,
+    name: str,
+    max_n: int,
+    storage_path: Optional[str],
 ) -> list[dict]:
     """Top-N hotspots by complexity × churn. Failures degrade silently."""
     try:
         from .get_hotspots import get_hotspots
+
         result = get_hotspots(
             f"{owner}/{name}",
             top_n=max_n,
@@ -259,12 +273,16 @@ def _compose_hotspots(
 
 
 def _compose_dead_code(
-    owner: str, name: str, max_n: int, storage_path: Optional[str],
+    owner: str,
+    name: str,
+    max_n: int,
+    storage_path: Optional[str],
 ) -> list[dict]:
     """Top-N dead-code candidates. Failures degrade silently."""
     try:
-        from .find_dead_code import find_dead_code
-        result = find_dead_code(
+        from .get_dead_code_v2 import get_dead_code_v2
+
+        result = get_dead_code_v2(
             f"{owner}/{name}",
             storage_path=storage_path,
         )
@@ -282,6 +300,7 @@ def _compose_regret(repo: str, storage_path: Optional[str]) -> Optional[dict]:
     silently."""
     try:
         from ..retrieval.regret import analyze_regret
+
         out = analyze_regret(repo, storage_path=storage_path)
         clusters = out.get("clusters") or []
         if not clusters:
@@ -339,7 +358,9 @@ def _render_markdown(s: dict) -> str:
                     sid = sym.get("symbol_id") or sym.get("name", "?")
                     lines.append(f"- `{_truncate_symbol_id(sid)}`")
     elif s.get("prior_head") is None:
-        lines.append("\n_(first session — no prior digest state; future calls will surface deltas)_")
+        lines.append(
+            "\n_(first session — no prior digest state; future calls will surface deltas)_"
+        )
 
     hotspots = s.get("hotspots") or []
     if hotspots:
@@ -367,7 +388,7 @@ def _render_markdown(s: dict) -> str:
         )
 
     lines.append(
-        "\n_Composed from get_changed_symbols + get_hotspots + find_dead_code. "
+        "\n_Composed from get_changed_symbols + get_hotspots + get_dead_code_v2. "
         "Call those tools directly for full data._"
     )
     return "\n".join(lines)
