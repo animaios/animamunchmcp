@@ -9,14 +9,15 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # push version-bump commit, tag, release
-  id-token: write   # Trusted Publisher (OIDC) for PyPI
+  contents: write # push version-bump commit, tag, release
+  id-token: write # Trusted Publisher (OIDC) for PyPI
 
 jobs:
   release-and-publish:
     # Skip re-triggers from our own auto-bump commits
     if: "!startsWith(github.event.head_commit.message, 'publish-nightly ')"
     runs-on: ubuntu-latest
+    environment: pypi
 
     steps:
       - uses: actions/checkout@v5
