@@ -63,8 +63,6 @@ _CANONICAL_TOOL_NAMES: tuple[str, ...] = (
     # Discovery
     "list_repos",
     "resolve_repo",
-    "suggest_queries",
-    "get_repo_outline",
     "get_file_tree",
     "get_file_outline",
     # Search & Retrieval
@@ -74,18 +72,14 @@ _CANONICAL_TOOL_NAMES: tuple[str, ...] = (
     "get_file_content",
     "search_text",
     "search_columns",
-    "get_ranked_context",
     "assemble_task_context",
     # Relationships
-    "find_importers",
     "find_references",
     "get_dependency_graph",
     "get_class_hierarchy",
-    "get_related_symbols",
     "get_call_hierarchy",
     # Impact & Safety
     "get_blast_radius",
-    "check_rename_safe",
     "check_safe",
     "get_changed_symbols",
     "plan_refactoring",
@@ -94,37 +88,23 @@ _CANONICAL_TOOL_NAMES: tuple[str, ...] = (
     # Symbol navigation
     "find_implementations",
     # Architecture
-    "get_dependency_cycles",
-    "get_coupling_metrics",
-    "get_layer_violations",
-    "get_extraction_candidates",
     "get_tectonic_map",
-    "get_signal_chains",
-    "render_diagram",
     "get_project_intel",
     "list_workspaces",
     # Quality & Metrics
     "get_symbol_complexity",
-    "get_churn_rate",
-    "get_hotspots",
     "get_repo_health",
     "get_repo_map",
     "get_dead_code_v2",
-    "get_untested_symbols",
     "find_similar_symbols",
     "search_ast",
     "embed_repo",
-    "get_session_context",
     "register_edit",
     # Agent stand-up briefing
-    "digest",
     # Composite retrieval
-    "winnow_symbols",
     # Runtime trace ingest + analytics
     "import_runtime_signal",
     "find_hot_paths",
-    # Self-guide (force-included; lets one-line CLAUDE.md pull full policy on demand)
-    "jcodemunch_guide",
 )
 
 # Category groupings for the generated CLAUDE.md snippet (`claude-md --generate`).
@@ -136,14 +116,7 @@ _SNIPPET_TOOL_CATEGORIES: list[tuple[str, list[str]]] = [
     ("Indexing", ["index_repo", "index_folder", "summarize_repo", "index_file"]),
     (
         "Discovery",
-        [
-            "list_repos",
-            "resolve_repo",
-            "suggest_queries",
-            "get_repo_outline",
-            "get_file_tree",
-            "get_file_outline",
-        ],
+        ["list_repos", "resolve_repo", "get_file_tree", "get_file_outline"],
     ),
     (
         "Search & Retrieval",
@@ -154,18 +127,15 @@ _SNIPPET_TOOL_CATEGORIES: list[tuple[str, list[str]]] = [
             "get_file_content",
             "search_text",
             "search_columns",
-            "get_ranked_context",
             "assemble_task_context",
         ],
     ),
     (
         "Relationships",
         [
-            "find_importers",
             "find_references",
             "get_dependency_graph",
             "get_class_hierarchy",
-            "get_related_symbols",
             "get_call_hierarchy",
             "find_implementations",
         ],
@@ -183,50 +153,28 @@ _SNIPPET_TOOL_CATEGORIES: list[tuple[str, list[str]]] = [
     ),
     (
         "Architecture",
-        [
-            "get_dependency_cycles",
-            "get_coupling_metrics",
-            "get_layer_violations",
-            "get_extraction_candidates",
-            "get_tectonic_map",
-            "get_signal_chains",
-            "render_diagram",
-            "get_project_intel",
-            "list_workspaces",
-        ],
+        ["get_tectonic_map", "get_project_intel", "list_workspaces"],
     ),
     (
         "Quality & Metrics",
         [
             "get_symbol_complexity",
-            "get_churn_rate",
-            "get_hotspots",
             "get_repo_health",
             "get_repo_map",
             "find_similar_symbols",
             "get_dead_code_v2",
-            "get_untested_symbols",
             "search_ast",
-            "winnow_symbols",
         ],
     ),
     ("Diffs & Embeddings", ["embed_repo"]),
     (
         "Session",
-        [
-            "get_session_context",
-            "register_edit",
-            "digest",
-        ],
+        ["register_edit"],
     ),
     (
         "Runtime Trace Ingest & Analytics",
-        [
-            "import_runtime_signal",
-            "find_hot_paths",
-        ],
+        ["import_runtime_signal", "find_hot_paths"],
     ),
-    ("Self-Guide", ["jcodemunch_guide"]),
 ]
 
 
@@ -438,9 +386,7 @@ _COMPACT_STRIP_PARAMS: dict[str, set[str]] = {
         "max_total_source_bytes",
     },
     "get_context_bundle": {"budget_strategy"},
-    "get_ranked_context": {"detail_level"},
     "get_blast_radius": {"cross_repo", "max_depth"},
-    "find_importers": {"cross_repo"},
     "get_dependency_graph": {"cross_repo"},
     "index_repo": {"extra_ignore_patterns", "incremental"},
     "index_folder": {"extra_ignore_patterns", "incremental"},
@@ -456,7 +402,6 @@ _COMPACT_DEMOTE_ENUM_PARAMS: frozenset[str] = frozenset({"language"})
 # Tools eligible for Agent Selector complexity scoring
 _AGENT_SELECTOR_TOOLS = frozenset(
     {
-        "get_ranked_context",
         "get_context_bundle",
         "search_symbols",
         "search_text",
@@ -472,7 +417,6 @@ _EXCLUDED_FROM_STRICT = frozenset(
     {
         "list_repos",
         "resolve_repo",
-        "get_session_context",
         "index_repo",
         "index_folder",
         "index_file",
@@ -1282,6 +1226,27 @@ def _build_tools_list() -> list[Tool]:
                         "description": "Enable multi-signal fusion (Weighted Reciprocal Rank) across lexical, structural, similarity, and identity channels. Produces higher-quality ranking than linear score addition. When True, sort_by is ignored.",
                         "default": False,
                     },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["search", "winnow", "context"],
+                        "default": "search",
+                        "description": "Operation mode: 'search' (default, normal search), 'winnow' (multi-axis constraint query, former winnow_symbols), 'context' (query-less ranked context assembly, former get_ranked_context).",
+                    },
+                    "criteria": {
+                        "type": "array",
+                        "description": "Ordered list of filter criteria for winnow mode. Each item: {axis, op, value}. Supported axes: kind, language, name, file, complexity, decorator, calls, summary, churn.",
+                        "items": {"type": "object"},
+                    },
+                    "order": {
+                        "type": "string",
+                        "enum": ["asc", "desc"],
+                        "default": "desc",
+                    },
+                    "rank_by": {
+                        "type": "string",
+                        "enum": ["importance", "complexity", "churn", "name"],
+                        "default": "importance",
+                    },
                     "fqn": {
                         "type": "string",
                         "description": "PHP fully-qualified class name (e.g. 'App\\Models\\User'). Resolves via PSR-4 and uses the class name as query. Alternative to query.",
@@ -1328,56 +1293,36 @@ def _build_tools_list() -> list[Tool]:
             },
         ),
         Tool(
-            name="get_repo_outline",
-            description="Get a high-level overview of an indexed repository: directories, file counts, language breakdown, symbol counts. Lighter than get_file_tree.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository identifier (owner/repo or just repo name)",
-                    }
-                },
-                "required": ["repo"],
-            },
-        ),
-        Tool(
-            name="find_importers",
-            description="Find all files that import a given file. Answers 'what uses this file?'. has_importers=false on a result means that importer is itself unreachable (dead code chain). Supports dbt {{ ref() }} edges. Use file_paths for batch queries. Set cross_repo=true to also find importers in other indexed repos.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {"type": "string", "description": "Repository identifier"},
-                    "file_path": {
-                        "type": "string",
-                        "description": "Target file path within the repo (e.g. 'src/features/intake/IntakeService.js'). Use for single-file queries. Cannot be used together with file_paths.",
-                    },
-                    "file_paths": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "List of target file paths for batch queries. Returns a results array. Cannot be used together with file_path.",
-                    },
-                    "max_results": {
-                        "type": "integer",
-                        "default": 50,
-                        "description": "Maximum results per file",
-                    },
-                    "cross_repo": {
-                        "type": "boolean",
-                        "default": False,
-                        "description": "When true, also search other indexed repos for cross-repo importers (package-level scope). Default: false (or JCODEMUNCH_CROSS_REPO_DEFAULT env var). Only valid with singular file_path or a single-element file_paths batch; combined with a multi-file file_paths batch it returns an error (use singular calls for cross-repo evidence).",
-                    },
-                },
-                "required": ["repo"],
-            },
-        ),
-        Tool(
             name="find_references",
             description="Find all files that import or reference an identifier via the import graph. Answers 'where is this imported / re-exported?'. SCOPE: import sites + dbt `{{ ref() }}` edges + (when `include_call_chain=true`) symbols whose bodies textually mention the identifier. Does NOT exhaustively enumerate every call site across the codebase — for that, combine with search_text or use get_call_hierarchy on the resolved symbol_id. Use `identifiers` for batch queries. With `quick=true`, returns a lightweight is_referenced {bool} envelope (import_count + content_count) for fast dead-code detection — the former check_references mode.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "repo": {"type": "string", "description": "Repository identifier"},
+                    "mode": {
+                        "type": "string",
+                        "description": "Operation mode: 'refs' (default, original find_references), 'importers' (former find_importers — find files importing a given file), 'related' (former get_related_symbols — find symbols related to a given symbol).",
+                        "enum": ["refs", "importers", "related"],
+                        "default": "refs",
+                    },
+                    "file_path": {
+                        "type": "string",
+                        "description": "For mode='importers': target file path within the repo. Use for single-file queries.",
+                    },
+                    "file_paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "For mode='importers': list of target file paths for batch queries. Cannot be used together with file_path.",
+                    },
+                    "cross_repo": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "For mode='importers': when true, also search other indexed repos for cross-repo importers.",
+                    },
+                    "symbol_id": {
+                        "type": "string",
+                        "description": "For mode='related': ID of the symbol to find relatives for.",
+                    },
                     "identifier": {
                         "type": "string",
                         "description": "Symbol or module name to search for (e.g. 'bulkImport', 'IntakeService'). Use for single-identifier queries. Cannot be used together with identifiers.",
@@ -1506,94 +1451,6 @@ def _build_tools_list() -> list[Tool]:
             },
         ),
         Tool(
-            name="get_session_context",
-            description=(
-                "Get the current session context — files accessed, searches performed, "
-                "and edits registered during this MCP session. Use to avoid re-reading "
-                "the same files. When format='compact', returns a ~200 token markdown "
-                "summary (formerly get_session_snapshot)."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "max_files": {
-                        "type": "integer",
-                        "description": "Maximum number of files to return in files_accessed / focus files in snapshot.",
-                        "default": 50,
-                    },
-                    "max_queries": {
-                        "type": "integer",
-                        "description": "Maximum number of queries to return in recent_searches.",
-                        "default": 20,
-                    },
-                    "format": {
-                        "type": "string",
-                        "enum": ["json", "compact"],
-                        "default": "json",
-                        "description": "'json' (default) returns full session context; 'compact' returns a ~200 token markdown summary for context-compaction recovery.",
-                    },
-                    "max_searches": {
-                        "type": "integer",
-                        "default": 5,
-                        "description": "Maximum key searches to include (format='compact' only).",
-                    },
-                    "max_edits": {
-                        "type": "integer",
-                        "default": 10,
-                        "description": "Maximum edited files to include (format='compact' only).",
-                    },
-                    "include_negative_evidence": {
-                        "type": "boolean",
-                        "default": True,
-                        "description": "Include dead-end searches (negative evidence) in snapshot (format='compact' only).",
-                    },
-                },
-            },
-        ),
-        Tool(
-            name="digest",
-            description=(
-                "Agent stand-up briefing for a repo. Returns a tight (~200 token) "
-                "markdown digest of (a) what changed since the agent's last session "
-                "(by tracking git HEAD between calls), (b) the current risk surface "
-                "(top hotspots by complexity × churn), and (c) dead-code candidates. "
-                "Each item references symbol_ids the agent can immediately query "
-                "with get_symbol_source / get_call_hierarchy / find_references. "
-                "Designed for session-start context injection: call once when you "
-                "open a repo, get oriented to the load-bearing changes without cold "
-                "exploration."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repo identifier (owner/name, full id, or bare display name).",
-                    },
-                    "since_sha": {
-                        "type": "string",
-                        "description": "Override the last-seen SHA (for re-running a delta).",
-                    },
-                    "max_changed_files": {
-                        "type": "integer",
-                        "default": 5,
-                        "description": "Cap on changed-files list (default 5).",
-                    },
-                    "max_hotspots": {
-                        "type": "integer",
-                        "default": 3,
-                        "description": "Cap on hotspot list (default 3).",
-                    },
-                    "max_dead_code": {
-                        "type": "integer",
-                        "default": 3,
-                        "description": "Cap on dead-code candidates (default 3).",
-                    },
-                },
-                "required": ["repo"],
-            },
-        ),
-        Tool(
             name="register_edit",
             description="Register file edits to invalidate caches. Call after editing files to clear BM25 cache and search result cache for the repo.",
             inputSchema={
@@ -1667,43 +1524,6 @@ def _build_tools_list() -> list[Tool]:
                     },
                 },
                 "required": ["repo", "class_name"],
-            },
-        ),
-        Tool(
-            name="get_related_symbols",
-            description="Find symbols related to a given symbol using heuristic clustering: same-file co-location (weight 3), shared importers (weight 1.5), and name-token overlap (weight 0.5/token). Useful for discovering what else to read when exploring an unfamiliar codebase.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository identifier (owner/repo or just repo name)",
-                    },
-                    "symbol_id": {
-                        "type": "string",
-                        "description": "ID of the symbol to find relatives for",
-                    },
-                    "max_results": {
-                        "type": "integer",
-                        "description": "Maximum results (default 10, max 50)",
-                        "default": 10,
-                    },
-                },
-                "required": ["repo", "symbol_id"],
-            },
-        ),
-        Tool(
-            name="suggest_queries",
-            description="Suggest search queries, entry-point files, and index stats. Good first call on an unfamiliar repo — surfaces most-imported files, top keywords, and ready-to-run example queries.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository identifier (owner/repo or just repo name)",
-                    },
-                },
-                "required": ["repo"],
             },
         ),
         Tool(
@@ -1787,6 +1607,21 @@ def _build_tools_list() -> list[Tool]:
                     "symbol_id": {
                         "type": "string",
                         "description": "Symbol name or full ID to analyse. Use search_symbols to find IDs.",
+                    },
+                    "chains": {
+                        "type": "boolean",
+                        "description": "When true, also discover signal chains (HTTP routes, CLI commands, etc.) that involve this symbol. Merges get_signal_chains functionality.",
+                        "default": False,
+                    },
+                    "kind": {
+                        "type": "string",
+                        "description": "When chains=true: filter gateways by kind (http, cli, event, task, main, test).",
+                        "enum": ["http", "cli", "event", "task", "main", "test"],
+                    },
+                    "max_depth": {
+                        "type": "integer",
+                        "description": "When chains=true: BFS depth limit per chain (1-8, default 5). Also limits signal chain discovery depth.",
+                        "default": 5,
                     },
                     "direction": {
                         "type": "string",
@@ -1880,81 +1715,10 @@ def _build_tools_list() -> list[Tool]:
             },
         ),
         Tool(
-            name="get_dependency_cycles",
-            description=(
-                "Detect circular import chains in a repository. "
-                "Returns every strongly-connected component (set of files that mutually import "
-                "each other, directly or transitively). Run this to identify architectural "
-                "problems before a refactor, or to understand why a module is hard to test in isolation."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository identifier (owner/repo or just repo name)",
-                    },
-                },
-                "required": ["repo"],
-            },
-        ),
-        Tool(
-            name="get_coupling_metrics",
-            description=(
-                "Return afferent coupling (Ca), efferent coupling (Ce), and instability score "
-                "for a file/module. Ca = files that import this module (dependents). "
-                "Ce = files this module imports (dependencies). "
-                "Instability I = Ce/(Ca+Ce): 0 = stable, 1 = unstable. "
-                "Use to identify fragile modules and guide refactoring priorities."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository identifier (owner/repo or just repo name)",
-                    },
-                    "module_path": {
-                        "type": "string",
-                        "description": "File path within the repo (e.g. 'src/utils.py')",
-                    },
-                },
-                "required": ["repo", "module_path"],
-            },
-        ),
-        Tool(
-            name="get_layer_violations",
-            description=(
-                "Check whether imports respect declared architectural layer boundaries. "
-                "Reports every import that crosses a forbidden layer boundary. "
-                "Layer rules can be passed directly or defined in .jcodemunch.jsonc under "
-                "'architecture.layers'. Use to enforce clean architecture and detect "
-                "dependency-direction violations (e.g. API layer importing DB layer directly)."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository identifier (owner/repo or just repo name)",
-                    },
-                    "rules": {
-                        "type": "array",
-                        "description": (
-                            "Layer definitions. Each entry: {name, paths: [...], may_not_import: [...]}. "
-                            "If omitted, reads from .jcodemunch.jsonc architecture.layers."
-                        ),
-                        "items": {"type": "object"},
-                    },
-                },
-                "required": ["repo"],
-            },
-        ),
-        Tool(
             name="check_safe",
             description=(
                 "Composite preflight: can this symbol be safely deleted or edited? "
-                "Combines find_importers (cross-repo), find_references(quick=true), dead-code "
+                "Combines import analysis (cross-repo), reference check (quick=true), dead-code "
                 "confidence, runtime evidence, and entry-point heuristics into a "
                 "single verdict + one-line recommended_action. Use mode='delete' "
                 "for deletion safety (verdict: safe_to_delete / test_coverage_only / "
@@ -2144,40 +1908,6 @@ def _build_tools_list() -> list[Tool]:
             },
         ),
         Tool(
-            name="get_extraction_candidates",
-            description=(
-                "Identify functions in a file that are good candidates for extraction to a shared module. "
-                "A candidate must have high cyclomatic complexity (doing a lot) AND "
-                "be called from multiple other files (already implicitly shared). "
-                "Results are ranked by score = complexity × caller_file_count. "
-                "Requires re-indexing with jcodemunch-mcp >= 1.16 to populate complexity data."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository identifier (owner/repo or just repo name)",
-                    },
-                    "file_path": {
-                        "type": "string",
-                        "description": "Relative file path within the repo (e.g. 'src/utils.py').",
-                    },
-                    "min_complexity": {
-                        "type": "integer",
-                        "description": "Minimum cyclomatic complexity threshold (default 5).",
-                        "default": 5,
-                    },
-                    "min_callers": {
-                        "type": "integer",
-                        "description": "Minimum number of distinct caller files (default 2).",
-                        "default": 2,
-                    },
-                },
-                "required": ["repo", "file_path"],
-            },
-        ),
-        Tool(
             name="get_symbol_complexity",
             description=(
                 "Return cyclomatic complexity, nesting depth, and parameter count for a single symbol. "
@@ -2201,69 +1931,6 @@ def _build_tools_list() -> list[Tool]:
             },
         ),
         Tool(
-            name="get_churn_rate",
-            description=(
-                "Return git churn metrics for a file or symbol: commit count, unique authors, "
-                "first_seen date, last_modified date, and churn_per_week over a configurable window. "
-                "assessment: 'stable' (<=1/week), 'active' (<=3/week), 'volatile' (>3/week). "
-                "Requires a locally indexed repo (index_folder); GitHub-indexed repos are not supported."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository identifier (owner/repo or just repo name)",
-                    },
-                    "target": {
-                        "type": "string",
-                        "description": "Relative file path (e.g. 'src/utils.py') or a full symbol ID.",
-                    },
-                    "days": {
-                        "type": "integer",
-                        "description": "Look-back window in days (default 90).",
-                        "default": 90,
-                    },
-                },
-                "required": ["repo", "target"],
-            },
-        ),
-        Tool(
-            name="get_hotspots",
-            description=(
-                "Return the top-N highest-risk symbols ranked by hotspot score = "
-                "cyclomatic_complexity x log(1 + commits_last_N_days). "
-                "Identifies code that is both complex and frequently changed — the highest "
-                "bug-introduction risk in the codebase. Methodology matches CodeScene/Adam Tornhill. "
-                "Requires jcodemunch-mcp >= 1.16 for complexity data and a locally indexed repo for churn."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository identifier (owner/repo or just repo name)",
-                    },
-                    "top_n": {
-                        "type": "integer",
-                        "description": "Number of results to return (default 20).",
-                        "default": 20,
-                    },
-                    "days": {
-                        "type": "integer",
-                        "description": "Churn look-back window in days (default 90).",
-                        "default": 90,
-                    },
-                    "min_complexity": {
-                        "type": "integer",
-                        "description": "Minimum cyclomatic complexity to include (default 2).",
-                        "default": 2,
-                    },
-                },
-                "required": ["repo"],
-            },
-        ),
-        Tool(
             name="get_repo_health",
             description=(
                 "Return a one-call triage snapshot of the entire repository: symbol counts, "
@@ -2284,41 +1951,33 @@ def _build_tools_list() -> list[Tool]:
                         "description": "Churn look-back window for hotspot calculation (default 90).",
                         "default": 90,
                     },
-                },
-                "required": ["repo"],
-            },
-        ),
-        Tool(
-            name="get_untested_symbols",
-            description=(
-                "Find functions and methods with no evidence of being exercised by any test file. "
-                "Uses import-graph reachability + name matching (AST call_references when available, "
-                "word-boundary text heuristic as fallback). Returns symbols classified as 'unreached' "
-                "(no test file imports the source file) or 'imported_not_called' (test imports the "
-                "module but no test references this specific function). "
-                "This is heuristic reachability, NOT runtime coverage — it answers 'does any test "
-                "reference this symbol?' rather than 'what % of lines are covered.' "
-                "Use after get_repo_health for a deeper quality picture."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository identifier (owner/repo or just repo name)",
+                    "detailed": {
+                        "type": "boolean",
+                        "description": "When true, include additional detail sub-sections (cycles, coupling, layer violations, extraction candidates, hotspots, untested symbols, churn rates). Default false.",
+                        "default": False,
                     },
-                    "file_pattern": {
+                    "file_path": {
                         "type": "string",
-                        "description": "Optional glob to narrow which source files are analysed (e.g. 'src/**/*.py').",
+                        "description": "When detailed=true, scope extraction candidates and coupling to this file (e.g. 'src/utils.py').",
+                    },
+                    "rules": {
+                        "type": "array",
+                        "description": "When detailed=true, layer definitions for violation checking. Each entry: {name, paths: [...], may_not_import: [...]}. If omitted, reads from .jcodemunch.jsonc architecture.layers.",
+                        "items": {"type": "object"},
+                    },
+                    "top_n": {
+                        "type": "integer",
+                        "description": "When detailed=true, number of hotspot results to return (default 20).",
+                        "default": 20,
                     },
                     "min_confidence": {
                         "type": "number",
-                        "description": "Minimum confidence to include (0.0–1.0, default 0.5).",
+                        "description": "When detailed=true, minimum confidence for untested symbols (0.0-1.0, default 0.5).",
                         "default": 0.5,
                     },
                     "max_results": {
                         "type": "integer",
-                        "description": "Cap on returned symbols (default 100).",
+                        "description": "When detailed=true, cap on untested symbols returned (default 100).",
                         "default": 100,
                     },
                 },
@@ -2462,6 +2121,12 @@ def _build_tools_list() -> list[Tool]:
                         "type": "string",
                         "description": "Repository identifier (owner/repo or just repo name)",
                     },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["map", "outline"],
+                        "default": "map",
+                        "description": "'map' (default) returns signature-level map grouped by file or flat; 'outline' returns a lighter directory/language/symbol count overview (former get_repo_outline).",
+                    },
                     "token_budget": {
                         "type": "integer",
                         "description": "Hard cap on returned tokens (default 2048). Ignored when group_by='flat'.",
@@ -2505,58 +2170,6 @@ def _build_tools_list() -> list[Tool]:
                     },
                 },
                 "required": ["repo"],
-            },
-        ),
-        Tool(
-            name="get_ranked_context",
-            description=(
-                "Assemble the best-fit context for a query within a token budget. "
-                "Ranks all symbols by relevance (BM25) and/or centrality (PageRank), "
-                "loads source for the top candidates, and packs greedily until token_budget is exhausted. "
-                "Use when you want 'the best N tokens of context for this task' without specifying exact symbols."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository identifier (owner/repo or just repo name)",
-                    },
-                    "query": {
-                        "type": "string",
-                        "description": "Natural language or identifier describing the task (max 500 chars)",
-                    },
-                    "token_budget": {
-                        "type": "integer",
-                        "description": "Hard cap on returned tokens (default 4000).",
-                        "default": 4000,
-                    },
-                    "strategy": {
-                        "type": "string",
-                        "enum": ["combined", "bm25", "centrality"],
-                        "description": (
-                            "'combined' (default) = BM25 + PageRank weighted sum. "
-                            "'bm25' = pure text relevance. "
-                            "'centrality' = PageRank only, filtered to query-matching symbols."
-                        ),
-                        "default": "combined",
-                    },
-                    "include_kinds": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Optional list of symbol kinds to restrict results (e.g. ['class', 'function']).",
-                    },
-                    "scope": {
-                        "type": "string",
-                        "description": "Optional glob pattern to limit search to a subdirectory (e.g. 'src/core/*').",
-                    },
-                    "fusion": {
-                        "type": "boolean",
-                        "description": "Enable multi-signal fusion (Weighted Reciprocal Rank) for ranking. Combines lexical, structural, and identity channels.",
-                        "default": False,
-                    },
-                },
-                "required": ["repo", "query"],
             },
         ),
         Tool(
@@ -2713,114 +2326,6 @@ def _build_tools_list() -> list[Tool]:
             },
         ),
         Tool(
-            name="get_signal_chains",
-            description=(
-                "Discover how external signals (HTTP requests, CLI commands, scheduled tasks, events) "
-                "propagate through the codebase via the call graph. Each signal chain traces a path "
-                "from a gateway (entry point) through its callees to leaf symbols. "
-                "Two modes: (1) Discovery — omit symbol to map all chains with orphan detection; "
-                "(2) Lookup — pass a symbol name/ID to find which user-facing chains it participates in "
-                "(e.g. 'validate_email sits on POST /api/users and cli:import-users'). "
-                "Detects gateways from route decorators (Flask/FastAPI/Spring/NestJS/ASP.NET), "
-                "CLI commands (@click, @app.command), task queues (@celery, @dramatiq), event handlers, "
-                "and standard entry points (main.py, __main__.py). "
-                "Use before refactoring to understand which user-facing behaviors depend on a symbol."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository identifier (owner/repo or just repo name)",
-                    },
-                    "symbol": {
-                        "type": "string",
-                        "description": "Symbol name or ID for lookup mode. When provided, returns only chains containing that symbol. Omit for discovery mode (all chains).",
-                    },
-                    "kind": {
-                        "type": "string",
-                        "description": "Filter gateways by kind: http, cli, event, task, main, test.",
-                        "enum": ["http", "cli", "event", "task", "main", "test"],
-                    },
-                    "max_depth": {
-                        "type": "integer",
-                        "description": "BFS depth limit per chain (1–8, default 5).",
-                        "default": 5,
-                    },
-                    "include_tests": {
-                        "type": "boolean",
-                        "description": "Include test_* functions as gateways (default false).",
-                        "default": False,
-                    },
-                    "include_flow_edges": {
-                        "type": "boolean",
-                        "description": (
-                            "Resolve framework flow edges the call graph is blind to (default true). "
-                            "String-dispatched handlers (Django path()/re_path(), Express "
-                            "router.get(path, handler), Flask add_url_rule, Rails to:) surface as http "
-                            "gateways even with no route decorator, and templates a chain renders "
-                            "(render/render_template/res.render/view) attach as a per-chain 'views' list. "
-                            "Set false for pure call-graph behavior."
-                        ),
-                        "default": True,
-                    },
-                },
-                "required": ["repo"],
-            },
-        ),
-        Tool(
-            name="render_diagram",
-            description=(
-                "Render any graph-producing tool's output as rich, annotated Mermaid markup. "
-                "Pass the raw output dict from get_call_hierarchy (with include_impact=true), get_signal_chains, "
-                "get_tectonic_map, get_dependency_cycles, "
-                "get_blast_radius, or get_dependency_graph. Auto-detects the source tool "
-                "and picks the optimal diagram type: flowchart TD (call hierarchy, blast radius), "
-                "flowchart BT (call hierarchy with impact), flowchart LR (tectonic plates, dependency graph, "
-                "cycles), or sequenceDiagram (signal chains). Encodes metadata as visual signals: "
-                "edge colors for resolution confidence, node shapes for symbol kind, subgraph "
-                "grouping by file/plate/depth, risk heat coloring. Themes: 'flow' (blue/purple "
-                "depth gradient), 'risk' (red/yellow/green heat), 'minimal' (monochrome). "
-                "Smart pruning keeps output under max_nodes."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "source": {
-                        "type": "object",
-                        "description": "Raw output dict from any supported graph-producing tool.",
-                    },
-                    "theme": {
-                        "type": "string",
-                        "enum": ["flow", "risk", "minimal"],
-                        "description": "Visual theme: 'flow' (architecture), 'risk' (impact), 'minimal' (docs). Default: flow.",
-                        "default": "flow",
-                    },
-                    "max_nodes": {
-                        "type": "integer",
-                        "description": "Maximum nodes before smart pruning (default 80, range 10–200).",
-                        "default": 80,
-                    },
-                    **(
-                        {
-                            "open_in_viewer": {
-                                "type": "boolean",
-                                "description": (
-                                    "When true, also open the rendered mermaid in the local mmd-viewer. "
-                                    "The HTML file is written under <index_storage>/temp/mermaid/. "
-                                    "Non-fatal: if the viewer is missing, mermaid is returned anyway."
-                                ),
-                                "default": False,
-                            },
-                        }
-                        if config_module.get("render_diagram_viewer_enabled", False)
-                        else {}
-                    ),
-                },
-                "required": ["source"],
-            },
-        ),
-        Tool(
             name="get_project_intel",
             description=(
                 "Auto-discover and parse non-code knowledge files (Dockerfiles, CI configs, "
@@ -2873,85 +2378,6 @@ def _build_tools_list() -> list[Tool]:
                     },
                 },
                 "required": ["repo"],
-            },
-        ),
-        Tool(
-            name="winnow_symbols",
-            description=(
-                "Run a multi-axis constraint query against the index in a single round trip. "
-                "Accepts an ordered list of criteria (AND) intersecting signals no other tool "
-                "composes: kind, language, name (regex), file glob, cyclomatic complexity, "
-                "decorator, direct call references, summary/docstring text, and git churn. "
-                "Survivors are ranked by importance (PageRank, default), complexity, churn, "
-                "or name. Use for questions like 'complex untested functions that call db.Exec' "
-                "or 'deprecated methods still churning in the last 30 days' — cases that would "
-                "otherwise require 4-5 separate calls and client-side merging."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository identifier (owner/repo or just repo name)",
-                    },
-                    "criteria": {
-                        "type": "array",
-                        "description": (
-                            "Ordered list of filters. Each item is {axis, op, value}. "
-                            "Supported axes: kind (in/eq), language (in/eq), name (eq/matches), "
-                            "file (matches - glob), complexity (>,<,>=,<=,==), decorator (contains), "
-                            "calls (contains - matches call_references), summary (contains), "
-                            "churn (>,<,>=,<=,== with optional window_days, default 90). "
-                            "All criteria must match (AND)."
-                        ),
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "axis": {"type": "string"},
-                                "op": {"type": "string"},
-                                "value": {},
-                                "window_days": {
-                                    "type": "integer",
-                                    "description": "Only used when axis='churn'. Days of git history to scan (default 90).",
-                                },
-                            },
-                            "required": ["axis", "op", "value"],
-                        },
-                    },
-                    "rank_by": {
-                        "type": "string",
-                        "enum": ["importance", "complexity", "churn", "name"],
-                        "default": "importance",
-                        "description": "Ranking axis for survivors.",
-                    },
-                    "order": {
-                        "type": "string",
-                        "enum": ["asc", "desc"],
-                        "default": "desc",
-                    },
-                    "max_results": {
-                        "type": "integer",
-                        "default": 20,
-                        "description": "Hard cap on returned results.",
-                    },
-                },
-                "required": ["repo", "criteria"],
-            },
-        ),
-        # --- Self-guide tool -------
-        Tool(
-            name="jcodemunch_guide",
-            description=(
-                "Return the version-current CLAUDE.md / AGENT.md policy snippet for "
-                "jcodemunch-mcp — the same text produced by `jcodemunch-mcp claude-md "
-                '--generate`. Lets an agent keep a one-line CLAUDE.md (e.g. "Call '
-                'jcodemunch_guide and strictly follow its instructions.") instead of '
-                "pasting a static snippet that drifts from the installed version. "
-                "Idempotent, no repo context required. Honors disabled_tools"
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {},
             },
         ),
     ]
@@ -3209,7 +2635,6 @@ async def get_prompt(name: str, arguments: dict | None = None) -> GetPromptResul
 _AUTO_WATCH_EXCLUDED = frozenset(
     {
         "list_repos",
-        "get_session_context",
         "index_file",  # path arg is a file path, not a folder; requires repo already indexed
     }
 )
@@ -3757,30 +3182,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     storage_path=storage_path,
                 )
             )
-        elif name == "get_repo_outline":
-            from .tools.get_repo_outline import get_repo_outline
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    get_repo_outline,
-                    repo=arguments["repo"],
-                    storage_path=storage_path,
-                )
-            )
-        elif name == "find_importers":
-            from .tools.find_importers import find_importers
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    find_importers,
-                    repo=arguments["repo"],
-                    file_path=arguments.get("file_path"),
-                    file_paths=arguments.get("file_paths"),
-                    max_results=arguments.get("max_results", 50),
-                    storage_path=storage_path,
-                    cross_repo=arguments.get("cross_repo"),
-                )
-            )
         elif name == "find_references":
             from .tools.find_references import find_references
 
@@ -3790,12 +3191,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     repo=arguments["repo"],
                     identifier=arguments.get("identifier"),
                     identifiers=arguments.get("identifiers"),
-                    max_results=arguments.get("max_results", 50),
-                    storage_path=storage_path,
+                    max_results=arguments.get("max_results", 20),
                     include_call_chain=arguments.get("include_call_chain", False),
-                    quick=arguments.get("quick", False),
-                    search_content=arguments.get("search_content", True),
-                    max_content_results=arguments.get("max_content_results", 20),
+                    storage_path=storage_path,
                 )
             )
         elif name == "search_columns":
@@ -3829,22 +3227,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     fqn=arguments.get("fqn"),
                 )
             )
-        elif name == "get_ranked_context":
-            from .tools.get_ranked_context import get_ranked_context
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    get_ranked_context,
-                    repo=arguments["repo"],
-                    query=arguments["query"],
-                    token_budget=arguments.get("token_budget", 4000),
-                    strategy=arguments.get("strategy", "combined"),
-                    include_kinds=arguments.get("include_kinds"),
-                    scope=arguments.get("scope"),
-                    fusion=arguments.get("fusion", False),
-                    storage_path=storage_path,
-                )
-            )
         elif name == "assemble_task_context":
             from .tools.assemble_task_context import assemble_task_context
 
@@ -3858,37 +3240,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     token_budget=arguments.get("token_budget", 8000),
                     include=arguments.get("include"),
                     cross_repo=arguments.get("cross_repo", False),
-                    storage_path=storage_path,
-                )
-            )
-        elif name == "get_session_context":
-            from .tools.get_session_context import get_session_context
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    get_session_context,
-                    max_files=arguments.get("max_files", 50),
-                    max_queries=arguments.get("max_queries", 20),
-                    format=arguments.get("format", "json"),
-                    max_searches=arguments.get("max_searches", 5),
-                    max_edits=arguments.get("max_edits", 10),
-                    include_negative_evidence=arguments.get(
-                        "include_negative_evidence", True
-                    ),
-                    storage_path=storage_path,
-                )
-            )
-        elif name == "digest":
-            from .tools.digest import compose_digest
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    compose_digest,
-                    repo=arguments["repo"],
-                    since_sha=arguments.get("since_sha"),
-                    max_changed_files=arguments.get("max_changed_files", 5),
-                    max_hotspots=arguments.get("max_hotspots", 3),
-                    max_dead_code=arguments.get("max_dead_code", 3),
                     storage_path=storage_path,
                 )
             )
@@ -3941,6 +3292,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
         elif name == "get_call_hierarchy":
             from .tools.get_call_hierarchy import get_call_hierarchy
 
+            chains = arguments.get("chains", False)
+
             result = await asyncio.to_thread(
                 functools.partial(
                     get_call_hierarchy,
@@ -3951,6 +3304,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     storage_path=storage_path,
                     include_impact=arguments.get("include_impact", False),
                     include_decisions=arguments.get("include_decisions", False),
+                    chains=chains,
                 )
             )
         elif name == "get_symbol_provenance":
@@ -3975,38 +3329,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     base_ref=arguments.get("base_ref"),
                     head_ref=arguments.get("head_ref", "HEAD"),
                     days=arguments.get("days", 90),
-                    storage_path=storage_path,
-                )
-            )
-        elif name == "get_dependency_cycles":
-            from .tools.get_dependency_cycles import get_dependency_cycles
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    get_dependency_cycles,
-                    repo=arguments["repo"],
-                    storage_path=storage_path,
-                )
-            )
-        elif name == "get_coupling_metrics":
-            from .tools.get_coupling_metrics import get_coupling_metrics
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    get_coupling_metrics,
-                    repo=arguments["repo"],
-                    module_path=arguments["module_path"],
-                    storage_path=storage_path,
-                )
-            )
-        elif name == "get_layer_violations":
-            from .tools.get_layer_violations import get_layer_violations
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    get_layer_violations,
-                    repo=arguments["repo"],
-                    rules=arguments.get("rules"),
                     storage_path=storage_path,
                 )
             )
@@ -4071,19 +3393,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     storage_path=storage_path,
                 )
             )
-        elif name == "get_extraction_candidates":
-            from .tools.get_extraction_candidates import get_extraction_candidates
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    get_extraction_candidates,
-                    repo=arguments["repo"],
-                    file_path=arguments["file_path"],
-                    min_complexity=arguments.get("min_complexity", 5),
-                    min_callers=arguments.get("min_callers", 2),
-                    storage_path=storage_path,
-                )
-            )
         elif name == "get_symbol_complexity":
             from .tools.get_symbol_complexity import get_symbol_complexity
 
@@ -4095,31 +3404,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     storage_path=storage_path,
                 )
             )
-        elif name == "get_churn_rate":
-            from .tools.get_churn_rate import get_churn_rate
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    get_churn_rate,
-                    repo=arguments["repo"],
-                    target=arguments["target"],
-                    days=arguments.get("days", 90),
-                    storage_path=storage_path,
-                )
-            )
-        elif name == "get_hotspots":
-            from .tools.get_hotspots import get_hotspots
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    get_hotspots,
-                    repo=arguments["repo"],
-                    top_n=arguments.get("top_n", 20),
-                    days=arguments.get("days", 90),
-                    min_complexity=arguments.get("min_complexity", 2),
-                    storage_path=storage_path,
-                )
-            )
         elif name == "get_repo_health":
             from .tools.get_repo_health import get_repo_health
 
@@ -4128,6 +3412,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     get_repo_health,
                     repo=arguments["repo"],
                     days=arguments.get("days", 90),
+                    detailed=arguments.get("detailed", False),
+                    file_path=arguments.get("file_path"),
+                    rules=arguments.get("rules"),
+                    top_n=arguments.get("top_n", 20),
+                    min_confidence=arguments.get("min_confidence", 0.5),
+                    max_results=arguments.get("max_results", 100),
                     storage_path=storage_path,
                 )
             )
@@ -4142,45 +3432,37 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     storage_path=storage_path,
                 )
             )
-        elif name == "get_related_symbols":
-            from .tools.get_related_symbols import get_related_symbols
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    get_related_symbols,
-                    repo=arguments["repo"],
-                    symbol_id=arguments["symbol_id"],
-                    max_results=arguments.get("max_results", 10),
-                    storage_path=storage_path,
-                )
-            )
-        elif name == "suggest_queries":
-            from .tools.suggest_queries import suggest_queries
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    suggest_queries,
-                    repo=arguments["repo"],
-                    storage_path=storage_path,
-                )
-            )
         elif name == "get_repo_map":
-            from .tools.get_repo_map import get_repo_map
+            mode = arguments.get("mode", "map")
 
-            result = await asyncio.to_thread(
-                functools.partial(
-                    get_repo_map,
-                    repo=arguments["repo"],
-                    token_budget=arguments.get("token_budget", 2048),
-                    scope=arguments.get("scope"),
-                    max_per_file=arguments.get("max_per_file", 5),
-                    include_kinds=arguments.get("include_kinds"),
-                    storage_path=storage_path,
-                    group_by=arguments.get("group_by", "file"),
-                    algorithm=arguments.get("algorithm", "pagerank"),
-                    top_n=arguments.get("top_n", 20),
+            if mode == "outline":
+                from .tools.get_repo_map import get_repo_map
+
+                result = await asyncio.to_thread(
+                    functools.partial(
+                        get_repo_map,
+                        repo=arguments["repo"],
+                        mode="outline",
+                        storage_path=storage_path,
+                    )
                 )
-            )
+            else:
+                from .tools.get_repo_map import get_repo_map
+
+                result = await asyncio.to_thread(
+                    functools.partial(
+                        get_repo_map,
+                        repo=arguments["repo"],
+                        token_budget=arguments.get("token_budget", 2048),
+                        scope=arguments.get("scope"),
+                        max_per_file=arguments.get("max_per_file", 5),
+                        include_kinds=arguments.get("include_kinds"),
+                        storage_path=storage_path,
+                        group_by=arguments.get("group_by", "file"),
+                        algorithm=arguments.get("algorithm", "pagerank"),
+                        top_n=arguments.get("top_n", 20),
+                    )
+                )
         elif name == "find_similar_symbols":
             from .tools.find_similar_symbols import find_similar_symbols
 
@@ -4196,19 +3478,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     include_kinds=arguments.get("include_kinds"),
                     semantic_weight=arguments.get("semantic_weight", 0.6),
                     token_budget=arguments.get("token_budget", 4000),
-                    storage_path=storage_path,
-                )
-            )
-        elif name == "get_untested_symbols":
-            from .tools.get_untested_symbols import get_untested_symbols
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    get_untested_symbols,
-                    repo=arguments["repo"],
-                    file_pattern=arguments.get("file_pattern"),
-                    min_confidence=arguments.get("min_confidence", 0.5),
-                    max_results=arguments.get("max_results", 100),
                     storage_path=storage_path,
                 )
             )
@@ -4266,33 +3535,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     storage_path=storage_path,
                 )
             )
-        elif name == "get_signal_chains":
-            from .tools.get_signal_chains import get_signal_chains
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    get_signal_chains,
-                    repo=arguments["repo"],
-                    symbol=arguments.get("symbol"),
-                    kind=arguments.get("kind"),
-                    max_depth=arguments.get("max_depth", 5),
-                    include_tests=arguments.get("include_tests", False),
-                    include_flow_edges=arguments.get("include_flow_edges", True),
-                    storage_path=storage_path,
-                )
-            )
-        elif name == "render_diagram":
-            from .tools.render_diagram import render_diagram
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    render_diagram,
-                    source=arguments["source"],
-                    theme=arguments.get("theme", "flow"),
-                    max_nodes=arguments.get("max_nodes", 80),
-                    open_in_viewer=arguments.get("open_in_viewer", False),
-                )
-            )
         elif name == "list_workspaces":
             from .tools.list_workspaces import list_workspaces
 
@@ -4315,27 +3557,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     storage_path=storage_path,
                 )
             )
-        elif name == "winnow_symbols":
-            from .tools.winnow_symbols import winnow_symbols
-
-            result = await asyncio.to_thread(
-                functools.partial(
-                    winnow_symbols,
-                    repo=arguments["repo"],
-                    criteria=arguments.get("criteria", []),
-                    rank_by=arguments.get("rank_by", "importance"),
-                    order=arguments.get("order", "desc"),
-                    max_results=arguments.get("max_results", 20),
-                    storage_path=storage_path,
-                )
-            )
-        elif name == "jcodemunch_guide":
-            from . import __version__ as _ver
-
-            result = {
-                "version": _ver,
-                "content": _generate_claude_md_snippet(missing_only=False),
-            }
         else:
             result = {"error": f"Unknown tool: {name}"}
 
@@ -4394,27 +3615,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                                     "timestamp": _t.time(),
                                 }
                             )
-                elif name == "get_ranked_context":
-                    if isinstance(result, dict):
-                        query = arguments.get("query", "")
-                        if query:
-                            items_included = result.get("items_included", 0)
-                            journal.record_search(query, items_included)
-                        ne = result.get("negative_evidence")
-                        if ne and isinstance(ne, dict):
-                            import time as _t
-
-                            journal.record_negative_evidence(
-                                {
-                                    "query": query,
-                                    "repo": arguments.get("repo", ""),
-                                    "verdict": ne.get("verdict", ""),
-                                    "scanned_symbols": ne.get("scanned_symbols", 0),
-                                    "timestamp": _t.time(),
-                                }
-                            )
-                # Persist a compact live snapshot so the out-of-process
-                # PreCompact hook can read real session state (#334). Throttled.
                 _maybe_flush_live_journal(journal)
             except Exception:
                 logger.debug("Journal recording failed", exc_info=True)
@@ -6028,19 +5228,15 @@ def _run_config(check: bool = False, init: bool = False, upgrade: bool = False) 
                 cm_content = claude_md_path.read_text(
                     encoding="utf-8", errors="replace"
                 )
-                # The README documents a supported one-line form: "Call the
-                # jcodemunch_guide tool and strictly follow its instructions."
-                # That tool returns the per-version policy at runtime, so the
-                # full canonical tool list is not expected to appear in CLAUDE.md.
-                # Treat any mention of jcodemunch_guide as valid setup.
-                if "jcodemunch_guide" in cm_content:
+                # Check for the one-line form that delegates to jcodemunch_guide
+                # (Issue #271: "Call the jcodemunch_guide tool and strictly follow its instructions.")
+                if "jcodemunch_guide" in cm_content and "strictly follow" in cm_content:
                     print(
-                        f"  {green(CHECK)} CLAUDE.md uses jcodemunch_guide one-line form (version-pinned at runtime)"
+                        f"  {green(CHECK)} CLAUDE.md uses one-line form (jcodemunch_guide) — skipping tool-by-tool check"
                     )
                 else:
                     missing_in_cm = [t for t in canonical_tools if t not in cm_content]
                     if missing_in_cm:
-                        # Wrap into ~60-char lines for readability
                         _wrapped = _wrap_names(missing_in_cm)
                         print(
                             f"  {yellow(WARN)} {len(missing_in_cm)} tool(s) not mentioned in CLAUDE.md:"
@@ -6049,9 +5245,6 @@ def _run_config(check: bool = False, init: bool = False, upgrade: bool = False) 
                             print(f"       {dim(_line)}")
                         print(
                             f"  {dim('  Run: jcodemunch-mcp claude-md --generate  (or --format=append for delta only)')}"
-                        )
-                        print(
-                            f"  {dim('  Or use the one-line form: add `Call the jcodemunch_guide tool and strictly follow its instructions.` to CLAUDE.md')}"
                         )
                         issues.append("claude_md")
                     else:
@@ -6903,46 +6096,6 @@ def main(argv: Optional[list[str]] = None):
         "--storage-path", default=None, help="Override index storage location."
     )
 
-    # --- digest ---
-    digest_parser = subparsers.add_parser(
-        "digest",
-        help="Agent stand-up briefing — since-last-session delta + risk surface + dead-code candidates",
-    )
-    digest_parser.add_argument(
-        "repo",
-        nargs="?",
-        default=".",
-        help="Repo identifier (path, owner/name, or bare display name). Defaults to '.' (cwd).",
-    )
-    digest_parser.add_argument(
-        "--since-sha",
-        default=None,
-        help="Override the last-seen SHA (for re-running a delta).",
-    )
-    digest_parser.add_argument(
-        "--max-changed-files",
-        type=int,
-        default=5,
-        help="Cap on changed-files list (default 5).",
-    )
-    digest_parser.add_argument(
-        "--max-hotspots", type=int, default=3, help="Cap on hotspot list (default 3)."
-    )
-    digest_parser.add_argument(
-        "--max-dead-code",
-        type=int,
-        default=3,
-        help="Cap on dead-code candidates (default 3).",
-    )
-    digest_parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit the structured payload as JSON instead of markdown.",
-    )
-    digest_parser.add_argument(
-        "--storage-path", default=None, help="Override index storage location."
-    )
-
     # --- receipt ---
     receipt_parser = subparsers.add_parser(
         "receipt",
@@ -7221,7 +6374,6 @@ def main(argv: Optional[list[str]] = None):
             "upgrade",
             "whatsnew",
             "receipt",
-            "digest",
             "health",
             "observatory",
             "keyring",
@@ -7760,21 +6912,6 @@ def main(argv: Optional[list[str]] = None):
         if args.storage_path:
             argv += ["--storage-path", args.storage_path]
         sys.exit(health_main(argv))
-
-    if args.command == "digest":
-        from .cli.digest import main as digest_main
-
-        argv = [args.repo]
-        if args.since_sha:
-            argv += ["--since-sha", args.since_sha]
-        argv += ["--max-changed-files", str(args.max_changed_files)]
-        argv += ["--max-hotspots", str(args.max_hotspots)]
-        argv += ["--max-dead-code", str(args.max_dead_code)]
-        if args.json:
-            argv += ["--json"]
-        if args.storage_path:
-            argv += ["--storage-path", args.storage_path]
-        sys.exit(digest_main(argv))
 
     if args.command == "receipt":
         from .cli.receipt import main as receipt_main

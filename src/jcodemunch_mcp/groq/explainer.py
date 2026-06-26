@@ -25,15 +25,14 @@ from typing import Optional
 from .config import GcmConfig
 from .voice import TTS_MODEL, TTS_VOICE
 
-
 # Slide layout constants
 SLIDE_WIDTH = 1920
 SLIDE_HEIGHT = 1080
-BG_COLOR = (13, 17, 23)       # GitHub dark background
-TEXT_COLOR = (230, 237, 243)   # Light text
+BG_COLOR = (13, 17, 23)  # GitHub dark background
+TEXT_COLOR = (230, 237, 243)  # Light text
 ACCENT_COLOR = (88, 166, 255)  # Blue accent
-CODE_COLOR = (201, 209, 217)   # Code text
-HEADER_COLOR = (255, 123, 114) # Red-orange for headers
+CODE_COLOR = (201, 209, 217)  # Code text
+HEADER_COLOR = (255, 123, 114)  # Red-orange for headers
 MARGIN = 80
 CODE_FONT_SIZE = 20
 TITLE_FONT_SIZE = 48
@@ -44,6 +43,7 @@ FOOTER_FONT_SIZE = 16
 @dataclass
 class Slide:
     """A single slide in the explainer video."""
+
     title: str
     content: str  # Plain text or code
     is_code: bool = False
@@ -53,6 +53,7 @@ class Slide:
 @dataclass
 class NarrationSegment:
     """A segment of the narration script tied to a slide."""
+
     slide_title: str
     text: str
     slide_content: str
@@ -107,14 +108,16 @@ def _check_deps() -> Optional[str]:
 def _gather_repo_info(repo_id: str, storage_path: Optional[str] = None) -> dict:
     """Gather repo summary, file tree, and key symbols via jCodeMunch."""
     from ..tools.get_file_tree import get_file_tree
-    from ..tools.get_repo_outline import get_repo_outline
+    from ..tools.get_repo_map import get_repo_map
     from ..tools.search_symbols import search_symbols
 
     info: dict = {"repo": repo_id}
 
     # Repo outline (summary + structure)
     try:
-        outline = get_repo_outline(repo=repo_id, storage_path=storage_path)
+        outline = get_repo_map(
+            repo=repo_id, storage_path=storage_path, group_by="file", token_budget=512
+        )
         info["outline"] = outline
     except Exception as e:
         info["outline"] = {"error": str(e)}
@@ -141,7 +144,9 @@ def _gather_repo_info(repo_id: str, storage_path: Optional[str] = None) -> dict:
     return info
 
 
-def _generate_narration_script(cfg: GcmConfig, repo_info: dict, verbose: bool = False) -> list[NarrationSegment]:
+def _generate_narration_script(
+    cfg: GcmConfig, repo_info: dict, verbose: bool = False
+) -> list[NarrationSegment]:
     """Use Groq LLM to generate a structured narration script."""
     from .inference import ask
 
@@ -153,7 +158,10 @@ def _generate_narration_script(cfg: GcmConfig, repo_info: dict, verbose: bool = 
         if outline.get("summary"):
             parts.append(f"\nSummary:\n{outline['summary']}")
         if outline.get("languages"):
-            langs = ", ".join(f"{l['language']} ({l['files']} files)" for l in outline["languages"][:5])
+            langs = ", ".join(
+                f"{l['language']} ({l['files']} files)"
+                for l in outline["languages"][:5]
+            )
             parts.append(f"\nLanguages: {langs}")
         if outline.get("total_files"):
             parts.append(f"Total files: {outline['total_files']}")
@@ -170,7 +178,9 @@ def _generate_narration_script(cfg: GcmConfig, repo_info: dict, verbose: bool = 
     if symbols:
         sym_lines = []
         for s in symbols[:10]:
-            sym_lines.append(f"  {s.get('kind', '?')} {s.get('id', '?')} in {s.get('file', '?')}")
+            sym_lines.append(
+                f"  {s.get('kind', '?')} {s.get('id', '?')} in {s.get('file', '?')}"
+            )
         parts.append("\nKey Symbols:\n" + "\n".join(sym_lines))
 
     context = "\n".join(parts)
@@ -209,21 +219,27 @@ def _generate_narration_script(cfg: GcmConfig, repo_info: dict, verbose: bool = 
         if start >= 0 and end > start:
             segments_raw = json.loads(text[start:end])
         else:
-            raise ValueError(f"Could not parse narration script from LLM response:\n{raw[:200]}")
+            raise ValueError(
+                f"Could not parse narration script from LLM response:\n{raw[:200]}"
+            )
 
     segments = []
     for seg in segments_raw:
-        segments.append(NarrationSegment(
-            slide_title=seg.get("slide_title", ""),
-            text=seg.get("text", ""),
-            slide_content=seg.get("slide_content", ""),
-            is_code=seg.get("is_code", False),
-        ))
+        segments.append(
+            NarrationSegment(
+                slide_title=seg.get("slide_title", ""),
+                text=seg.get("text", ""),
+                slide_content=seg.get("slide_content", ""),
+                is_code=seg.get("is_code", False),
+            )
+        )
 
     return segments
 
 
-def _render_tts(cfg: GcmConfig, text: str, output_path: str, verbose: bool = False) -> float:
+def _render_tts(
+    cfg: GcmConfig, text: str, output_path: str, verbose: bool = False
+) -> float:
     """Render TTS for a text segment. Returns duration in seconds."""
     from openai import OpenAI
 
@@ -250,12 +266,17 @@ def _render_tts(cfg: GcmConfig, text: str, output_path: str, verbose: bool = Fal
 
     if verbose:
         elapsed = time.perf_counter() - t0
-        print(f"  [tts] segment rendered ({duration:.1f}s audio, {elapsed:.2f}s wall)", file=sys.stderr)
+        print(
+            f"  [tts] segment rendered ({duration:.1f}s audio, {elapsed:.2f}s wall)",
+            file=sys.stderr,
+        )
 
     return duration
 
 
-def _render_slide(slide: Slide, slide_num: int, total_slides: int, repo_name: str, output_path: str) -> None:
+def _render_slide(
+    slide: Slide, slide_num: int, total_slides: int, repo_name: str, output_path: str
+) -> None:
     """Render a single slide as a PNG image using Pillow."""
     from PIL import Image, ImageDraw, ImageFont
 
@@ -265,7 +286,10 @@ def _render_slide(slide: Slide, slide_num: int, total_slides: int, repo_name: st
     # Use default font (monospace-like) — Pillow's built-in
     try:
         title_font = ImageFont.truetype("arial.ttf", TITLE_FONT_SIZE)
-        body_font = ImageFont.truetype("consola.ttf" if slide.is_code else "arial.ttf", CODE_FONT_SIZE if slide.is_code else BODY_FONT_SIZE)
+        body_font = ImageFont.truetype(
+            "consola.ttf" if slide.is_code else "arial.ttf",
+            CODE_FONT_SIZE if slide.is_code else BODY_FONT_SIZE,
+        )
         footer_font = ImageFont.truetype("arial.ttf", FOOTER_FONT_SIZE)
     except (OSError, IOError):
         # Fallback to default
@@ -288,7 +312,10 @@ def _render_slide(slide: Slide, slide_num: int, total_slides: int, repo_name: st
         # Draw code background
         code_bg = (22, 27, 34)
         draw.rectangle(
-            [(MARGIN - 10, y - 5), (SLIDE_WIDTH - MARGIN + 10, SLIDE_HEIGHT - MARGIN - 40)],
+            [
+                (MARGIN - 10, y - 5),
+                (SLIDE_WIDTH - MARGIN + 10, SLIDE_HEIGHT - MARGIN - 40),
+            ],
             fill=code_bg,
         )
 
@@ -305,13 +332,22 @@ def _render_slide(slide: Slide, slide_num: int, total_slides: int, repo_name: st
 
     # Footer
     footer_y = SLIDE_HEIGHT - MARGIN
-    footer = f"Powered by jCodeMunch + Groq  |  {repo_name}  |  {slide_num}/{total_slides}"
+    footer = (
+        f"Powered by jCodeMunch + Groq  |  {repo_name}  |  {slide_num}/{total_slides}"
+    )
     draw.text((MARGIN, footer_y), footer, fill=(110, 118, 129), font=footer_font)
 
     img.save(output_path)
 
 
-def _composite_video(slides_dir: str, audio_dir: str, segments: list[NarrationSegment], durations: list[float], output_path: str, verbose: bool = False) -> None:
+def _composite_video(
+    slides_dir: str,
+    audio_dir: str,
+    segments: list[NarrationSegment],
+    durations: list[float],
+    output_path: str,
+    verbose: bool = False,
+) -> None:
     """Composite slide images + audio segments into final MP4 via FFmpeg."""
     # Build FFmpeg concat file
     concat_entries = []
@@ -332,8 +368,12 @@ def _composite_video(slides_dir: str, audio_dir: str, segments: list[NarrationSe
     for i in range(n):
         v_idx = i * 2
         a_idx = i * 2 + 1
-        filter_parts.append(f"[{v_idx}:v]scale={SLIDE_WIDTH}:{SLIDE_HEIGHT},setsar=1[v{i}]")
-        filter_parts.append(f"[{a_idx}:a]aformat=sample_rates=44100:channel_layouts=mono[a{i}]")
+        filter_parts.append(
+            f"[{v_idx}:v]scale={SLIDE_WIDTH}:{SLIDE_HEIGHT},setsar=1[v{i}]"
+        )
+        filter_parts.append(
+            f"[{a_idx}:a]aformat=sample_rates=44100:channel_layouts=mono[a{i}]"
+        )
 
     v_concat = "".join(f"[v{i}]" for i in range(n))
     a_concat = "".join(f"[a{i}]" for i in range(n))
@@ -343,14 +383,29 @@ def _composite_video(slides_dir: str, audio_dir: str, segments: list[NarrationSe
     filter_complex = ";".join(filter_parts)
 
     cmd = [
-        "ffmpeg", "-y",
+        "ffmpeg",
+        "-y",
         *input_args,
-        "-filter_complex", filter_complex,
-        "-map", "[outv]", "-map", "[outa]",
-        "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-        "-c:a", "aac", "-b:a", "128k",
-        "-pix_fmt", "yuv420p",
-        "-movflags", "+faststart",
+        "-filter_complex",
+        filter_complex,
+        "-map",
+        "[outv]",
+        "-map",
+        "[outa]",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "fast",
+        "-crf",
+        "23",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
         output_path,
     ]
 
@@ -403,7 +458,9 @@ def generate_explainer(
     if verbose:
         print("  [2/5] Generating narration script...", file=sys.stderr)
     segments = _generate_narration_script(cfg, repo_info, verbose=verbose)
-    print(f"  Script: {len(segments)} segments, ~{sum(len(s.text.split()) for s in segments)} words")
+    print(
+        f"  Script: {len(segments)} segments, ~{sum(len(s.text.split()) for s in segments)} words"
+    )
 
     # Step 3: Render TTS for each segment
     if verbose:
@@ -446,7 +503,9 @@ def generate_explainer(
         print("  [5/5] Compositing video...", file=sys.stderr)
 
     output_abs = os.path.abspath(output_path)
-    _composite_video(slides_dir, audio_dir, segments, durations, output_abs, verbose=verbose)
+    _composite_video(
+        slides_dir, audio_dir, segments, durations, output_abs, verbose=verbose
+    )
 
     # Cleanup temp dir
     try:
@@ -455,6 +514,8 @@ def generate_explainer(
         pass
 
     total_time = time.perf_counter() - t0
-    print(f"  Done! {output_abs} ({total_duration:.0f}s video, generated in {total_time:.1f}s)")
+    print(
+        f"  Done! {output_abs} ({total_duration:.0f}s video, generated in {total_time:.1f}s)"
+    )
 
     return output_abs

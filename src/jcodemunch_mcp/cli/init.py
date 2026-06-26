@@ -39,11 +39,11 @@ Always use jCodemunch-MCP tools for code navigation. Never fall back to Read, Gr
 - specific line range only → `get_file_content` (last resort)
 
 **Repo structure:**
-- `get_repo_outline` → dirs, languages, symbol counts
+- `get_repo_map(mode="outline")` → dirs, languages, symbol counts
 - `get_file_tree` → file layout, filter with `path_prefix`
 
 **Relationships & impact:**
-- what imports this file → `find_importers`
+- what imports this file → `find_references(mode="importers")`
 - where is this name used → `find_references`
 - is this identifier used anywhere → `find_references` (with `quick=true`)
 - file dependency graph → `get_dependency_graph`

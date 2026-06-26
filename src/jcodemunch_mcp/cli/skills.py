@@ -123,7 +123,7 @@ def _build_skill_content() -> str:
         "",
         "Each does something distinct; pick by question:",
         "",
-        '- "What imports this file?" → `find_importers`',
+        '- "Who imports this file?" → `find_references(mode=importers)`',
         '- "Where is this identifier used?" → `find_references`',
         '- "Is this identifier used anywhere?" → `find_references` (quick=true, fast yes/no)',
         '- "What breaks if I change X?" → `get_blast_radius`',

@@ -20,6 +20,7 @@ from collections import deque
 from typing import Optional
 
 from ..parser.context._route_utils import ENTRY_POINT_DECORATOR_RE
+from ..parser.imports import resolve_specifier
 from ..storage import IndexStore
 from ._call_graph import _word_match, build_symbols_by_file
 from ._graph_utils import build_adjacency

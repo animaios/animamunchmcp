@@ -5,9 +5,9 @@ import os
 import sys
 from typing import Optional
 
-from ..tools.list_repos import list_repos
-from ..tools.get_ranked_context import get_ranked_context
 from ..tools.index_folder import index_folder
+from ..tools.list_repos import list_repos
+from ..tools.search_symbols import search_symbols
 
 
 def _is_github_repo(repo: str) -> bool:
@@ -67,12 +67,15 @@ def ensure_indexed(
         if verbose:
             print(f"Indexing {repo} from GitHub...", file=sys.stderr)
         from ..tools.index_repo import index_repo
-        result = asyncio.run(index_repo(
-            url=repo,
-            use_ai_summaries=False,
-            github_token=github_token,
-            storage_path=storage_path,
-        ))
+
+        result = asyncio.run(
+            index_repo(
+                url=repo,
+                use_ai_summaries=False,
+                github_token=github_token,
+                storage_path=storage_path,
+            )
+        )
         if not result.get("success", False):
             return None, result.get("error", "Indexing failed")
         # Re-check
@@ -98,7 +101,9 @@ def ensure_indexed(
             # index_folder uses folder name as display_name; try repo field
             for entry in list_repos(storage_path=storage_path).get("repos", []):
                 source = entry.get("source_root", "")
-                if source and os.path.normcase(os.path.normpath(source)) == os.path.normcase(os.path.normpath(local_path)):
+                if source and os.path.normcase(
+                    os.path.normpath(source)
+                ) == os.path.normcase(os.path.normpath(local_path)):
                     return entry["repo"], None
         if existing:
             return existing, None
@@ -114,12 +119,13 @@ def retrieve_context(
     storage_path: Optional[str] = None,
 ) -> tuple[str, dict]:
     """Retrieve ranked context for a query. Returns (formatted_context, raw_result)."""
-    result = get_ranked_context(
+    result = search_symbols(
         repo=repo_id,
         query=query,
         token_budget=token_budget,
-        strategy="combined",
+        sort_by="combined",
         fusion=True,
+        mode="context",
         storage_path=storage_path,
     )
 

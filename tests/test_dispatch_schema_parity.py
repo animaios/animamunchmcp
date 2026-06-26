@@ -157,7 +157,7 @@ def test_dispatch_chain_is_parseable_and_nonempty():
     finding `name == "..."` branches, this test fails loudly rather than passing
     vacuously."""
     dispatch = _collect_dispatch_arg_keys()
-    assert len(dispatch) > 50, (
+    assert len(dispatch) > 30, (
         f"Only {len(dispatch)} dispatch branches found by AST walk; the parity "
         f"check may have gone vacuous (call_tool dispatch shape changed?)."
     )

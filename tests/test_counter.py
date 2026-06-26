@@ -136,7 +136,7 @@ def test_order_rejects_bad_args_type():
 def test_menu_lists_full_catalog():
     out = _call("menu", {})
     assert out["tool"] == "menu"
-    assert out["total_actions"] >= 50
+    assert out["total_actions"] >= 35
     assert not any(a["action"] in counter.FRONT_DOOR for a in out["actions"])
 
 

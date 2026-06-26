@@ -1,18 +1,25 @@
-"""Find all files that reference (import) a given identifier.
+"""Find files that reference, import, or are related to a given identifier.
 
-Supports two modes:
-  - Full (quick=False, default): return the complete reference list.
-  - Quick (quick=True): return a lightweight {is_referenced, import_count,
-    content_count} envelope for fast dead-code checks — the behaviour that
-    was formerly the separate ``check_references`` tool.
+Supports three modes (``mode`` parameter):
+  - ``"refs"`` (default): find who references an identifier — the original
+    find_references behaviour, with full and quick sub-modes.
+  - ``"importers"``: find which files import a given file — the former
+    find_importers tool (singular or batch).
+  - ``"related"``: find related symbols using heuristic clustering — the
+    former get_related_symbols tool.
 """
 
 import posixpath
+import re
 import time
 from typing import Optional
 
 from ..storage import IndexStore, result_cache_get, result_cache_put
 from ._utils import index_status_to_tool_error, resolve_repo
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Mode "refs" — original find_references logic
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 def _quick_check_single(
@@ -436,6 +443,552 @@ def _attach_runtime_to_response(response: dict, store, owner: str, name: str) ->
     return response
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Mode "importers" — former find_importers logic
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def _importers_resolve_to_leaves(
+    imp: dict,
+    src_file: str,
+    source_files: frozenset,
+    alias_map,
+    psr4_map,
+    wildcard_map: dict[str, list[str]],
+    named_map: dict[str, dict[str, tuple[str, str]]],
+) -> set[str]:
+    """Resolve `imp` to its direct target plus every leaf reachable through
+    re-export chains, with per-name routing for selective re-exports.
+
+    For `export { Foo } from './foo'` in a barrel, only consumers that
+    actually import `Foo` from the barrel credit `./foo`.
+    """
+    from ..parser.imports import expand_barrel_leaves
+    from ..parser.imports import resolve_specifier as _rs
+
+    direct = _rs(imp["specifier"], src_file, source_files, alias_map, psr4_map)
+    if not direct:
+        return set()
+    return expand_barrel_leaves(direct, imp.get("names", []), wildcard_map, named_map)
+
+
+def _importers_find_single(
+    file_path: str,
+    index,
+    max_results: int,
+    owner: str,
+    name: str,
+    start: float,
+) -> dict:
+    """Core logic for a single file_path query. Returns the original flat shape."""
+    from ..parser.imports import build_re_export_maps
+
+    if index.imports is None:
+        return {
+            "repo": f"{owner}/{name}",
+            "file_path": file_path,
+            "importers": [],
+            "note": "No import data available. Re-index with jcodemunch-mcp >= 1.3.0 to enable find_importers.",
+            "_meta": {"timing_ms": round((time.perf_counter() - start) * 1000, 1)},
+        }
+
+    source_files = frozenset(index.source_files)
+    alias_map = index.alias_map
+    psr4_map = getattr(index, "psr4_map", None)
+
+    # v1.94.0: symbol-aware barrel resolution.  Wildcard re-exports
+    # (`export * from`) credit every leaf to anyone importing the barrel
+    # (v1.93 behavior).  Selective re-exports (`export { Foo } from`)
+    # credit only consumers that actually import `Foo` from the barrel.
+    # Old indexes without `re_export_kind` default to wildcard semantics.
+    wildcard_map, named_map = build_re_export_maps(
+        index.imports,
+        source_files,
+        alias_map,
+        psr4_map,
+    )
+
+    # Build a set of all files that are imported by at least one other file
+    # (used for has_importers). Counts barrel-expanded leaves so a leaf
+    # definition file isn't flagged as orphan just because its only
+    # importers reach it via re-exports.
+    files_that_are_imported: set[str] = set()
+    for src_file, file_imports in index.imports.items():
+        for imp in file_imports:
+            if imp.get("is_re_export"):
+                continue  # re-exports forward, not consume
+            files_that_are_imported.update(
+                _importers_resolve_to_leaves(
+                    imp,
+                    src_file,
+                    source_files,
+                    alias_map,
+                    psr4_map,
+                    wildcard_map,
+                    named_map,
+                )
+            )
+
+    results = []
+
+    for src_file, file_imports in index.imports.items():
+        if src_file == file_path:
+            continue
+        for imp in file_imports:
+            if imp.get("is_re_export"):
+                continue  # re-export-only files are forwarders, not consumers
+            leaves = _importers_resolve_to_leaves(
+                imp,
+                src_file,
+                source_files,
+                alias_map,
+                psr4_map,
+                wildcard_map,
+                named_map,
+            )
+            if file_path in leaves:
+                results.append(
+                    {
+                        "file": src_file,
+                        "specifier": imp["specifier"],
+                        "names": imp.get("names", []),
+                        "has_importers": src_file in files_that_are_imported,
+                    }
+                )
+                break  # one match per file is enough
+
+    results.sort(key=lambda r: r["file"])
+
+    elapsed = (time.perf_counter() - start) * 1000
+    truncated = len(results) > max_results
+    return {
+        "repo": f"{owner}/{name}",
+        "file_path": file_path,
+        "importer_count": len(results),
+        "importers": results[:max_results],
+        "_meta": {
+            "timing_ms": round(elapsed, 1),
+            "truncated": truncated,
+            "tip": "Tip: use file_paths=['{0}','...'] to query multiple files in one call.".format(
+                file_path
+            )
+            if truncated
+            else "Tip: use file_paths=['{0}','...'] to query multiple files in one call. "
+            "For usage-site matching beyond imports, also try find_references(quick=True).".format(
+                file_path
+            ),
+        },
+    }
+
+
+def _importers_find_batch(
+    file_paths: list[str],
+    index,
+    max_results: int,
+    owner: str,
+    name: str,
+    start: float,
+) -> dict:
+    """Batch logic: loop over file_paths, return grouped results array."""
+    from ..parser.imports import build_re_export_maps
+
+    if index.imports is None:
+        return {
+            "repo": f"{owner}/{name}",
+            "results": [
+                {
+                    "file_path": fp,
+                    "importers": [],
+                    "note": "No import data available. Re-index with jcodemunch-mcp >= 1.3.0 to enable find_importers.",
+                }
+                for fp in file_paths
+            ],
+            "_meta": {"timing_ms": round((time.perf_counter() - start) * 1000, 1)},
+        }
+
+    source_files = frozenset(index.source_files)
+    alias_map = index.alias_map
+    psr4_map = getattr(index, "psr4_map", None)
+
+    # v1.94.0: symbol-aware barrel resolution. See _importers_find_single.
+    wildcard_map, named_map = build_re_export_maps(
+        index.imports,
+        source_files,
+        alias_map,
+        psr4_map,
+    )
+
+    # Pass 1: build files_that_are_imported (counts barrel-expanded leaves)
+    files_that_are_imported: set[str] = set()
+    for src_file, file_imports in index.imports.items():
+        for imp in file_imports:
+            if imp.get("is_re_export"):
+                continue
+            files_that_are_imported.update(
+                _importers_resolve_to_leaves(
+                    imp,
+                    src_file,
+                    source_files,
+                    alias_map,
+                    psr4_map,
+                    wildcard_map,
+                    named_map,
+                )
+            )
+
+    # Pass 2: build import_map. Each importer is recorded under every leaf
+    # its specifier reaches (including transitively through barrels).
+    import_map: dict[str, list[dict]] = {}
+    for src_file, file_imports in index.imports.items():
+        for imp in file_imports:
+            if imp.get("is_re_export"):
+                continue
+            leaves = _importers_resolve_to_leaves(
+                imp,
+                src_file,
+                source_files,
+                alias_map,
+                psr4_map,
+                wildcard_map,
+                named_map,
+            )
+            if not leaves:
+                continue
+            entry = {
+                "file": src_file,
+                "specifier": imp["specifier"],
+                "names": imp.get("names", []),
+                "has_importers": src_file in files_that_are_imported,
+            }
+            for leaf in leaves:
+                import_map.setdefault(leaf, []).append(entry)
+
+    results = []
+    for file_path in file_paths:
+        file_results = import_map.get(file_path, [])  # O(1) lookup
+        file_results.sort(key=lambda r: r["file"])
+        results.append(
+            {
+                "file_path": file_path,
+                "importer_count": len(file_results),
+                "importers": file_results[:max_results],
+            }
+        )
+
+    return {
+        "repo": f"{owner}/{name}",
+        "results": results,
+        "_meta": {"timing_ms": round((time.perf_counter() - start) * 1000, 1)},
+    }
+
+
+def _importers_find_cross_repo(
+    file_path: str,
+    repo_id: str,
+    all_repos: list[dict],
+    store: IndexStore,
+    owner: str,
+    name: str,
+) -> list[dict]:
+    """Search other indexed repos for files that import from this repo's package."""
+    from .package_registry import extract_root_package_from_specifier
+
+    # Look up this repo's package names from its index
+    current_index = store.load_index(owner, name)
+    if not current_index:
+        return []
+    pkg_names = getattr(current_index, "package_names", []) or []
+    if not pkg_names:
+        return []
+
+    cross_results: list[dict] = []
+
+    for repo_entry in all_repos:
+        other_repo_id = repo_entry.get("repo", "")
+        if not other_repo_id or other_repo_id == repo_id or "/" not in other_repo_id:
+            continue
+        other_owner, other_name = other_repo_id.split("/", 1)
+        other_index = store.load_index(other_owner, other_name)
+        if not other_index or not other_index.imports:
+            continue
+
+        other_source_files = frozenset(other_index.source_files)
+
+        for src_file, file_imports in other_index.imports.items():
+            for imp in file_imports:
+                specifier = imp.get("specifier", "")
+                # Determine language from file extension
+                lang = other_index.file_languages.get(src_file, "")
+                root_pkg = extract_root_package_from_specifier(specifier, lang)
+                if root_pkg and root_pkg in pkg_names:
+                    cross_results.append(
+                        {
+                            "file": src_file,
+                            "specifier": specifier,
+                            "names": imp.get("names", []),
+                            "has_importers": True,  # cross-repo — not analyzed further
+                            "cross_repo": True,
+                            "source_repo": other_repo_id,
+                        }
+                    )
+                    break  # one match per file per other-repo is enough
+
+    return cross_results
+
+
+def _mode_importers(
+    repo: str,
+    file_path: Optional[str],
+    file_paths: Optional[list[str]],
+    max_results: int,
+    storage_path: Optional[str],
+    cross_repo: bool,
+) -> dict:
+    """Dispatch the find_importers logic (singular or batch, with optional cross-repo)."""
+    # Normalize: some MCP clients send file_paths=[] alongside file_path when they mean singular mode
+    if file_path is not None and file_paths is not None and len(file_paths) == 0:
+        file_paths = None
+    if (file_path is None and file_paths is None) or (
+        file_path is not None and file_paths is not None
+    ):
+        raise ValueError(
+            "Provide exactly one of 'file_path' or 'file_paths', not both and not neither."
+        )
+
+    # Resolve cross_repo default from config if not explicitly provided
+    if not cross_repo:
+        from .. import config as _cfg
+
+        cross_repo = bool(_cfg.get("cross_repo_default", False))
+
+    start = time.perf_counter()
+    max_results = max(1, min(max_results, 200))
+
+    try:
+        owner, name = resolve_repo(repo, storage_path)
+    except ValueError as e:
+        return {"error": str(e)}
+
+    store = IndexStore(base_path=storage_path)
+    index = store.load_index(owner, name)
+    if not index:
+        return index_status_to_tool_error(store.inspect_index(owner, name))
+
+    repo_id = f"{owner}/{name}"
+
+    if file_paths is not None:
+        # Cross-repo importer lookup is package-level (whole-repo, not per-file —
+        # _importers_find_cross_repo ignores its file_path arg). Attaching one
+        # whole-repo result across a multi-file batch would either drop the
+        # evidence (the old `""` path) or imply per-file precision that does not
+        # exist. Fail closed and point the caller at singular calls (#339).
+        if cross_repo and len(file_paths) > 1:
+            return {
+                "error": (
+                    "cross_repo=true is not supported with a multi-file 'file_paths' "
+                    "batch: cross-repo importer lookup is package-level, not per-file. "
+                    "Use singular 'file_path' calls for cross-repo evidence."
+                ),
+                "_meta": {
+                    "cross_repo_scope": "package",
+                    "file_count": len(file_paths),
+                },
+            }
+        result = _importers_find_batch(
+            file_paths, index, max_results, owner, name, start
+        )
+        if cross_repo:
+            # len(file_paths) == 1 here — equivalent to the singular cross-repo path.
+            try:
+                from .list_repos import list_repos
+
+                all_repos = list_repos(storage_path=storage_path).get("repos", [])
+                cross_results = _importers_find_cross_repo(
+                    file_paths[0],
+                    repo_id,
+                    all_repos,
+                    store,
+                    owner,
+                    name,
+                )
+                if cross_results and "results" in result:
+                    # Attach cross-repo results to the batch response
+                    result["cross_repo_importers"] = cross_results[:max_results]
+            except Exception:
+                pass
+        return result
+    else:
+        result = _importers_find_single(
+            file_path, index, max_results, owner, name, start
+        )
+        if cross_repo and "importers" in result:
+            try:
+                from .list_repos import list_repos
+
+                all_repos = list_repos(storage_path=storage_path).get("repos", [])
+                cross_results = _importers_find_cross_repo(
+                    file_path,
+                    repo_id,
+                    all_repos,
+                    store,
+                    owner,
+                    name,
+                )
+                if cross_results:
+                    result["importers"] = (
+                        result.get("importers", []) + cross_results[:max_results]
+                    )
+                    result["cross_repo_importer_count"] = len(cross_results)
+            except Exception:
+                pass
+        return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Mode "related" — former get_related_symbols logic
+# ═══════════════════════════════════════════════════════════════════════════
+
+_W_SAME_FILE = 3.0
+_W_SHARED_IMPORT = 1.5
+_W_NAME_TOKEN = 0.5  # per overlapping token
+
+
+def _related_tokenize_name(name: str) -> set[str]:
+    """Split camelCase/snake_case name into lowercase tokens (≥2 chars)."""
+    name = re.sub(r"([a-z])([A-Z])", r"\1_\2", name)
+    return {t.lower() for t in re.findall(r"[a-zA-Z0-9]+", name) if len(t) > 1}
+
+
+def _related_build_file_importers(
+    imports: Optional[dict],
+    source_files: frozenset,
+    alias_map: Optional[dict] = None,
+    psr4_map: Optional[dict] = None,
+) -> dict[str, set[str]]:
+    """Return {file: {files_that_import_it}} — used for shared-importer signal."""
+    from ..parser.imports import resolve_specifier
+
+    if not imports:
+        return {}
+    rev: dict[str, set[str]] = {}
+    for src_file, file_imports in imports.items():
+        for imp in file_imports:
+            target = resolve_specifier(
+                imp["specifier"], src_file, source_files, alias_map, psr4_map
+            )
+            if target and target != src_file:
+                rev.setdefault(target, set()).add(src_file)
+    return rev
+
+
+def _mode_related(
+    repo: str,
+    symbol_id: str,
+    max_results: int,
+    storage_path: Optional[str],
+) -> dict:
+    """Find symbols related to a given symbol using heuristic clustering.
+
+    Three signals are combined:
+    * Same file (weight 3.0)
+    * Shared importers (weight 1.5)
+    * Name token overlap (weight 0.5 per token)
+    """
+    start = time.perf_counter()
+    max_results = max(1, min(max_results, 50))
+
+    try:
+        owner, name = resolve_repo(repo, storage_path)
+    except ValueError as e:
+        return {"error": str(e)}
+
+    store = IndexStore(base_path=storage_path)
+    index = store.load_index(owner, name)
+    if not index:
+        return index_status_to_tool_error(store.inspect_index(owner, name))
+
+    target = index.get_symbol(symbol_id)
+    if not target:
+        return {"error": f"Symbol not found: {symbol_id}"}
+
+    target_file = target.get("file", "")
+    target_tokens = _related_tokenize_name(target.get("name", ""))
+
+    # Build shared-importer map if imports are available
+    source_files = frozenset(index.source_files)
+    file_importers = _related_build_file_importers(
+        index.imports, source_files, index.alias_map, getattr(index, "psr4_map", None)
+    )
+    target_importers = file_importers.get(target_file, set())
+
+    scores: dict[str, float] = {}
+
+    for sym in index.symbols:
+        sid = sym.get("id", "")
+        if sid == symbol_id:
+            continue
+
+        sym_file = sym.get("file", "")
+        score = 0.0
+
+        # Same file
+        if sym_file == target_file:
+            score += _W_SAME_FILE
+
+        # Shared importers
+        elif (
+            target_importers and file_importers.get(sym_file, set()) & target_importers
+        ):
+            score += _W_SHARED_IMPORT
+
+        # Name token overlap
+        sym_tokens = _related_tokenize_name(sym.get("name", ""))
+        overlap = target_tokens & sym_tokens
+        if overlap:
+            score += len(overlap) * _W_NAME_TOKEN
+
+        if score > 0:
+            scores[sid] = score
+
+    # Sort and take top results
+    top_ids = sorted(scores, key=lambda x: scores[x], reverse=True)[:max_results]
+
+    related = []
+    for sid in top_ids:
+        sym = index.get_symbol(sid)
+        if sym:
+            related.append(
+                {
+                    "id": sym["id"],
+                    "name": sym["name"],
+                    "kind": sym["kind"],
+                    "file": sym["file"],
+                    "line": sym["line"],
+                    "signature": sym.get("signature", ""),
+                    "relatedness_score": round(scores[sid], 2),
+                }
+            )
+
+    elapsed = (time.perf_counter() - start) * 1000
+    return {
+        "repo": f"{owner}/{name}",
+        "symbol": {
+            "id": target["id"],
+            "name": target["name"],
+            "kind": target["kind"],
+            "file": target_file,
+        },
+        "related_count": len(related),
+        "related": related,
+        "_meta": {"timing_ms": round(elapsed, 1)},
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Unified public entry point
+# ═══════════════════════════════════════════════════════════════════════════
+
+
 def find_references(
     repo: str,
     identifier: Optional[str] = None,
@@ -446,46 +999,85 @@ def find_references(
     quick: bool = False,
     search_content: bool = True,
     max_content_results: int = 20,
+    # ── mode parameter ────────────────────────────────────────────────────
+    mode: str = "refs",
+    # ── mode="importers" params ──────────────────────────────────────────
+    file_path: Optional[str] = None,
+    file_paths: Optional[list] = None,
+    cross_repo: bool = False,
+    # ── mode="related" params ───────────────────────────────────────────
+    symbol_id: Optional[str] = None,
 ) -> dict:
-    """Find all indexed files that import or reference an identifier.
+    """Find files that reference, import, or are related to an identifier.
 
-    Supports two modes:
-    - Singular: pass ``identifier`` to get the original flat response shape.
-    - Batch: pass ``identifiers`` (list) to query multiple identifiers at once,
-      returning a grouped ``results`` array.
+    Three modes are available via the ``mode`` parameter:
 
-    With ``quick=True``, returns a lightweight envelope per identifier:
-    ``{is_referenced: bool, import_count: int, content_count: int}`` — the
-    behaviour formerly provided by the separate ``check_references`` tool.
-    When ``quick=True``, also searches file content (controlled by
-    ``search_content`` and capped by ``max_content_results``) in addition to
-    the import graph.
+    * ``"refs"`` (default): find who references an identifier — the original
+      find_references behaviour. Supports singular (``identifier``) and batch
+      (``identifiers``), full and quick sub-modes.
+
+    * ``"importers"``: find which files import a given file — the former
+      find_importers tool. Use ``file_path`` for singular mode or ``file_paths``
+      for batch mode. Set ``cross_repo=True`` to also search other indexed repos.
+
+    * ``"related"``: find related symbols using heuristic clustering — the
+      former get_related_symbols tool. Pass ``symbol_id`` to specify the target
+      symbol.
 
     Args:
         repo: Repository identifier (owner/repo or display name).
+        mode: ``"refs"`` | ``"importers"`` | ``"related"``. Default ``"refs"``.
+
+    Refs-mode params:
         identifier: The symbol/module name to look for (singular mode).
+        identifiers: List of symbol/module names (batch mode).
         max_results: Maximum number of results (full mode only).
-        storage_path: Custom storage path.
-        identifiers: List of symbol/module names to look for (batch mode).
-        include_call_chain: When True (singular mode, full mode only), each
-            reference entry gains a ``calling_symbols`` list.
-        quick: When True, return a lightweight ``is_referenced`` envelope with
-            import/content counts instead of the full reference list. This is
-            the merged ``check_references`` behaviour.
-        search_content: Also search file contents, not just imports
-            (quick mode only). Default True.
-        max_content_results: Max files to return per identifier for content
-            search (quick mode only). Default 20.
+        include_call_chain: When True, each reference gains a ``calling_symbols`` list.
+        quick: When True, return a lightweight ``is_referenced`` envelope.
+        search_content: Also search file contents (quick mode only). Default True.
+        max_content_results: Max files per identifier for content search. Default 20.
+
+    Importers-mode params:
+        file_path: Target file path within the repo (singular mode).
+        file_paths: List of target file paths (batch mode).
+        cross_repo: When True, also search other indexed repos for cross-repo importers.
+
+    Related-mode params:
+        symbol_id: ID of the symbol to find relatives for.
+        max_results: Maximum number of related symbols to return (capped at 50).
 
     Returns:
-        Full singular: dict with flat ``references`` list and _meta envelope.
-        Full batch: dict with ``results`` array.
-        Quick singular: dict with ``is_referenced``, ``import_count``, ``content_count``.
-        Quick batch: dict with ``results`` array (one entry per input identifier).
+        Varies by mode. See individual mode documentation above.
 
     Raises:
-        ValueError: if neither or both of identifier and identifiers are provided.
+        ValueError: if required mode-specific params are missing or conflicting.
     """
+    if mode == "importers":
+        return _mode_importers(
+            repo=repo,
+            file_path=file_path,
+            file_paths=file_paths,
+            max_results=max_results,
+            storage_path=storage_path,
+            cross_repo=cross_repo,
+        )
+
+    if mode == "related":
+        if not symbol_id:
+            return {"error": "symbol_id is required when mode='related'."}
+        return _mode_related(
+            repo=repo,
+            symbol_id=symbol_id,
+            max_results=max_results,
+            storage_path=storage_path,
+        )
+
+    # ── mode="refs" (default) ────────────────────────────────────────────────
+    if mode != "refs":
+        return {
+            "error": f"Invalid mode '{mode}'. Must be 'refs', 'importers', or 'related'."
+        }
+
     # Normalize: some MCP clients send identifiers=[] alongside identifier when they mean singular mode
     if identifier is not None and identifiers is not None and len(identifiers) == 0:
         identifiers = None

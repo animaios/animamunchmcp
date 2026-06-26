@@ -281,7 +281,7 @@ def assemble_task_context(
             intent strategy (e.g. ["anchor", "blast", "runtime"]). When omitted,
             the full intent strategy runs.
         cross_repo: When True, also layer cross-repo signals
-            (find_importers cross_repo + get_group_contracts when applicable).
+            (find_references(mode=importers) cross_repo when applicable).
         storage_path: Custom storage path.
 
     Returns:
@@ -406,37 +406,20 @@ def assemble_task_context(
     # contributes 0..N entries.
 
     def _stage_orientation() -> None:
-        try:
-            from .digest import digest  # noqa: PLC0415
-
-            out = digest(repo_id, storage_path=storage_path)
-            if isinstance(out, dict) and "error" not in out:
-                _add_entry(
-                    "orientation",
-                    "digest",
-                    {
-                        "summary": out.get("summary", ""),
-                        "changed_files": out.get("changed_files", []) or [],
-                        "hotspots": out.get("hotspots", []) or [],
-                        "dead_code": out.get("dead_code", []) or [],
-                    },
-                )
-        except Exception as exc:  # noqa: BLE001
-            logger.debug(
-                "assemble_task_context: digest skipped: %s", exc, exc_info=True
-            )
+        # digest tool removed — orientation stage is a no-op
+        pass
 
     def _stage_hotspots() -> None:
         try:
-            from .get_hotspots import get_hotspots  # noqa: PLC0415
+            from .get_repo_health import get_repo_health  # noqa: PLC0415
 
-            out = get_hotspots(repo_id, top_n=5, storage_path=storage_path)
+            out = get_repo_health(repo_id, top_n=5, storage_path=storage_path)
             if isinstance(out, dict) and "error" not in out:
                 _add_entry(
                     "hotspots",
                     "get_hotspots",
                     {
-                        "hotspots": out.get("hotspots", [])[:5],
+                        "hotspots": out.get("top_hotspots", [])[:5],
                     },
                 )
         except Exception as exc:  # noqa: BLE001
@@ -823,16 +806,28 @@ def assemble_task_context(
 
     def _stage_untested() -> None:
         try:
-            from .get_untested_symbols import get_untested_symbols  # noqa: PLC0415
+            from .get_repo_health import get_repo_health  # noqa: PLC0415
 
-            out = get_untested_symbols(
-                repo_id,
-                min_confidence=0.5,
-                max_results=8,
-                storage_path=storage_path,
-            )
+            out = get_repo_health(repo_id, detailed=True, storage_path=storage_path)
             if isinstance(out, dict) and "error" not in out:
-                untested = out.get("untested", []) or out.get("results", []) or []
+                untested = out.get("details", {}).get("untested_symbols", {})
+                # _get_untested_symbols returns a dict with "symbols" key, not a list
+                if isinstance(untested, dict) and "symbols" in untested:
+                    untested = untested["symbols"]
+                elif isinstance(untested, dict) and "error" in untested:
+                    untested = []  # sub-tool errored, try fallback
+                # else: untested is already a list (shouldn't happen, but cope)
+                if not untested:
+                    # Fallback: use dead_code_v2 which is the modern replacement
+                    from .get_dead_code_v2 import get_dead_code_v2  # noqa: PLC0415
+
+                    dead_result = get_dead_code_v2(
+                        repo_id,
+                        min_confidence=0.5,
+                        max_results=8,
+                        storage_path=storage_path,
+                    )
+                    untested = dead_result.get("dead_symbols", [])
                 if untested:
                     _add_entry(
                         "untested",

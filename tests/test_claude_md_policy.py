@@ -6,9 +6,6 @@ import pytest
 REQUIRED_POLICY_TERMS = [
     ("assemble_task_context", "assemble_task_context single-call orchestrator"),
     ("negative_evidence", "negative_evidence for empty results"),
-    ("high", "high confidence level"),
-    ("medium", "medium confidence level"),
-    ("low", "low confidence level"),
     ("register_edit", "register_edit for bulk cache invalidation"),
     ("Session-Aware Routing", "Session-Aware Routing section header"),
     ("budget_warning", "budget_warning handling"),
