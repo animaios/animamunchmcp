@@ -74,11 +74,10 @@ def test_counter_surface_collapses_to_front_door():
     _surface("counter")
     names = {t.name for t in asyncio.run(server.list_tools())}
     assert counter.FRONT_DOOR <= names
-    # Always-present controls survive so tier switching / guide still work.
-    assert {"announce_model", "jcodemunch_guide"} <= names
+    # Counter surface collapses to just the front door.
+    assert counter.FRONT_DOOR == names
     # Everything else is collapsed away.
     assert "search_symbols" not in names
-    assert len(names) <= 8
 
 
 # --- 3. order: dispatch + charter gate ------------------------------------- #
