@@ -1,77 +1,80 @@
-name: Auto-release
+name: publish-nightly
 
-# On every push to main, auto-bump the patch version in pyproject.toml,
-# create a git tag, and publish a GitHub release — which then triggers
-# the existing publish.yml (on release: published) to push to PyPI.
+# On every push to main: auto-bump patch version, create a GitHub release,
+# build the package, and publish to PyPI — all in one workflow.
 
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
-  contents: write   # needed to push the version-bump commit, tag, and release
+  contents: write   # push version-bump commit, tag, release
+  id-token: write   # Trusted Publisher (OIDC) for PyPI
 
 jobs:
-  auto-release:
+  release-and-publish:
     # Skip re-triggers from our own auto-bump commits
-    if: "!startsWith(github.event.head_commit.message, 'auto-release ')"
+    if: "!startsWith(github.event.head_commit.message, 'publish-nightly ')"
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v5
         with:
-          fetch-depth: 0   # full history so we can list existing tags
+          fetch-depth: 0
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
           version: "0.6.5"
 
+      - name: Set up Python
+        run: uv python install 3.12
+
       - name: Bump patch version
         id: bump
         run: |
-          # Read current version (e.g. 1.108.84)
-          CURRENT=$(python3 -c "
-          import re, sys
+          NEW_VER=$(python3 -c "
+          import re
           t = open('pyproject.toml').read()
           m = re.search(r'^version\s*=\s*\"(\d+)\.(\d+)\.(\d+)\"', t, re.M)
           print(f'{m.group(1)}.{m.group(2)}.{int(m.group(3))+1}')
           ")
-          echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
-          # Write the new version back
-          sed -i -E "s/^(version\s*=\s*\")([0-9]+\.[0-9]+\.[0-9]+)(\")/\1${CURRENT}\3/" pyproject.toml
-          echo "Bumped to $CURRENT"
+          sed -i -E "s/^(version\s*=\s*\")([0-9]+\.[0-9]+\.[0-9]+)(\")/\1${NEW_VER}\3/" pyproject.toml
+          echo "version=$NEW_VER" >> "$GITHUB_OUTPUT"
+          echo "Bumped to $NEW_VER"
 
-      - name: Commit version bump
+      - name: Commit version bump and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add pyproject.toml
-          git commit -m "auto-release v${{ steps.bump.outputs.version }}"
-
-      - name: Push commit and tag
-        run: |
+          git commit -m "publish-nightly v${{ steps.bump.outputs.version }}"
           git push origin main
-          TAG="v${{ steps.bump.outputs.version }}"
-          git tag "$TAG"
-          git push origin "$TAG"
 
-      - name: Create GitHub release
+      - name: Tag and create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="v${{ steps.bump.outputs.version }}"
-          # Use the merge commit messages since the last tag as release notes
+          git tag "$TAG"
+          git push origin "$TAG"
+
           PREV_TAG=$(git tag --sort=-v:refname | head -2 | tail -1)
           if [ -n "$PREV_TAG" ]; then
             NOTES=$(git log "${PREV_TAG}..HEAD" --pretty='- %s' --no-merges | head -30)
           else
             NOTES=$(git log --pretty='- %s' --no-merges -20)
           fi
-          # Prepend the auto-release commit itself
-          NOTES="- auto-release v${{ steps.bump.outputs.version }}
+          NOTES="- publish-nightly v${{ steps.bump.outputs.version }}
           $NOTES"
           gh release create "$TAG" \
             --target main \
             --title "$TAG" \
             --notes "$NOTES"
+
+      - name: Build dist
+        run: uv build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
