@@ -38,13 +38,13 @@ BENCH_DIR = Path(__file__).resolve().parent
 REPO_ROOT = BENCH_DIR.parents[1]
 MCP_CONFIG = BENCH_DIR / "mcp_jcodemunch.json"
 
-# Fish shell env for claude9 (extracted from ~/.config/fish/functions/claude9.fish)
+# Fish shell env for claude1 (extracted from ~/.config/fish/functions/claude1.fish) — FRESH KEY
 CLAUDE_ENV = {
     "ANTHROPIC_MODEL": "LongCat-2.0-Preview",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "LongCat-2.0-Preview",
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "LongCat-2.0-Preview",
     "CLAUDE_CODE_SUBAGENT_MODEL": "LongCat-2.0-Preview",
-    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "200000",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "1000000",
     "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "70",
     "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "32000",
     "API_TIMEOUT_MS": "3000000",
@@ -52,8 +52,8 @@ CLAUDE_ENV = {
     "ENABLE_TOOL_SEARCH": "true",
     "ANTHROPIC_AUTH_TOKEN": os.environ.get(
         "ANTHROPIC_AUTH_TOKEN",
-        # Fallback: read from fish config
-        "ak_2Kq6Te7Qw4HI8q384p7Ql2vg3y45H",
+        # Fresh key from claude1 fish function
+        "ak_2dL6e18x82ra11J4Y83Su3Kh4Ry2x",
     ),
     "ANTHROPIC_BASE_URL": "https://api.longcat.chat/anthropic",
 }
@@ -117,6 +117,15 @@ Repo: `{{REPO}}` (indexed). Symbol ID: `{file_path}::{qualified_name}#{kind}`
 - ❌ Ignoring `_meta.confidence` < 0.4
 - ❌ Re-searching after `verdict: "no_implementation_found"`
 """
+
+# ---------------------------------------------------------------------------
+# Blind mode: generic prompt (no tool-specific instructions)
+# ---------------------------------------------------------------------------
+BLIND_PROMPT = (
+    "You are a senior software engineer. "
+    "Solve the following task using whichever tools are available to you. "
+    "Be thorough and report your findings."
+)
 
 # ---------------------------------------------------------------------------
 # Task definitions
@@ -199,6 +208,7 @@ def run_claude(
     repo: str = "animaios/animamunchmcp",
     max_turns: int = 25,
     timeout_seconds: int = 600,
+    blind: bool = False,
 ) -> dict:
     """Run Claude Code in non-interactive mode and capture metrics.
 
@@ -224,12 +234,13 @@ def run_claude(
         if MCP_CONFIG.exists():
             cmd += ["--mcp-config", str(MCP_CONFIG)]
 
-        # Append jcodemunch AGENTS.md instructions to system prompt
-        # Write to temp file to avoid shell escaping issues
-        agents_md = JCODEMUNCH_AGENTS_MD.replace("{{REPO}}", repo)
-        agents_md_file = Path(f"/tmp/bench_agents_md_{os.getpid()}.tmp")
-        agents_md_file.write_text(agents_md)
-        cmd += ["--append-system-prompt-file", str(agents_md_file)]
+        # In blind mode: NO AGENTS.md instructions — agent discovers tools on its own
+        # In guided mode: append full jcodemunch AGENTS.md v2
+        if not blind:
+            agents_md = JCODEMUNCH_AGENTS_MD.replace("{{REPO}}", repo)
+            agents_md_file = Path(f"/tmp/bench_agents_md_{os.getpid()}.tmp")
+            agents_md_file.write_text(agents_md)
+            cmd += ["--append-system-prompt-file", str(agents_md_file)]
     else:
         # Bare mode: skip hooks, plugins, LSP, auto-memory, CLAUDE.md discovery
         # This ensures a clean "no MCP" baseline
@@ -362,6 +373,7 @@ def run_benchmark(
     out_path: str | None = None,
     timeout_seconds: int = 600,
     max_turns: int = 25,
+    blind: bool = False,
 ) -> dict:
     task = ALL_TASKS.get(task_id)
     if not task:
@@ -468,14 +480,17 @@ def run_benchmark(
         print(f"{'─' * 70}")
 
         # --- Agent A: WITH jcodemunch MCP ---
-        print(f"\n  🟢 Agent A (jcodemunch MCP) — run {i + 1}", flush=True)
+        agent_a_label = "A (jcodemunch MCP" + (" blind)" if blind else "") + ")"
+        print(f"\n  🟢 {agent_a_label} — run {i + 1}", flush=True)
+        prompt_a = BLIND_PROMPT + "\n\n" + task["prompt"] if blind else task["prompt"]
         result_a = run_claude(
-            prompt=task["prompt"],
+            prompt=prompt_a,
             workspace=workspace,
             with_mcp=True,
             repo=repo,
             max_turns=max_turns,
             timeout_seconds=timeout_seconds,
+            blind=blind,
         )
         result_a["iteration"] = i + 1
         result_a["agent"] = "A (jcodemunch MCP)"
@@ -498,14 +513,17 @@ def run_benchmark(
             time.sleep(30)
 
         # --- Agent B: WITHOUT MCP (bare mode) ---
-        print(f"\n  🔴 Agent B (no MCP / bare) — run {i + 1}", flush=True)
+        agent_b_label = "B (no MCP / bare" + (" blind)" if blind else "") + ")"
+        print(f"\n  🔴 {agent_b_label} — run {i + 1}", flush=True)
+        prompt_b = BLIND_PROMPT + "\n\n" + task["prompt"] if blind else task["prompt"]
         result_b = run_claude(
-            prompt=task["prompt"],
+            prompt=prompt_b,
             workspace=workspace,
             with_mcp=False,
             repo=repo,
             max_turns=max_turns,
             timeout_seconds=timeout_seconds,
+            blind=blind,  # doesn't matter for bare, but pass for consistency
         )
         result_b["iteration"] = i + 1
         result_b["agent"] = "B (no MCP / bare)"
@@ -698,6 +716,11 @@ def main():
         action="store_true",
         help="Print commands without running",
     )
+    parser.add_argument(
+        "--blind",
+        action="store_true",
+        help="Blind mode: both agents get identical generic prompt (no AGENTS.md for MCP, no special instructions for bare)",
+    )
 
     args = parser.parse_args()
 
@@ -720,6 +743,7 @@ def main():
         out_path=args.out,
         timeout_seconds=args.timeout,
         max_turns=args.max_turns,
+        blind=args.blind,
     )
 
 

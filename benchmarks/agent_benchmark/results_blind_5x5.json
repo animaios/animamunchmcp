@@ -1,0 +1,187 @@
+{
+  "benchmark": {
+    "task_id": "dead_code_audit",
+    "repo": "animaios/animamunchmcp",
+    "iterations": 5,
+    "prompt": "Perform a dead code audit of this repository. 1. Identify all functions and methods that appear to be dead code (not called anywhere). 2. For each, state the file, function name, and line number. 3. R",
+    "timestamp": "2026-06-27T22:12:27.516875+00:00"
+  },
+  "agent_a_runs": [
+    {
+      "success": true,
+      "duration_ms": 257603,
+      "input_tokens": 113931,
+      "output_tokens": 9529,
+      "total_tokens": 123460,
+      "cost_usd": 1.609864,
+      "num_turns": 26,
+      "result_text": "",
+      "error": null,
+      "stop_reason": "tool_use",
+      "session_id": "fbce7788-a604-4cad-8387-f60d8ac3398f",
+      "iteration": 1,
+      "agent": "A (jcodemunch MCP)"
+    },
+    {
+      "success": false,
+      "error": "Timeout after 600s",
+      "duration_ms": 600087.6094049963,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0.0,
+      "num_turns": 0,
+      "result_text": "",
+      "iteration": 2,
+      "agent": "A (jcodemunch MCP)"
+    },
+    {
+      "success": false,
+      "error": "Timeout after 600s",
+      "duration_ms": 600132.4742880024,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0.0,
+      "num_turns": 0,
+      "result_text": "",
+      "iteration": 3,
+      "agent": "A (jcodemunch MCP)"
+    },
+    {
+      "success": false,
+      "error": "Timeout after 600s",
+      "duration_ms": 600133.1304189953,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0.0,
+      "num_turns": 0,
+      "result_text": "",
+      "iteration": 4,
+      "agent": "A (jcodemunch MCP)"
+    },
+    {
+      "success": true,
+      "duration_ms": 409673,
+      "input_tokens": 214395,
+      "output_tokens": 17130,
+      "total_tokens": 231525,
+      "cost_usd": 1.8798730000000001,
+      "num_turns": 17,
+      "result_text": "I now have the complete dataset. Let me compile the final audit report.\n\n---\n\n# Dead Code Audit Report \u2014 `jcodemunch-mcp`\n\n## Methodology\n\nUsed the `jcodemunch` MCP server's own `get_dead_code_v2` tool, which applies three independent signals to every symbol in the SQLite index:\n\n| Signal | Meaning |\n|--------|---------|\n| `unreachable_file` | The file is not reachable from any entry point via the import graph |\n| `no_callers` | No indexed symbol calls this symbol (full call-graph BFS) |\n| `not_",
+      "error": null,
+      "stop_reason": "end_turn",
+      "session_id": "55d5e4c6-7b9c-422f-8c4d-0fe0da98abd9",
+      "iteration": 5,
+      "agent": "A (jcodemunch MCP)"
+    }
+  ],
+  "agent_b_runs": [
+    {
+      "success": true,
+      "duration_ms": 478482,
+      "input_tokens": 92628,
+      "output_tokens": 19271,
+      "total_tokens": 111899,
+      "cost_usd": 1.7883069999999996,
+      "num_turns": 26,
+      "result_text": "",
+      "error": null,
+      "stop_reason": "tool_use",
+      "session_id": "caa446aa-6f2e-4c5c-98c3-12e26aef5e67",
+      "iteration": 1,
+      "agent": "B (no MCP / bare)"
+    },
+    {
+      "success": false,
+      "error": "Timeout after 600s",
+      "duration_ms": 600119.1148920043,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0.0,
+      "num_turns": 0,
+      "result_text": "",
+      "iteration": 2,
+      "agent": "B (no MCP / bare)"
+    },
+    {
+      "success": false,
+      "error": "Timeout after 600s",
+      "duration_ms": 600038.1715569965,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0.0,
+      "num_turns": 0,
+      "result_text": "",
+      "iteration": 3,
+      "agent": "B (no MCP / bare)"
+    },
+    {
+      "success": true,
+      "duration_ms": 460401,
+      "input_tokens": 77064,
+      "output_tokens": 12235,
+      "total_tokens": 89299,
+      "cost_usd": 1.3370829999999998,
+      "num_turns": 26,
+      "result_text": "",
+      "error": null,
+      "stop_reason": "tool_use",
+      "session_id": "76ce97b5-fece-439d-891f-63e19fc4fc7a",
+      "iteration": 4,
+      "agent": "B (no MCP / bare)"
+    },
+    {
+      "success": true,
+      "duration_ms": 569288,
+      "input_tokens": 58496,
+      "output_tokens": 10469,
+      "total_tokens": 68965,
+      "cost_usd": 1.1371810000000002,
+      "num_turns": 26,
+      "result_text": "",
+      "error": null,
+      "stop_reason": "tool_use",
+      "session_id": "3834dc64-cc84-44ea-bb29-a775017c6c20",
+      "iteration": 5,
+      "agent": "B (no MCP / bare)"
+    }
+  ],
+  "summary": {
+    "agent_a": {
+      "label": "A (jcodemunch MCP)",
+      "n_runs": 5,
+      "avg_duration_ms": 493525.8428223988,
+      "avg_input_tokens": 65665.2,
+      "avg_output_tokens": 5331.8,
+      "avg_total_tokens": 70997.0,
+      "avg_turns": 8.6,
+      "avg_cost_usd": 0.6979474,
+      "total_cost_usd": 3.489737,
+      "success_rate": 40.0
+    },
+    "agent_b": {
+      "label": "B (no MCP / bare)",
+      "n_runs": 5,
+      "avg_duration_ms": 541665.6572898001,
+      "avg_input_tokens": 45637.6,
+      "avg_output_tokens": 8395.0,
+      "avg_total_tokens": 54032.6,
+      "avg_turns": 15.6,
+      "avg_cost_usd": 0.8525141999999999,
+      "total_cost_usd": 4.262570999999999,
+      "success_rate": 60.0
+    },
+    "delta": {
+      "avg_duration_ms": -48139.8144674013,
+      "avg_total_tokens": 16964.4,
+      "avg_cost_usd": -0.1545667999999999,
+      "success_rate": -20.0,
+      "token_savings_pct": -31.396601311060362,
+      "time_overhead_pct": -8.887366924509616
+    }
+  }
+}

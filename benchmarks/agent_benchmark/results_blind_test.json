@@ -1,0 +1,105 @@
+{
+  "benchmark": {
+    "task_id": "dead_code_audit",
+    "repo": "animaios/animamunchmcp",
+    "iterations": 2,
+    "prompt": "Perform a dead code audit of this repository. 1. Identify all functions and methods that appear to be dead code (not called anywhere). 2. For each, state the file, function name, and line number. 3. R",
+    "timestamp": "2026-06-27T21:34:46.287640+00:00"
+  },
+  "agent_a_runs": [
+    {
+      "success": false,
+      "error": "Timeout after 600s",
+      "duration_ms": 600126.7003739995,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0.0,
+      "num_turns": 0,
+      "result_text": "",
+      "iteration": 1,
+      "agent": "A (jcodemunch MCP)"
+    },
+    {
+      "success": true,
+      "duration_ms": 402167,
+      "input_tokens": 143439,
+      "output_tokens": 13192,
+      "total_tokens": 156631,
+      "cost_usd": 1.6573630000000004,
+      "num_turns": 55,
+      "result_text": "I now have sufficient data to compile the final report. Let me write it up.\n\n---\n\n# Dead Code Audit Report \u2014 `jcodemunch-mcp`\n\n## Methodology\n\n1. **Primary tool:** `jcodemunch:get_dead_code_v2` \u2014 a 3-signal static analyzer that checks (a) file reachability from entry points, (b) call-graph callers, and (c) barrel (`__init__`) re-export visibility. Confidence = 0.33 (1 signal), 0.5 (2 signals), 0.67/1.0 (3 signals).\n2. **Verification:** For every core-source candidate at confidence \u2265 0.67, I cros",
+      "error": null,
+      "stop_reason": "end_turn",
+      "session_id": "6f5e0dea-fec3-4be5-9446-97523d4d2059",
+      "iteration": 2,
+      "agent": "A (jcodemunch MCP)"
+    }
+  ],
+  "agent_b_runs": [
+    {
+      "success": true,
+      "duration_ms": 475464,
+      "input_tokens": 76138,
+      "output_tokens": 17146,
+      "total_tokens": 93284,
+      "cost_usd": 1.5134039999999997,
+      "num_turns": 26,
+      "result_text": "",
+      "error": null,
+      "stop_reason": "tool_use",
+      "session_id": "44c8a188-48d1-496e-97a8-8aef88d1274e",
+      "iteration": 1,
+      "agent": "B (no MCP / bare)"
+    },
+    {
+      "success": true,
+      "duration_ms": 582752,
+      "input_tokens": 97732,
+      "output_tokens": 18300,
+      "total_tokens": 116032,
+      "cost_usd": 1.86712,
+      "num_turns": 26,
+      "result_text": "",
+      "error": null,
+      "stop_reason": "tool_use",
+      "session_id": "60d3c84e-c9af-4af4-888f-aece527b33c1",
+      "iteration": 2,
+      "agent": "B (no MCP / bare)"
+    }
+  ],
+  "summary": {
+    "agent_a": {
+      "label": "A (jcodemunch MCP)",
+      "n_runs": 2,
+      "avg_duration_ms": 501146.85018699977,
+      "avg_input_tokens": 71719.5,
+      "avg_output_tokens": 6596.0,
+      "avg_total_tokens": 78315.5,
+      "avg_turns": 27.5,
+      "avg_cost_usd": 0.8286815000000002,
+      "total_cost_usd": 1.6573630000000004,
+      "success_rate": 50.0
+    },
+    "agent_b": {
+      "label": "B (no MCP / bare)",
+      "n_runs": 2,
+      "avg_duration_ms": 529108.0,
+      "avg_input_tokens": 86935.0,
+      "avg_output_tokens": 17723.0,
+      "avg_total_tokens": 104658.0,
+      "avg_turns": 26.0,
+      "avg_cost_usd": 1.6902619999999997,
+      "total_cost_usd": 3.3805239999999994,
+      "success_rate": 100.0
+    },
+    "delta": {
+      "avg_duration_ms": -27961.14981300023,
+      "avg_total_tokens": -26342.5,
+      "avg_cost_usd": -0.8615804999999995,
+      "success_rate": -50.0,
+      "token_savings_pct": 25.170077777140783,
+      "time_overhead_pct": -5.2845826963493705
+    }
+  }
+}
