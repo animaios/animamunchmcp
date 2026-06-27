@@ -1,0 +1,435 @@
+{
+  "benchmark": "mcp_vs_direct",
+  "timestamp": "2026-06-27T16:41:49+00:00",
+  "swe_task": {
+    "instance_id": "0b01001001__spectree-64",
+    "repo": "0b01001001/spectree",
+    "base_commit": "a091fab020ac26548250c907bae0855273a98778",
+    "problem_statement_preview": "[BUG]description for query paramters can not show in swagger ui Hi, when I add a description for a schema used in query, it can not show in swagger ui but can show in Redoc"
+  },
+  "agent_steps": 8,
+  "mcp_runs": [
+    {
+      "mode": "mcp",
+      "total_time_ms": 536.7,
+      "total_input_tokens": 233,
+      "total_output_tokens": 5342,
+      "total_tokens": 5575,
+      "tools": [
+        {
+          "tool": "assemble_task_context",
+          "time_ms": 123.2,
+          "input_tokens": 27,
+          "output_tokens": 84,
+          "ok": true
+        },
+        {
+          "tool": "search_symbols",
+          "time_ms": 370.7,
+          "input_tokens": 32,
+          "output_tokens": 385,
+          "ok": true
+        },
+        {
+          "tool": "get_symbol_source",
+          "time_ms": 4.8,
+          "input_tokens": 25,
+          "output_tokens": 12,
+          "ok": true
+        },
+        {
+          "tool": "search_text",
+          "time_ms": 8.1,
+          "input_tokens": 29,
+          "output_tokens": 2016,
+          "ok": true
+        },
+        {
+          "tool": "get_file_outline",
+          "time_ms": 10.4,
+          "input_tokens": 36,
+          "output_tokens": 2600,
+          "ok": true
+        },
+        {
+          "tool": "get_blast_radius",
+          "time_ms": 5.4,
+          "input_tokens": 25,
+          "output_tokens": 14,
+          "ok": true
+        },
+        {
+          "tool": "get_call_hierarchy",
+          "time_ms": 4.6,
+          "input_tokens": 28,
+          "output_tokens": 14,
+          "ok": true
+        },
+        {
+          "tool": "search_symbols",
+          "time_ms": 9.6,
+          "input_tokens": 31,
+          "output_tokens": 217,
+          "ok": true
+        }
+      ],
+      "run": 1
+    },
+    {
+      "mode": "mcp",
+      "total_time_ms": 516.6,
+      "total_input_tokens": 233,
+      "total_output_tokens": 5342,
+      "total_tokens": 5575,
+      "tools": [
+        {
+          "tool": "assemble_task_context",
+          "time_ms": 98.2,
+          "input_tokens": 27,
+          "output_tokens": 84,
+          "ok": true
+        },
+        {
+          "tool": "search_symbols",
+          "time_ms": 378.8,
+          "input_tokens": 32,
+          "output_tokens": 385,
+          "ok": true
+        },
+        {
+          "tool": "get_symbol_source",
+          "time_ms": 5.0,
+          "input_tokens": 25,
+          "output_tokens": 12,
+          "ok": true
+        },
+        {
+          "tool": "search_text",
+          "time_ms": 6.2,
+          "input_tokens": 29,
+          "output_tokens": 2016,
+          "ok": true
+        },
+        {
+          "tool": "get_file_outline",
+          "time_ms": 9.1,
+          "input_tokens": 36,
+          "output_tokens": 2600,
+          "ok": true
+        },
+        {
+          "tool": "get_blast_radius",
+          "time_ms": 5.1,
+          "input_tokens": 25,
+          "output_tokens": 14,
+          "ok": true
+        },
+        {
+          "tool": "get_call_hierarchy",
+          "time_ms": 4.6,
+          "input_tokens": 28,
+          "output_tokens": 14,
+          "ok": true
+        },
+        {
+          "tool": "search_symbols",
+          "time_ms": 9.6,
+          "input_tokens": 31,
+          "output_tokens": 217,
+          "ok": true
+        }
+      ],
+      "run": 2
+    },
+    {
+      "mode": "mcp",
+      "total_time_ms": 510.9,
+      "total_input_tokens": 233,
+      "total_output_tokens": 5342,
+      "total_tokens": 5575,
+      "tools": [
+        {
+          "tool": "assemble_task_context",
+          "time_ms": 103.0,
+          "input_tokens": 27,
+          "output_tokens": 84,
+          "ok": true
+        },
+        {
+          "tool": "search_symbols",
+          "time_ms": 367.6,
+          "input_tokens": 32,
+          "output_tokens": 385,
+          "ok": true
+        },
+        {
+          "tool": "get_symbol_source",
+          "time_ms": 4.7,
+          "input_tokens": 25,
+          "output_tokens": 12,
+          "ok": true
+        },
+        {
+          "tool": "search_text",
+          "time_ms": 6.9,
+          "input_tokens": 29,
+          "output_tokens": 2016,
+          "ok": true
+        },
+        {
+          "tool": "get_file_outline",
+          "time_ms": 10.3,
+          "input_tokens": 36,
+          "output_tokens": 2600,
+          "ok": true
+        },
+        {
+          "tool": "get_blast_radius",
+          "time_ms": 5.0,
+          "input_tokens": 25,
+          "output_tokens": 14,
+          "ok": true
+        },
+        {
+          "tool": "get_call_hierarchy",
+          "time_ms": 4.0,
+          "input_tokens": 28,
+          "output_tokens": 14,
+          "ok": true
+        },
+        {
+          "tool": "search_symbols",
+          "time_ms": 9.3,
+          "input_tokens": 31,
+          "output_tokens": 217,
+          "ok": true
+        }
+      ],
+      "run": 3
+    }
+  ],
+  "direct_runs": [
+    {
+      "mode": "direct",
+      "total_time_ms": 620.9,
+      "total_input_tokens": 320,
+      "total_output_tokens": 12694,
+      "total_tokens": 13014,
+      "tools": [
+        {
+          "tool": "assemble_task_context",
+          "time_ms": 167.2,
+          "input_tokens": 69,
+          "output_tokens": 269,
+          "ok": true
+        },
+        {
+          "tool": "search_symbols",
+          "time_ms": 339.1,
+          "input_tokens": 32,
+          "output_tokens": 388,
+          "ok": true
+        },
+        {
+          "tool": "get_symbol_source",
+          "time_ms": 2.0,
+          "input_tokens": 44,
+          "output_tokens": 263,
+          "ok": true
+        },
+        {
+          "tool": "search_text",
+          "time_ms": 1.0,
+          "input_tokens": 29,
+          "output_tokens": 2057,
+          "ok": true
+        },
+        {
+          "tool": "get_file_outline",
+          "time_ms": 1.7,
+          "input_tokens": 36,
+          "output_tokens": 8522,
+          "ok": true
+        },
+        {
+          "tool": "get_blast_radius",
+          "time_ms": 58.3,
+          "input_tokens": 31,
+          "output_tokens": 640,
+          "ok": true
+        },
+        {
+          "tool": "get_call_hierarchy",
+          "time_ms": 50.6,
+          "input_tokens": 48,
+          "output_tokens": 212,
+          "ok": true
+        },
+        {
+          "tool": "search_symbols",
+          "time_ms": 1.0,
+          "input_tokens": 31,
+          "output_tokens": 343,
+          "ok": true
+        }
+      ],
+      "run": 1
+    },
+    {
+      "mode": "direct",
+      "total_time_ms": 181.9,
+      "total_input_tokens": 320,
+      "total_output_tokens": 12704,
+      "total_tokens": 13024,
+      "tools": [
+        {
+          "tool": "assemble_task_context",
+          "time_ms": 81.6,
+          "input_tokens": 69,
+          "output_tokens": 269,
+          "ok": true
+        },
+        {
+          "tool": "search_symbols",
+          "time_ms": 0.1,
+          "input_tokens": 32,
+          "output_tokens": 393,
+          "ok": true
+        },
+        {
+          "tool": "get_symbol_source",
+          "time_ms": 0.6,
+          "input_tokens": 44,
+          "output_tokens": 263,
+          "ok": true
+        },
+        {
+          "tool": "search_text",
+          "time_ms": 1.3,
+          "input_tokens": 29,
+          "output_tokens": 2057,
+          "ok": true
+        },
+        {
+          "tool": "get_file_outline",
+          "time_ms": 0.6,
+          "input_tokens": 36,
+          "output_tokens": 8522,
+          "ok": true
+        },
+        {
+          "tool": "get_blast_radius",
+          "time_ms": 49.3,
+          "input_tokens": 31,
+          "output_tokens": 640,
+          "ok": true
+        },
+        {
+          "tool": "get_call_hierarchy",
+          "time_ms": 48.4,
+          "input_tokens": 48,
+          "output_tokens": 212,
+          "ok": true
+        },
+        {
+          "tool": "search_symbols",
+          "time_ms": 0.1,
+          "input_tokens": 31,
+          "output_tokens": 348,
+          "ok": true
+        }
+      ],
+      "run": 2
+    },
+    {
+      "mode": "direct",
+      "total_time_ms": 188.4,
+      "total_input_tokens": 320,
+      "total_output_tokens": 12704,
+      "total_tokens": 13024,
+      "tools": [
+        {
+          "tool": "assemble_task_context",
+          "time_ms": 85.0,
+          "input_tokens": 69,
+          "output_tokens": 269,
+          "ok": true
+        },
+        {
+          "tool": "search_symbols",
+          "time_ms": 0.1,
+          "input_tokens": 32,
+          "output_tokens": 393,
+          "ok": true
+        },
+        {
+          "tool": "get_symbol_source",
+          "time_ms": 0.5,
+          "input_tokens": 44,
+          "output_tokens": 263,
+          "ok": true
+        },
+        {
+          "tool": "search_text",
+          "time_ms": 0.9,
+          "input_tokens": 29,
+          "output_tokens": 2057,
+          "ok": true
+        },
+        {
+          "tool": "get_file_outline",
+          "time_ms": 0.6,
+          "input_tokens": 36,
+          "output_tokens": 8522,
+          "ok": true
+        },
+        {
+          "tool": "get_blast_radius",
+          "time_ms": 50.4,
+          "input_tokens": 31,
+          "output_tokens": 640,
+          "ok": true
+        },
+        {
+          "tool": "get_call_hierarchy",
+          "time_ms": 50.9,
+          "input_tokens": 48,
+          "output_tokens": 212,
+          "ok": true
+        },
+        {
+          "tool": "search_symbols",
+          "time_ms": 0.1,
+          "input_tokens": 31,
+          "output_tokens": 348,
+          "ok": true
+        }
+      ],
+      "run": 3
+    }
+  ],
+  "mcp_summary": {
+    "iterations": 3,
+    "mean_time_ms": 521.4,
+    "stdev_time_ms": 13.6,
+    "mean_total_tokens": 5575,
+    "stdev_total_tokens": 0.0,
+    "mean_input_tokens": 233,
+    "mean_output_tokens": 5342
+  },
+  "direct_summary": {
+    "iterations": 3,
+    "mean_time_ms": 330.4,
+    "stdev_time_ms": 251.6,
+    "mean_total_tokens": 13020.7,
+    "stdev_total_tokens": 5.8,
+    "mean_input_tokens": 320,
+    "mean_output_tokens": 12700.7
+  },
+  "overhead": {
+    "time_ms_abs": 191.0,
+    "time_pct": 57.8,
+    "tokens_abs": -7445.7,
+    "tokens_pct": -57.2
+  }
+}

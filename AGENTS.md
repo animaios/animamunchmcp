@@ -3,16 +3,25 @@
 Repo: `animaios/animamunchmcp` (indexed). Symbol ID: `{file_path}::{qualified_name}#{kind}`
 
 ### Core lookup
+- `resolve_repo(path=".")` — confirm the project is indexed. If not: `index_folder(path=".")`. **Always call this first in a new session.**
 - `assemble_task_context(repo="animaios/animamunchmcp", task="...")` — opening move; auto-classifies intent (explore/debug/refactor/extend/audit/review), surfaces symbols + ranked context
 - `get_file_outline` → `get_symbol_source` / `get_context_bundle(symbol_ids=[...])` — targeted retrieval, never full files
 - `search_symbols(repo="animaios/animamunchmcp", query="...")` — find by name, signature, summary
   - `mode="context"` — query-less ranked context assembly
   - `mode="winnow"` — multi-axis constraint filter (kind, language, complexity, churn, etc.)
   - `semantic=true` — embedding-based search (requires embed provider)
-  - `decorator="X"` — find symbols with a specific decorator (e.g. `@property`, `@route`); combine with set-difference to find symbols *lacking* a decorator (e.g. "which endpoints lack CSRF protection?")
+  - `fusion=true` — multi-signal fusion (Weighted Reciprocal Rank) across lexical/structural/similarity/identity channels; best for vague queries
+  - `detail_level="compact"` — returns id/name/kind/file/line only (~15 tokens/row); use with `token_budget` for broad discovery
+  - `decorator="X"` — find symbols with a specific decorator (e.g. `@property`, `@route`); combine with set-difference to find symbols *lacking* a decorator
 - `search_text(repo="animaios/animamunchmcp", query="...")` — full-text search across file contents (string literals, comments, configs)
 - `search_ast(repo="animaios/animamunchmcp", pattern="..." | category="...")` — structural anti-pattern scan (empty_catch, god_function, hardcoded_secret, etc.)
 - `search_columns(repo="animaios/animamunchmcp", query="...")` — search column metadata across indexed models (dbt/SQLMesh)
+- `find_references(repo="animaios/animamunchmcp", identifier="..." | identifiers=[...])` — find all files that import or reference an identifier via the import graph
+  - `mode="refs"` (default) — original find_references
+  - `mode="importers"` — find files importing a given file
+  - `mode="related"` — find symbols related to a given symbol (use `symbol_id`)
+  - `quick=true` — lightweight `is_referenced` envelope (import_count + content_count) for fast dead-code detection
+  - `cross_repo=true` — also search other indexed repos for cross-repo importers
 
 ### Code Exploration Policy
 
@@ -33,8 +42,8 @@ Always use jCodemunch-MCP tools for code navigation. Never fall back to Read, Gr
 - `get_file_tree` → file layout, filter with `path_prefix`
 
 ### Impact & safety
-- `get_blast_radius(symbol="...", include_source=true)` — check impact before changes
-- `find_references` / `get_call_hierarchy` — trace who uses a symbol
+- `get_blast_radius(symbol="...", include_source=true)` — check impact before changes; add `call_depth=1` to also find symbols that *call* this symbol; `include_decisions=true` surfaces git commit intent (revert/perf/refactor/bugfix); `source_budget` caps snippet tokens
+- `find_references(mode="refs"|"importers"|"related", quick=true)` / `get_call_hierarchy(symbol_id="...", direction="both", depth=3)` — trace who uses a symbol; `get_call_hierarchy` also supports `chains=true` to discover HTTP routes / CLI commands / events involving this symbol, filtered by `kind` (http/cli/event/task/main/test), with `max_depth` BFS limit
 - `check_safe(repo="animaios/animamunchmcp", symbol="...", mode="edit"|"delete")` — composite preflight: can this symbol be safely edited/deleted?
 - `plan_refactoring(repo="animaios/animamunchmcp", symbol="...", refactor_type="rename"|"move"|"extract"|"signature")` — generate multi-file edit plan before refactoring
 - `get_changed_symbols(repo="animaios/animamunchmcp")` — map git diff to affected symbols
@@ -42,7 +51,7 @@ Always use jCodemunch-MCP tools for code navigation. Never fall back to Read, Gr
 
 ### Repository intelligence
 - `get_repo_health(repo="animaios/animamunchmcp")` — one-call triage (dead code %, complexity, hotspots, cycle count)
-- `get_repo_map(repo="animaios/animamunchmcp")` — signature-level overview ranked by PageRank (cold-start orientation)
+- `get_repo_map(repo="animaios/animamunchmcp")` — signature-level overview ranked by PageRank (cold-start orientation); `mode="outline"` for lightweight dirs/languages/symbol counts only
 - `get_tectonic_map(repo="animaios/animamunchmcp")` — logical module topology (hidden boundaries, misplaced files, drifters)
 - `find_hot_paths(repo="animaios/animamunchmcp")` — top-N symbols by runtime hit count (requires ingested traces)
 - `get_dead_code_v2(repo="animaios/animamunchmcp", min_confidence=0.67)` — multi-signal dead code detection
@@ -56,7 +65,7 @@ Always use jCodemunch-MCP tools for code navigation. Never fall back to Read, Gr
 
 ### Runtime & indexing
 - `import_runtime_signal(repo="animaios/animamunchmcp", path="...", source="otel"|"sql_log"|"stack_log")` — ingest runtime traces
-- `embed_repo(repo="animaios/animamunchmcp")` — precompute symbol embeddings for semantic search
+- `embed_repo(repo="animaios/animamunchmcp")` — precompute symbol embeddings for semantic search; `force=true` to recompute all; `batch_size` controls symbols per embedding batch (default 50)
 - `summarize_repo(repo="animaios/animamunchmcp", force=true)` — re-run AI summarization pipeline
 - `index_file(path="...")` — surgical single-file reindex after edits
 - `index_folder(path="...")` / `index_repo(url="...")` — full index/reindex
@@ -175,21 +184,26 @@ search_ast(repo="animaios/animamunchmcp", pattern="string:/password/i")      # c
 
 #### Parameter Cheatsheet
 
-| Tool | Key params | When to use |
-|---|---|---|
-| `assemble_task_context` | `task`, `token_budget` (8k default) | **First call for any task** — returns intent, symbols, context |
-| `search_symbols` | `mode`, `semantic`, `fusion`, `token_budget` | Symbol discovery; `mode=context` = ranked context w/o query |
-| `get_context_bundle` | `symbol_ids[]`, `budget_strategy`, `token_budget` | Multi-symbol context in one call; `core_first` keeps primary symbol |
-| `get_blast_radius` | `depth`, `include_source`, `include_depth_scores` | Pre-edit impact; `include_depth_scores` = per-hop risk |
-| `check_safe` | `mode` (edit/delete), `include_runtime` | Preflight — returns verdict + top-5 blockers |
-| `plan_refactoring` | `refactor_type`, `new_name`/`new_file`/`new_signature` | Returns `{old_text, new_text}` blocks ready for Edit tool |
-| `get_repo_health` | `detailed`, `rules` (layer defs) | One-call triage; `detailed=true` adds cycles, coupling, hotspots |
-| `get_tectonic_map` | `days`, `min_plate_size` | Module topology; finds drifters, nexus plates (coupled ≥4) |
-| `find_similar_symbols` | `threshold`, `semantic_weight`, `include_tests` | Consolidation candidates; `semantic_weight=0.6` default |
-| `get_symbol_provenance` | `max_commits` | Authorship lineage + evolution narrative |
-| `search_ast` | `category`, `pattern`, `language` | Anti-pattern sweep; `category=all` runs everything |
-| `get_changed_symbols` | `since_sha`, `until_sha`, `include_blast_radius` | Maps git diff → symbols + downstream impact |
-| `get_pr_risk_profile` | `base_ref`, `head_ref`, `days` | Composite risk score (blast + complexity + churn + tests + volume) |
+| Tool | Key params | Key param combos | When to use |
+|---|---|---|---|
+| `resolve_repo` | `path` | `path="."` | **First call in a new session** — confirm repo is indexed |
+| `assemble_task_context` | `task`, `token_budget` (8k default), `model` | `model="claude-sonnet-4-6"` | **First call for any task** — returns intent, symbols, context |
+| `search_symbols` | `mode`, `semantic`, `fusion`, `detail_level`, `token_budget` | `fusion=true` for vague queries; `detail_level="compact"` + `token_budget=3000` for broad discovery | Symbol discovery; `mode=context` = ranked context w/o query |
+| `get_context_bundle` | `symbol_ids[]`, `budget_strategy`, `token_budget` | `budget_strategy="compact"` for signatures only; `budget_strategy="core_first"` keeps primary symbol | Multi-symbol context in one call |
+| `find_references` | `identifier`/`identifiers`, `mode`, `quick`, `cross_repo` | `quick=true` for dead-code check; `mode="importers"` for file-level deps; `cross_repo=true` across repos | Find importers / references / related symbols |
+| `get_blast_radius` | `depth`, `include_source`, `include_depth_scores`, `call_depth`, `include_decisions`, `source_budget` | `call_depth=1` + `include_decisions=true` for full impact + git intent | Pre-edit impact; `include_depth_scores` = per-hop risk |
+| `get_call_hierarchy` | `symbol_id`, `direction`, `depth`, `chains`, `kind`, `max_depth`, `include_impact`, `include_decisions` | `chains=true` for HTTP routes / CLI commands; `include_decisions=true` on `include_impact=true` | Trace callers/callees; `include_impact=true` for deletion safety |
+| `check_safe` | `mode` (edit/delete), `include_runtime` | Use before every edit or delete | Preflight — returns verdict + top-5 blockers |
+| `plan_refactoring` | `refactor_type`, `new_name`/`new_file`/`new_signature` | `refactor_type="signature"` + `new_signature="..."` | Returns `{old_text, new_text}` blocks ready for Edit tool |
+| `get_repo_health` | `detailed`, `rules` (layer defs) | `detailed=true` for cycles, coupling, hotspots | One-call triage |
+| `get_repo_map` | `group_by`, `top_n`, `mode`, `scope` | `mode="outline"` for lightweight overview; `group_by="flat"` for ranked symbol list | Cold-start orientation |
+| `get_tectonic_map` | `days`, `min_plate_size` | — | Module topology; finds drifters, nexus plates (coupled ≥4) |
+| `find_similar_symbols` | `threshold`, `semantic_weight`, `include_tests` | `semantic_weight=0.6` default; `threshold=0.85` for strict match | Consolidation candidates |
+| `get_symbol_provenance` | `max_commits` | `max_commits=30` for deep history | Authorship lineage + evolution narrative |
+| `search_ast` | `category`, `pattern`, `language` | `category="security"` for hardcoded_secret, eval_exec; `category="all"` runs everything | Anti-pattern sweep |
+| `get_changed_symbols` | `since_sha`, `until_sha`, `include_blast_radius` | `include_blast_radius=true` + `max_blast_depth=3` | Maps git diff → symbols + downstream impact |
+| `get_pr_risk_profile` | `base_ref`, `head_ref`, `days` | — | Composite risk score (blast + complexity + churn + tests + volume) |
+| `embed_repo` | `force`, `batch_size` | `force=true` to recompute all | Precompute embeddings; run once then `semantic=true` works instantly |
 
 #### Anti-patterns to Avoid
 - ❌ Reading full files with `read_file` — use `get_context_bundle` or `get_symbol_source`
@@ -198,6 +212,7 @@ search_ast(repo="animaios/animamunchmcp", pattern="string:/password/i")      # c
 - ❌ Not verifying with `verify=true` — index can drift from working tree
 - ❌ Using `grep` for symbol lookup — `search_symbols` understands signatures, imports, types
 - ❌ Manual blast radius tracing — `get_blast_radius(depth=2, include_source=true)` is instant
+- ❌ Ignoring `_meta.confidence` < 0.4 — low confidence means widen the search or report a gap, not proceed as-is
 
 #### Pro Tips
 - **`fusion=true` on `search_symbols`** — uses Weighted Reciprocal Rank across lexical/structural/similarity/identity channels; best for vague queries

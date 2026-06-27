@@ -1,0 +1,77 @@
+{
+  "benchmark": {
+    "task_id": "dead_code_audit",
+    "repo": "animaios/animamunchmcp",
+    "iterations": 1,
+    "prompt": "Perform a dead code audit of this repository. 1. Identify all functions and methods that appear to be dead code (not called anywhere). 2. For each, state the file, function name, and line number. 3. R",
+    "timestamp": "2026-06-27T17:12:08.915222+00:00"
+  },
+  "agent_a_runs": [
+    {
+      "success": false,
+      "duration_ms": 69033,
+      "input_tokens": 100484,
+      "output_tokens": 1524,
+      "total_tokens": 102008,
+      "cost_usd": 0.623912,
+      "num_turns": 6,
+      "result_text": "",
+      "error": "unknown",
+      "stop_reason": "tool_use",
+      "session_id": "6640a1c0-38e1-4cb9-9ca1-262844afe2d0",
+      "iteration": 1,
+      "agent": "A (jcodemunch MCP)"
+    }
+  ],
+  "agent_b_runs": [
+    {
+      "success": false,
+      "duration_ms": 135078,
+      "input_tokens": 41044,
+      "output_tokens": 3674,
+      "total_tokens": 44718,
+      "cost_usd": 0.373678,
+      "num_turns": 6,
+      "result_text": "",
+      "error": "unknown",
+      "stop_reason": "tool_use",
+      "session_id": "e97cc372-75fb-47b9-94b9-2d922962fa2e",
+      "iteration": 1,
+      "agent": "B (no MCP / bare)"
+    }
+  ],
+  "summary": {
+    "agent_a": {
+      "label": "A (jcodemunch MCP)",
+      "n_runs": 1,
+      "avg_duration_ms": 69033.0,
+      "avg_input_tokens": 100484.0,
+      "avg_output_tokens": 1524.0,
+      "avg_total_tokens": 102008.0,
+      "avg_turns": 6.0,
+      "avg_cost_usd": 0.623912,
+      "total_cost_usd": 0.623912,
+      "success_rate": 0.0
+    },
+    "agent_b": {
+      "label": "B (no MCP / bare)",
+      "n_runs": 1,
+      "avg_duration_ms": 135078.0,
+      "avg_input_tokens": 41044.0,
+      "avg_output_tokens": 3674.0,
+      "avg_total_tokens": 44718.0,
+      "avg_turns": 6.0,
+      "avg_cost_usd": 0.373678,
+      "total_cost_usd": 0.373678,
+      "success_rate": 0.0
+    },
+    "delta": {
+      "avg_duration_ms": -66045.0,
+      "avg_total_tokens": 57290.0,
+      "avg_cost_usd": 0.250234,
+      "success_rate": 0.0,
+      "token_savings_pct": -128.11395858490988,
+      "time_overhead_pct": -48.89397237151868
+    }
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "benchmark": {
+    "task_id": "dead_code_audit",
+    "repo": "animaios/animamunchmcp",
+    "iterations": 1,
+    "prompt": "Perform a dead code audit of this repository. 1. Identify all functions and methods that appear to be dead code (not called anywhere). 2. For each, state the file, function name, and line number. 3. R",
+    "timestamp": "2026-06-27T19:27:58.522942+00:00"
+  },
+  "agent_a_runs": [
+    {
+      "success": true,
+      "duration_ms": 242864,
+      "input_tokens": 107664,
+      "output_tokens": 8674,
+      "total_tokens": 116338,
+      "cost_usd": 0.8710100000000001,
+      "num_turns": 9,
+      "result_text": "I have the results. Let me parse the MUNCH-format data and compile the audit report.\n\n---\n\n## Dead Code Audit Report \u2014 `animamunchmcp`\n\n### Methodology\n\n1. **Primary tool:** `jcodemunch:get_dead_code_v2` \u2014 uses three independent signals:\n   - `unreachable_file`: file not reachable from any entry point via the import graph\n   - `no_callers`: no indexed symbol calls this symbol in the call graph\n   - `not_barrel_exported`: not re-exported from any `__init__` or barrel file\n2. **Confidence = 1.0** ",
+      "error": null,
+      "stop_reason": "end_turn",
+      "session_id": "1528d7e1-230e-4e3c-a432-b4a83ae1f284",
+      "iteration": 1,
+      "agent": "A (jcodemunch MCP)"
+    }
+  ],
+  "agent_b_runs": [],
+  "summary": {
+    "agent_a": {
+      "label": "A (jcodemunch MCP)",
+      "n_runs": 1,
+      "avg_duration_ms": 242864.0,
+      "avg_input_tokens": 107664.0,
+      "avg_output_tokens": 8674.0,
+      "avg_total_tokens": 116338.0,
+      "avg_turns": 9.0,
+      "avg_cost_usd": 0.8710100000000001,
+      "total_cost_usd": 0.8710100000000001,
+      "success_rate": 100.0
+    },
+    "agent_b": {
+      "label": "B (no MCP / bare)",
+      "n_runs": 0,
+      "avg_duration_ms": 0,
+      "avg_input_tokens": 0,
+      "avg_output_tokens": 0,
+      "avg_total_tokens": 0,
+      "avg_turns": 0,
+      "avg_cost_usd": 0,
+      "total_cost_usd": 0,
+      "success_rate": 0
+    },
+    "delta": {
+      "avg_duration_ms": 242864.0,
+      "avg_total_tokens": 116338.0,
+      "avg_cost_usd": 0.8710100000000001,
+      "success_rate": 100.0,
+      "token_savings_pct": 0,
+      "time_overhead_pct": 0
+    }
+  }
+}

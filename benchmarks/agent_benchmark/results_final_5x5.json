@@ -1,0 +1,193 @@
+{
+  "benchmark": {
+    "task_id": "dead_code_audit",
+    "repo": "animaios/animamunchmcp",
+    "iterations": 5,
+    "prompt": "Perform a dead code audit of this repository. 1. Identify all functions and methods that appear to be dead code (not called anywhere). 2. For each, state the file, function name, and line number. 3. R",
+    "timestamp": "2026-06-27T20:12:26.144534+00:00"
+  },
+  "agent_a_runs": [
+    {
+      "success": false,
+      "error": "Timeout after 360s",
+      "duration_ms": 360126.8655219974,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0.0,
+      "num_turns": 0,
+      "result_text": "",
+      "iteration": 1,
+      "agent": "A (jcodemunch MCP)"
+    },
+    {
+      "success": true,
+      "duration_ms": 215965,
+      "input_tokens": 176981,
+      "output_tokens": 6525,
+      "total_tokens": 183506,
+      "cost_usd": 1.3685420000000001,
+      "num_turns": 13,
+      "result_text": "",
+      "error": null,
+      "stop_reason": "tool_use",
+      "session_id": "6439a5ee-15bb-4071-b817-bb85dec6cf2d",
+      "iteration": 2,
+      "agent": "A (jcodemunch MCP)"
+    },
+    {
+      "success": true,
+      "duration_ms": 287924,
+      "input_tokens": 201916,
+      "output_tokens": 6494,
+      "total_tokens": 208410,
+      "cost_usd": 1.538842,
+      "num_turns": 13,
+      "result_text": "",
+      "error": null,
+      "stop_reason": "tool_use",
+      "session_id": "17a8bb4e-65c7-4d4f-a6b2-369d8e0f7664",
+      "iteration": 3,
+      "agent": "A (jcodemunch MCP)"
+    },
+    {
+      "success": false,
+      "duration_ms": 36272,
+      "input_tokens": 41268,
+      "output_tokens": 1429,
+      "total_tokens": 42697,
+      "cost_usd": 0.246353,
+      "num_turns": 2,
+      "result_text": "API Error: 402 \u8c03\u7528\u5931\u8d25\uff1aToken \u989d\u5ea6\u4e0d\u8db3\u3002\u6b22\u8fce\u53cd\u9988\u6a21\u578b\u4f7f\u7528case\uff08https://longcat.chat/platform/feedback\uff09\u83b7\u53d6\u66f4\u591a\u989d\u5ea6",
+      "error": 402,
+      "stop_reason": "stop_sequence",
+      "session_id": "4e122cb4-d1b5-457b-ac69-dbb0f549e3f0",
+      "iteration": 4,
+      "agent": "A (jcodemunch MCP)"
+    },
+    {
+      "success": false,
+      "duration_ms": 732,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0,
+      "num_turns": 1,
+      "result_text": "API Error: 402 \u8c03\u7528\u5931\u8d25\uff1aToken \u989d\u5ea6\u4e0d\u8db3\u3002\u6b22\u8fce\u53cd\u9988\u6a21\u578b\u4f7f\u7528case\uff08https://longcat.chat/platform/feedback\uff09\u83b7\u53d6\u66f4\u591a\u989d\u5ea6",
+      "error": 402,
+      "stop_reason": "stop_sequence",
+      "session_id": "90a831f4-967c-4b40-822b-1243d128d8c9",
+      "iteration": 5,
+      "agent": "A (jcodemunch MCP)"
+    }
+  ],
+  "agent_b_runs": [
+    {
+      "success": true,
+      "duration_ms": 127725,
+      "input_tokens": 75643,
+      "output_tokens": 3299,
+      "total_tokens": 78942,
+      "cost_usd": 0.7882419999999999,
+      "num_turns": 13,
+      "result_text": "",
+      "error": null,
+      "stop_reason": "tool_use",
+      "session_id": "f4a6b64f-5e43-4b9a-b22a-0c94e547d9c0",
+      "iteration": 1,
+      "agent": "B (no MCP / bare)"
+    },
+    {
+      "success": false,
+      "error": "Timeout after 360s",
+      "duration_ms": 360072.4634319995,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0.0,
+      "num_turns": 0,
+      "result_text": "",
+      "iteration": 2,
+      "agent": "B (no MCP / bare)"
+    },
+    {
+      "success": true,
+      "duration_ms": 124100,
+      "input_tokens": 19923,
+      "output_tokens": 3027,
+      "total_tokens": 22950,
+      "cost_usd": 0.4586819999999999,
+      "num_turns": 13,
+      "result_text": "",
+      "error": null,
+      "stop_reason": "tool_use",
+      "session_id": "79e5c76a-7312-4f60-b0d9-d08be7c013e7",
+      "iteration": 3,
+      "agent": "B (no MCP / bare)"
+    },
+    {
+      "success": false,
+      "duration_ms": 909,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0,
+      "num_turns": 1,
+      "result_text": "API Error: 402 \u8c03\u7528\u5931\u8d25\uff1aToken \u989d\u5ea6\u4e0d\u8db3\u3002\u6b22\u8fce\u53cd\u9988\u6a21\u578b\u4f7f\u7528case\uff08https://longcat.chat/platform/feedback\uff09\u83b7\u53d6\u66f4\u591a\u989d\u5ea6",
+      "error": 402,
+      "stop_reason": "stop_sequence",
+      "session_id": "ca04cb0c-5c60-49ed-9122-936db64388c6",
+      "iteration": 4,
+      "agent": "B (no MCP / bare)"
+    },
+    {
+      "success": false,
+      "duration_ms": 890,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0,
+      "num_turns": 1,
+      "result_text": "API Error: 402 \u8c03\u7528\u5931\u8d25\uff1aToken \u989d\u5ea6\u4e0d\u8db3\u3002\u6b22\u8fce\u53cd\u9988\u6a21\u578b\u4f7f\u7528case\uff08https://longcat.chat/platform/feedback\uff09\u83b7\u53d6\u66f4\u591a\u989d\u5ea6",
+      "error": 402,
+      "stop_reason": "stop_sequence",
+      "session_id": "e6315803-f80d-4f9d-931c-ddc882a94a67",
+      "iteration": 5,
+      "agent": "B (no MCP / bare)"
+    }
+  ],
+  "summary": {
+    "agent_a": {
+      "label": "A (jcodemunch MCP)",
+      "n_runs": 5,
+      "avg_duration_ms": 180203.97310439948,
+      "avg_input_tokens": 84033.0,
+      "avg_output_tokens": 2889.6,
+      "avg_total_tokens": 86922.6,
+      "avg_turns": 5.8,
+      "avg_cost_usd": 0.6307474,
+      "total_cost_usd": 3.153737,
+      "success_rate": 40.0
+    },
+    "agent_b": {
+      "label": "B (no MCP / bare)",
+      "n_runs": 5,
+      "avg_duration_ms": 122739.29268639992,
+      "avg_input_tokens": 19113.2,
+      "avg_output_tokens": 1265.2,
+      "avg_total_tokens": 20378.4,
+      "avg_turns": 5.6,
+      "avg_cost_usd": 0.2493848,
+      "total_cost_usd": 1.246924,
+      "success_rate": 40.0
+    },
+    "delta": {
+      "avg_duration_ms": 57464.68041799957,
+      "avg_total_tokens": 66544.20000000001,
+      "avg_cost_usd": 0.3813626,
+      "success_rate": 0.0,
+      "token_savings_pct": -326.5428100341539,
+      "time_overhead_pct": 46.81848751142992
+    }
+  }
+}

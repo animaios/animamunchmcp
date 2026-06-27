@@ -1,0 +1,75 @@
+{
+  "benchmark": {
+    "task_id": "dead_code_audit",
+    "repo": "animaios/animamunchmcp",
+    "iterations": 1,
+    "prompt": "Perform a dead code audit of this repository. 1. Identify all functions and methods that appear to be dead code (not called anywhere). 2. For each, state the file, function name, and line number. 3. R",
+    "timestamp": "2026-06-27T17:16:35.101658+00:00"
+  },
+  "agent_a_runs": [
+    {
+      "success": false,
+      "error": "Timeout after 600s",
+      "duration_ms": 600034.9302310024,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0.0,
+      "num_turns": 0,
+      "result_text": "",
+      "iteration": 1,
+      "agent": "A (jcodemunch MCP)"
+    }
+  ],
+  "agent_b_runs": [
+    {
+      "success": true,
+      "duration_ms": 248001,
+      "input_tokens": 57966,
+      "output_tokens": 7169,
+      "total_tokens": 65135,
+      "cost_usd": 0.669311,
+      "num_turns": 11,
+      "result_text": "",
+      "error": null,
+      "stop_reason": "tool_use",
+      "session_id": "7cb57361-e193-4095-8c39-9b23bb0ca060",
+      "iteration": 1,
+      "agent": "B (no MCP / bare)"
+    }
+  ],
+  "summary": {
+    "agent_a": {
+      "label": "A (jcodemunch MCP)",
+      "n_runs": 1,
+      "avg_duration_ms": 600034.9302310024,
+      "avg_input_tokens": 0.0,
+      "avg_output_tokens": 0.0,
+      "avg_total_tokens": 0.0,
+      "avg_turns": 0.0,
+      "avg_cost_usd": 0.0,
+      "total_cost_usd": 0.0,
+      "success_rate": 0.0
+    },
+    "agent_b": {
+      "label": "B (no MCP / bare)",
+      "n_runs": 1,
+      "avg_duration_ms": 248001.0,
+      "avg_input_tokens": 57966.0,
+      "avg_output_tokens": 7169.0,
+      "avg_total_tokens": 65135.0,
+      "avg_turns": 11.0,
+      "avg_cost_usd": 0.669311,
+      "total_cost_usd": 0.669311,
+      "success_rate": 100.0
+    },
+    "delta": {
+      "avg_duration_ms": 352033.9302310024,
+      "avg_total_tokens": -65135.0,
+      "avg_cost_usd": -0.669311,
+      "success_rate": -100.0,
+      "token_savings_pct": 100.0,
+      "time_overhead_pct": 141.94859304236772
+    }
+  }
+}

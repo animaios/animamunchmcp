@@ -1,0 +1,105 @@
+{
+  "benchmark": {
+    "task_id": "dead_code_audit",
+    "repo": "animaios/animamunchmcp",
+    "iterations": 2,
+    "prompt": "Perform a dead code audit of this repository. 1. Identify all functions and methods that appear to be dead code (not called anywhere). 2. For each, state the file, function name, and line number. 3. R",
+    "timestamp": "2026-06-27T18:12:15.495611+00:00"
+  },
+  "agent_a_runs": [
+    {
+      "success": false,
+      "error": "Timeout after 240s",
+      "duration_ms": 240127.94614400264,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0.0,
+      "num_turns": 0,
+      "result_text": "",
+      "iteration": 1,
+      "agent": "A (jcodemunch MCP)"
+    },
+    {
+      "success": true,
+      "duration_ms": 79187,
+      "input_tokens": 66819,
+      "output_tokens": 1902,
+      "total_tokens": 68721,
+      "cost_usd": 0.632141,
+      "num_turns": 11,
+      "result_text": "",
+      "error": null,
+      "stop_reason": "tool_use",
+      "session_id": "55b9adbb-77ff-4203-8946-0e451b3169b5",
+      "iteration": 2,
+      "agent": "A (jcodemunch MCP)"
+    }
+  ],
+  "agent_b_runs": [
+    {
+      "success": true,
+      "duration_ms": 169155,
+      "input_tokens": 49577,
+      "output_tokens": 4251,
+      "total_tokens": 53828,
+      "cost_usd": 0.5431520000000001,
+      "num_turns": 11,
+      "result_text": "",
+      "error": null,
+      "stop_reason": "tool_use",
+      "session_id": "5a29f464-de87-4973-8b89-c6c7d6a1b746",
+      "iteration": 1,
+      "agent": "B (no MCP / bare)"
+    },
+    {
+      "success": true,
+      "duration_ms": 224717,
+      "input_tokens": 57719,
+      "output_tokens": 7920,
+      "total_tokens": 65639,
+      "cost_usd": 0.706243,
+      "num_turns": 11,
+      "result_text": "",
+      "error": null,
+      "stop_reason": "tool_use",
+      "session_id": "6c132f56-e03f-4258-a883-d9e47719cd6c",
+      "iteration": 2,
+      "agent": "B (no MCP / bare)"
+    }
+  ],
+  "summary": {
+    "agent_a": {
+      "label": "A (jcodemunch MCP)",
+      "n_runs": 2,
+      "avg_duration_ms": 159657.4730720013,
+      "avg_input_tokens": 33409.5,
+      "avg_output_tokens": 951.0,
+      "avg_total_tokens": 34360.5,
+      "avg_turns": 5.5,
+      "avg_cost_usd": 0.3160705,
+      "total_cost_usd": 0.632141,
+      "success_rate": 50.0
+    },
+    "agent_b": {
+      "label": "B (no MCP / bare)",
+      "n_runs": 2,
+      "avg_duration_ms": 196936.0,
+      "avg_input_tokens": 53648.0,
+      "avg_output_tokens": 6085.5,
+      "avg_total_tokens": 59733.5,
+      "avg_turns": 11.0,
+      "avg_cost_usd": 0.6246975,
+      "total_cost_usd": 1.249395,
+      "success_rate": 100.0
+    },
+    "delta": {
+      "avg_duration_ms": -37278.5269279987,
+      "avg_total_tokens": -25373.0,
+      "avg_cost_usd": -0.30862700000000004,
+      "success_rate": -50.0,
+      "token_savings_pct": 42.47700201729348,
+      "time_overhead_pct": -18.92925972295502
+    }
+  }
+}

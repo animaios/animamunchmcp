@@ -79,6 +79,9 @@ index.php
 # Local docs notes
 docs/
 
+# Benchmark temp artifacts
+benchmarks/agent_benchmark/_tmp_*.json
+
 # macOS
 .DS_Store
 **/.DS_Store
