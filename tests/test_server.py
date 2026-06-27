@@ -763,7 +763,7 @@ async def test_disabled_tools_filtered_from_schema(monkeypatch):
         assert "index_repo" not in tool_names
         assert "search_symbols" not in tool_names
         assert "get_file_tree" in tool_names  # Not disabled
-        assert len(tools) == 37  # 39 - 2 disabled
+        assert len(tools) == 44  # 46 - 2 disabled
     finally:
         config_module._GLOBAL_CONFIG.clear()
         config_module._GLOBAL_CONFIG.update(orig_config)
@@ -781,7 +781,9 @@ async def test_disabled_tools_empty_all_tools_present(monkeypatch):
         config_module._GLOBAL_CONFIG["disabled_tools"] = []
 
         tools = await list_tools()
-        assert len(tools) == 39  # 39 tools (config cleared, so disabled gate off)
+        assert (
+            len(tools) == 46
+        )  # 39 code + 7 unified reading tools (config cleared, so disabled gate off)
     finally:
         config_module._GLOBAL_CONFIG.clear()
         config_module._GLOBAL_CONFIG.update(orig_config)

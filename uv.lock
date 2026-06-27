@@ -10,7 +10,7 @@ resolution-markers = [
 
 [[package]]
 name = "animamunch"
-version = "1.108.90"
+version = "1.108.92"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },

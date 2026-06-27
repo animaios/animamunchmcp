@@ -105,6 +105,14 @@ _CANONICAL_TOOL_NAMES: tuple[str, ...] = (
     "register_edit",
     # Agent stand-up briefing
     # Composite retrieval
+    # Unified Reading (code + docs)
+    "index_content",
+    "list_content",
+    "get_outline",
+    "get_file",
+    "search_units",
+    "get_unit",
+    "get_unit_context",
     # Runtime trace ingest + analytics
     "import_runtime_signal",
     "find_hot_paths",
@@ -173,6 +181,18 @@ _SNIPPET_TOOL_CATEGORIES: list[tuple[str, list[str]]] = [
     (
         "Session",
         ["register_edit"],
+    ),
+    (
+        "Unified Reading",
+        [
+            "index_content",
+            "list_content",
+            "get_outline",
+            "get_file",
+            "search_units",
+            "get_unit",
+            "get_unit_context",
+        ],
     ),
     (
         "Runtime Trace Ingest & Analytics",
@@ -2564,6 +2584,8 @@ def _build_tools_list() -> list[Tool]:
     # Non-counter surfaces: front-door tools stay hidden
     # (still callable via call_tool), only non-front-door tools appear.
     all_tools = [t for t in all_tools if t.name not in _COUNTER_FRONT_DOOR]
+    # Merge unified reading tools into the default surface
+    all_tools = all_tools + _reading_surface_tools()
     # Filter out disabled tools (simple set difference).
     disabled = config_module.get("disabled_tools", [])
     if disabled:

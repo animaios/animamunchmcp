@@ -2189,8 +2189,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 async def run_server():
     """Run the MCP server."""
     import contextlib
-    from jdocmunch_mcp import __version__
-    from jdocmunch_mcp.embeddings.provider import warmup as _embedding_warmup
+    from jcodemunch_mcp._jdocmunch import __version__
+    from jcodemunch_mcp._jdocmunch.embeddings.provider import warmup as _embedding_warmup
     from mcp.server.stdio import stdio_server
     print(f"jdocmunch-mcp {__version__} by jgravelle · https://github.com/jgravelle/jdocmunch-mcp", file=sys.stderr)
 

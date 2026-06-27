@@ -12,7 +12,6 @@ import os
 from pathlib import Path
 from typing import Optional
 
-
 _DOC_STRONG_EXTS = {
     ".md",
     ".markdown",
@@ -78,7 +77,7 @@ def _load_code_index(repo: str, storage_path: Optional[str]):
 
 
 def _load_doc_index(repo: str, doc_storage_path: Optional[str]):
-    from jdocmunch_mcp.storage import DocStore
+    from jcodemunch_mcp._jdocmunch.storage import DocStore
 
     store = DocStore(base_path=doc_storage_path)
     owner, name = store._resolve_repo(repo)
@@ -110,7 +109,7 @@ def _doc_repo_for_code_repo(
     if not source_root:
         return None
     try:
-        from jdocmunch_mcp.storage import DocStore
+        from jcodemunch_mcp._jdocmunch.storage import DocStore
 
         for row in DocStore(base_path=doc_storage_path).list_repos():
             if _same_source_root(source_root, row.get("source_root", "")):
@@ -309,7 +308,7 @@ def index_content(
             results.append(_wrap("code", "symbol", result))
         else:
             if path:
-                from jdocmunch_mcp.tools.index_local import index_local
+                from jcodemunch_mcp._jdocmunch.tools.index_local import index_local
 
                 result = index_local(
                     path=path,
@@ -321,7 +320,7 @@ def index_content(
                     paths=paths,
                 )
             else:
-                from jdocmunch_mcp.tools.index_repo import index_repo as doc_index_repo
+                from jcodemunch_mcp._jdocmunch.tools.index_repo import index_repo as doc_index_repo
 
                 result = doc_index_repo(
                     url=url or "",
@@ -366,7 +365,7 @@ def list_content(
             results.append(_wrap("code", "file", result))
         else:
             if tree or path_glob:
-                from jdocmunch_mcp.tools.get_toc_tree import get_toc_tree
+                from jcodemunch_mcp._jdocmunch.tools.get_toc_tree import get_toc_tree
 
                 doc_repo = _resolve_doc_repo_for_call(repo, storage_path, doc_store)
                 result = get_toc_tree(
@@ -375,7 +374,7 @@ def list_content(
                     storage_path=doc_store,
                 )
             else:
-                from jdocmunch_mcp.tools.list_docs import list_docs
+                from jcodemunch_mcp._jdocmunch.tools.list_docs import list_docs
 
                 doc_repo = _resolve_doc_repo_for_call(repo, storage_path, doc_store)
                 result = list_docs(repo=doc_repo, storage_path=doc_store)
@@ -406,7 +405,7 @@ def get_outline(
             )
             results.append(_wrap("code", "symbol", result))
         else:
-            from jdocmunch_mcp.tools.get_document_outline import get_document_outline
+            from jcodemunch_mcp._jdocmunch.tools.get_document_outline import get_document_outline
 
             doc_repo = _resolve_doc_repo_for_call(repo, storage_path, doc_store)
             result = get_document_outline(
@@ -464,7 +463,7 @@ def _get_doc_file_content(
     end_line: Optional[int],
     doc_storage_path: Optional[str],
 ) -> dict:
-    from jdocmunch_mcp.storage import DocStore
+    from jcodemunch_mcp._jdocmunch.storage import DocStore
 
     store = DocStore(base_path=doc_storage_path)
     try:
@@ -491,9 +490,14 @@ def _get_doc_file_content(
         actual_end = line_count
         selected = content
     else:
-        actual_start = max(1, min(start_line if start_line is not None else 1, line_count))
-        actual_end = max(actual_start, min(end_line if end_line is not None else line_count, line_count))
-        selected = "\n".join(lines[actual_start - 1:actual_end])
+        actual_start = max(
+            1, min(start_line if start_line is not None else 1, line_count)
+        )
+        actual_end = max(
+            actual_start,
+            min(end_line if end_line is not None else line_count, line_count),
+        )
+        selected = "\n".join(lines[actual_start - 1 : actual_end])
 
     return {
         "repo": f"{owner}/{name}",
@@ -527,7 +531,11 @@ def search_units(
     for d in domains:
         if d == "code":
             if not repo:
-                results.append(_wrap("code", "symbol", {"error": "repo is required for code search"}))
+                results.append(
+                    _wrap(
+                        "code", "symbol", {"error": "repo is required for code search"}
+                    )
+                )
                 continue
             from .search_symbols import search_symbols
 
@@ -544,10 +552,16 @@ def search_units(
             results.append(_wrap("code", "symbol", result))
         else:
             if mode == "title":
-                from jdocmunch_mcp.tools.search_titles import search_titles
+                from jcodemunch_mcp._jdocmunch.tools.search_titles import search_titles
 
                 if not repo:
-                    results.append(_wrap("docs", "section", {"error": "repo is required for title search"}))
+                    results.append(
+                        _wrap(
+                            "docs",
+                            "section",
+                            {"error": "repo is required for title search"},
+                        )
+                    )
                     continue
                 doc_repo = _resolve_doc_repo_for_call(repo, storage_path, doc_store)
                 result = search_titles(
@@ -557,7 +571,7 @@ def search_units(
                     storage_path=doc_store,
                 )
             else:
-                from jdocmunch_mcp.tools.search_sections import search_sections
+                from jcodemunch_mcp._jdocmunch.tools.search_sections import search_sections
 
                 doc_repo = (
                     _resolve_doc_repo_for_call(repo, storage_path, doc_store)
@@ -616,7 +630,7 @@ def get_unit(
         results.append(_wrap("code", "symbol", result))
     if by_domain["docs"]:
         if len(by_domain["docs"]) == 1:
-            from jdocmunch_mcp.tools.get_section import get_section
+            from jcodemunch_mcp._jdocmunch.tools.get_section import get_section
 
             doc_repo = _resolve_doc_repo_for_call(repo, storage_path, doc_store)
             result = get_section(
@@ -628,7 +642,7 @@ def get_unit(
                 storage_path=doc_store,
             )
         else:
-            from jdocmunch_mcp.tools.get_sections import get_sections
+            from jcodemunch_mcp._jdocmunch.tools.get_sections import get_sections
 
             doc_repo = _resolve_doc_repo_for_call(repo, storage_path, doc_store)
             result = get_sections(
@@ -670,7 +684,7 @@ def get_unit_context(
             )
             results.append(_wrap("code", "symbol", result))
         else:
-            from jdocmunch_mcp.tools.get_section_context import get_section_context
+            from jcodemunch_mcp._jdocmunch.tools.get_section_context import get_section_context
 
             doc_repo = _resolve_doc_repo_for_call(repo, storage_path, doc_store)
             result = get_section_context(
