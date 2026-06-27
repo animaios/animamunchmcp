@@ -8,10 +8,8 @@ import pytest
 
 from jcodemunch_mcp.server import (
     _coerce_arguments,
-    _ensure_tool_schemas,
     call_tool,
     list_tools,
-    server,
 )
 
 
@@ -108,6 +106,8 @@ async def test_search_units_tool_schema():
     assert "query" in props
     assert "kind" in props
     assert "max_results" in props
+    assert "order" not in props
+    assert "rank_by" not in props
 
     # kind should have enum
     assert "enum" in props["kind"]
@@ -265,6 +265,145 @@ async def test_call_tool_forwards_get_file_bounds():
         domain="auto",
         doc_storage_path=None,
     )
+
+
+@pytest.mark.asyncio
+async def test_call_tool_forwards_canonical_search_units_advanced_args():
+    """Canonical search_units should preserve the old search_symbols capability."""
+    with patch(
+        "jcodemunch_mcp.tools.content_router.search_units", return_value={}
+    ) as mock_search:
+        await call_tool(
+            "search_units",
+            {
+                "repo": "owner/repo",
+                "query": "foo",
+                "decorator": "route",
+                "token_budget": 500,
+                "detail_level": "compact",
+                "debug": True,
+                "fuzzy": True,
+                "fuzzy_threshold": 0.6,
+                "max_edit_distance": 1,
+                "sort_by": "centrality",
+                "semantic": True,
+                "semantic_weight": 0.7,
+                "semantic_only": True,
+                "fusion": True,
+                "fqn": "App\\Models\\User",
+            },
+        )
+
+    call_kwargs = mock_search.call_args[1]
+    assert call_kwargs["decorator"] == "route"
+    assert call_kwargs["token_budget"] == 500
+    assert call_kwargs["detail_level"] == "compact"
+    assert call_kwargs["debug"] is True
+    assert call_kwargs["fuzzy"] is True
+    assert call_kwargs["fuzzy_threshold"] == 0.6
+    assert call_kwargs["max_edit_distance"] == 1
+    assert call_kwargs["sort_by"] == "centrality"
+    assert call_kwargs["semantic"] is True
+    assert call_kwargs["semantic_weight"] == 0.7
+    assert call_kwargs["semantic_only"] is True
+    assert call_kwargs["fusion"] is True
+    assert call_kwargs["fqn"] == "App\\Models\\User"
+
+
+@pytest.mark.asyncio
+async def test_call_tool_legacy_alias_schemas_accept_old_arg_names():
+    """Removed tool names remain callable with their original argument names."""
+    with patch(
+        "jcodemunch_mcp.tools.get_context_bundle.get_context_bundle", return_value={}
+    ) as mock_context:
+        await call_tool(
+            "get_context_bundle",
+            {"repo": "owner/repo", "symbol_id": "src/a.py::Foo#function"},
+        )
+
+    mock_context.assert_called_once()
+    assert mock_context.call_args[1]["symbol_id"] == "src/a.py::Foo#function"
+
+    with patch(
+        "jcodemunch_mcp.tools.content_router.get_outline", return_value={}
+    ) as mock_outline:
+        await call_tool(
+            "get_file_outline",
+            {"repo": "owner/repo", "file_paths": ["src/a.py", "src/b.py"]},
+        )
+
+    mock_outline.assert_called_once()
+    assert mock_outline.call_args[1]["file_path"] == ""
+    assert mock_outline.call_args[1]["file_paths"] == ["src/a.py", "src/b.py"]
+
+
+@pytest.mark.asyncio
+async def test_call_tool_canonical_get_outline_accepts_batch_file_paths():
+    """get_outline advertises file_paths, so batch mode must not require file_path."""
+    with patch(
+        "jcodemunch_mcp.tools.content_router.get_outline", return_value={}
+    ) as mock_outline:
+        await call_tool(
+            "get_outline",
+            {"repo": "owner/repo", "file_paths": ["src/a.py", "src/b.py"]},
+        )
+
+    mock_outline.assert_called_once()
+    assert mock_outline.call_args[1]["file_path"] == ""
+    assert mock_outline.call_args[1]["file_paths"] == ["src/a.py", "src/b.py"]
+
+
+@pytest.mark.asyncio
+async def test_call_tool_legacy_context_bundle_preserves_old_inputs():
+    """Legacy context bundle should preserve symbol_ids and fqn alternatives."""
+    with patch(
+        "jcodemunch_mcp.tools.get_context_bundle.get_context_bundle", return_value={}
+    ) as mock_context:
+        await call_tool(
+            "get_context_bundle",
+            {
+                "repo": "owner/repo",
+                "symbol_ids": ["src/a.py::A#function", "src/b.py::B#function"],
+            },
+        )
+
+    mock_context.assert_called_once()
+    assert mock_context.call_args[1]["symbol_id"] is None
+    assert mock_context.call_args[1]["symbol_ids"] == [
+        "src/a.py::A#function",
+        "src/b.py::B#function",
+    ]
+
+    with patch(
+        "jcodemunch_mcp.tools.get_context_bundle.get_context_bundle", return_value={}
+    ) as mock_context:
+        await call_tool(
+            "get_context_bundle",
+            {"repo": "owner/repo", "fqn": "App\\Models\\User"},
+        )
+
+    mock_context.assert_called_once()
+    assert mock_context.call_args[1]["symbol_id"] is None
+    assert mock_context.call_args[1]["symbol_ids"] is None
+    assert mock_context.call_args[1]["fqn"] == "App\\Models\\User"
+
+
+@pytest.mark.asyncio
+async def test_call_tool_rejects_missing_alternative_inputs():
+    """Schemas should reject calls missing all mutually exclusive identifiers."""
+    from mcp.types import CallToolResult
+
+    for tool_name in (
+        "get_outline",
+        "get_file_outline",
+        "get_context_bundle",
+        "get_unit",
+    ):
+        result = await call_tool(tool_name, {"repo": "owner/repo"})
+        assert isinstance(result, CallToolResult)
+        assert result.isError is True
+        payload = json.loads(result.content[0].text)
+        assert "Input validation error" in payload["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -448,6 +587,29 @@ async def test_call_tool_coerces_string_integer():
     call_kwargs = mock_search.call_args[1]
     assert call_kwargs["max_results"] == 20
     assert isinstance(call_kwargs["max_results"], int)
+
+
+@pytest.mark.asyncio
+async def test_call_tool_schema_cache_includes_catalog_when_counter_surface(monkeypatch):
+    """Counter surface must not make hidden catalog actions skip coercion."""
+    import jcodemunch_mcp.server as server_module
+
+    monkeypatch.setenv("JCODEMUNCH_TOOL_SURFACE", "counter")
+    server_module._RAW_CATALOG = None
+    server_module._TOOL_SCHEMAS = None
+    try:
+        with patch(
+            "jcodemunch_mcp.tools.content_router.search_units", return_value={}
+        ) as mock_search:
+            await call_tool(
+                "search_units",
+                {"repo": "owner/repo", "query": "foo", "max_results": "20"},
+            )
+
+        assert mock_search.call_args[1]["max_results"] == 20
+    finally:
+        server_module._RAW_CATALOG = None
+        server_module._TOOL_SCHEMAS = None
 
 
 @pytest.mark.asyncio
@@ -686,7 +848,6 @@ async def test_sql_enabled_keeps_search_columns(monkeypatch):
 async def test_language_enum_reflects_config_limited(monkeypatch):
     """Language enum should only include configured languages."""
     from jcodemunch_mcp import config as config_module
-    from jcodemunch_mcp.parser.languages import LANGUAGE_REGISTRY
 
     orig_config = config_module._GLOBAL_CONFIG.copy()
     config_module._GLOBAL_CONFIG.clear()
