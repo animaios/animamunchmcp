@@ -9,6 +9,164 @@ resolution-markers = [
 ]
 
 [[package]]
+name = "animamunch"
+version = "1.108.90"
+source = { editable = "." }
+dependencies = [
+    { name = "httpx" },
+    { name = "mcp" },
+    { name = "pathspec" },
+    { name = "pyyaml" },
+    { name = "tree-sitter-language-pack" },
+]
+
+[package.optional-dependencies]
+all = [
+    { name = "anthropic" },
+    { name = "anyio" },
+    { name = "google-generativeai" },
+    { name = "jinja2" },
+    { name = "keyring" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "onnxruntime", version = "1.24.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "onnxruntime", version = "1.27.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "openai" },
+    { name = "pillow" },
+    { name = "pyyaml" },
+    { name = "rich" },
+    { name = "sentence-transformers" },
+    { name = "sounddevice" },
+    { name = "starlette" },
+    { name = "uvicorn" },
+    { name = "watchfiles" },
+]
+anthropic = [
+    { name = "anthropic" },
+]
+bench = [
+    { name = "anthropic" },
+    { name = "jinja2" },
+    { name = "openai" },
+    { name = "pyyaml" },
+    { name = "rich" },
+]
+dbt = [
+    { name = "pyyaml" },
+]
+gemini = [
+    { name = "google-generativeai" },
+]
+groq = [
+    { name = "openai" },
+]
+groq-explain = [
+    { name = "openai" },
+    { name = "pillow" },
+]
+groq-voice = [
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "openai" },
+    { name = "sounddevice" },
+]
+http = [
+    { name = "anyio" },
+    { name = "starlette" },
+    { name = "uvicorn" },
+]
+keyring = [
+    { name = "keyring" },
+]
+local-embed = [
+    { name = "onnxruntime", version = "1.24.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "onnxruntime", version = "1.27.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
+minimax = [
+    { name = "openai" },
+]
+openai = [
+    { name = "openai" },
+]
+semantic = [
+    { name = "sentence-transformers" },
+]
+watch = [
+    { name = "watchfiles" },
+]
+zhipu = [
+    { name = "openai" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "hypothesis" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anthropic", marker = "extra == 'all'", specifier = ">=0.40.0" },
+    { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.40.0" },
+    { name = "anthropic", marker = "extra == 'bench'", specifier = ">=0.40.0" },
+    { name = "anyio", marker = "extra == 'all'", specifier = ">=4.0.0" },
+    { name = "anyio", marker = "extra == 'http'", specifier = ">=4.0.0" },
+    { name = "google-generativeai", marker = "extra == 'all'", specifier = ">=0.8.0" },
+    { name = "google-generativeai", marker = "extra == 'gemini'", specifier = ">=0.8.0" },
+    { name = "httpx", specifier = ">=0.27.0" },
+    { name = "jinja2", marker = "extra == 'all'", specifier = ">=3.1" },
+    { name = "jinja2", marker = "extra == 'bench'", specifier = ">=3.1" },
+    { name = "keyring", marker = "extra == 'all'", specifier = ">=24.0" },
+    { name = "keyring", marker = "extra == 'keyring'", specifier = ">=24.0" },
+    { name = "mcp", specifier = ">=1.10.0,<2.0.0" },
+    { name = "numpy", marker = "extra == 'all'", specifier = ">=1.24.0" },
+    { name = "numpy", marker = "extra == 'groq-voice'", specifier = ">=1.24.0" },
+    { name = "onnxruntime", marker = "extra == 'all'", specifier = ">=1.16.0" },
+    { name = "onnxruntime", marker = "extra == 'local-embed'", specifier = ">=1.16.0" },
+    { name = "openai", marker = "extra == 'all'", specifier = ">=1.0.0" },
+    { name = "openai", marker = "extra == 'bench'", specifier = ">=1.0.0" },
+    { name = "openai", marker = "extra == 'groq'", specifier = ">=1.0.0" },
+    { name = "openai", marker = "extra == 'groq-explain'", specifier = ">=1.0.0" },
+    { name = "openai", marker = "extra == 'groq-voice'", specifier = ">=1.0.0" },
+    { name = "openai", marker = "extra == 'minimax'", specifier = ">=1.0.0" },
+    { name = "openai", marker = "extra == 'openai'", specifier = ">=1.0.0" },
+    { name = "openai", marker = "extra == 'zhipu'", specifier = ">=1.0.0" },
+    { name = "pathspec", specifier = ">=0.12.0" },
+    { name = "pillow", marker = "extra == 'all'", specifier = ">=10.0.0" },
+    { name = "pillow", marker = "extra == 'groq-explain'", specifier = ">=10.0.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "pyyaml", marker = "extra == 'all'", specifier = ">=6.0" },
+    { name = "pyyaml", marker = "extra == 'bench'", specifier = ">=6.0" },
+    { name = "pyyaml", marker = "extra == 'dbt'", specifier = ">=6.0" },
+    { name = "rich", marker = "extra == 'all'", specifier = ">=13.0" },
+    { name = "rich", marker = "extra == 'bench'", specifier = ">=13.0" },
+    { name = "sentence-transformers", marker = "extra == 'all'", specifier = ">=2.2.0" },
+    { name = "sentence-transformers", marker = "extra == 'semantic'", specifier = ">=2.2.0" },
+    { name = "sounddevice", marker = "extra == 'all'", specifier = ">=0.4.6" },
+    { name = "sounddevice", marker = "extra == 'groq-voice'", specifier = ">=0.4.6" },
+    { name = "starlette", marker = "extra == 'all'", specifier = ">=1.3.1" },
+    { name = "starlette", marker = "extra == 'http'", specifier = ">=1.3.1" },
+    { name = "tree-sitter-language-pack", specifier = ">=0.7.0,<1.0.0" },
+    { name = "uvicorn", marker = "extra == 'all'", specifier = ">=0.20.0" },
+    { name = "uvicorn", marker = "extra == 'http'", specifier = ">=0.20.0" },
+    { name = "watchfiles", marker = "extra == 'all'", specifier = ">=1.0.0" },
+    { name = "watchfiles", marker = "extra == 'watch'", specifier = ">=1.0.0" },
+]
+provides-extras = ["anthropic", "gemini", "openai", "minimax", "zhipu", "dbt", "http", "watch", "semantic", "local-embed", "groq", "groq-voice", "groq-explain", "keyring", "bench", "all"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "hypothesis", specifier = ">=6.0.0" },
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-asyncio", specifier = ">=1.3.0" },
+    { name = "pytest-cov", specifier = ">=7.0.0" },
+    { name = "ruff", specifier = ">=0.6.0" },
+]
+
+[[package]]
 name = "annotated-doc"
 version = "0.0.4"
 source = { registry = "https://pypi.org/simple" }
@@ -999,164 +1157,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/36/cf/ea4ef2920830dea3f5ab2ea4da6fb67724e6dca80ee2553788c3607243d0/jaraco_functools-4.5.0.tar.gz", hash = "sha256:3bb5665ea4a020cf78a7040e89154c77edadb3ca74f366479669c5999aa70b03", size = 20272, upload-time = "2026-05-15T21:34:10.025Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/96/9a/982e48afcffcd727a9144506720ffd4224b6b7e355c98641866f38b7c043/jaraco_functools-4.5.0-py3-none-any.whl", hash = "sha256:79ce39246eddbde4b3a03b77ea5f0f7878dc669b166a66cf3fa8e266aa3fa2f4", size = 10594, upload-time = "2026-05-15T21:34:08.595Z" },
-]
-
-[[package]]
-name = "jcodemunch-mcp"
-version = "1.108.77"
-source = { editable = "." }
-dependencies = [
-    { name = "httpx" },
-    { name = "mcp" },
-    { name = "pathspec" },
-    { name = "pyyaml" },
-    { name = "tree-sitter-language-pack" },
-]
-
-[package.optional-dependencies]
-all = [
-    { name = "anthropic" },
-    { name = "anyio" },
-    { name = "google-generativeai" },
-    { name = "jinja2" },
-    { name = "keyring" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "onnxruntime", version = "1.24.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "onnxruntime", version = "1.27.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "openai" },
-    { name = "pillow" },
-    { name = "pyyaml" },
-    { name = "rich" },
-    { name = "sentence-transformers" },
-    { name = "sounddevice" },
-    { name = "starlette" },
-    { name = "uvicorn" },
-    { name = "watchfiles" },
-]
-anthropic = [
-    { name = "anthropic" },
-]
-bench = [
-    { name = "anthropic" },
-    { name = "jinja2" },
-    { name = "openai" },
-    { name = "pyyaml" },
-    { name = "rich" },
-]
-dbt = [
-    { name = "pyyaml" },
-]
-gemini = [
-    { name = "google-generativeai" },
-]
-groq = [
-    { name = "openai" },
-]
-groq-explain = [
-    { name = "openai" },
-    { name = "pillow" },
-]
-groq-voice = [
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "openai" },
-    { name = "sounddevice" },
-]
-http = [
-    { name = "anyio" },
-    { name = "starlette" },
-    { name = "uvicorn" },
-]
-keyring = [
-    { name = "keyring" },
-]
-local-embed = [
-    { name = "onnxruntime", version = "1.24.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "onnxruntime", version = "1.27.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-]
-minimax = [
-    { name = "openai" },
-]
-openai = [
-    { name = "openai" },
-]
-semantic = [
-    { name = "sentence-transformers" },
-]
-watch = [
-    { name = "watchfiles" },
-]
-zhipu = [
-    { name = "openai" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "hypothesis" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "anthropic", marker = "extra == 'all'", specifier = ">=0.40.0" },
-    { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.40.0" },
-    { name = "anthropic", marker = "extra == 'bench'", specifier = ">=0.40.0" },
-    { name = "anyio", marker = "extra == 'all'", specifier = ">=4.0.0" },
-    { name = "anyio", marker = "extra == 'http'", specifier = ">=4.0.0" },
-    { name = "google-generativeai", marker = "extra == 'all'", specifier = ">=0.8.0" },
-    { name = "google-generativeai", marker = "extra == 'gemini'", specifier = ">=0.8.0" },
-    { name = "httpx", specifier = ">=0.27.0" },
-    { name = "jinja2", marker = "extra == 'all'", specifier = ">=3.1" },
-    { name = "jinja2", marker = "extra == 'bench'", specifier = ">=3.1" },
-    { name = "keyring", marker = "extra == 'all'", specifier = ">=24.0" },
-    { name = "keyring", marker = "extra == 'keyring'", specifier = ">=24.0" },
-    { name = "mcp", specifier = ">=1.10.0,<2.0.0" },
-    { name = "numpy", marker = "extra == 'all'", specifier = ">=1.24.0" },
-    { name = "numpy", marker = "extra == 'groq-voice'", specifier = ">=1.24.0" },
-    { name = "onnxruntime", marker = "extra == 'all'", specifier = ">=1.16.0" },
-    { name = "onnxruntime", marker = "extra == 'local-embed'", specifier = ">=1.16.0" },
-    { name = "openai", marker = "extra == 'all'", specifier = ">=1.0.0" },
-    { name = "openai", marker = "extra == 'bench'", specifier = ">=1.0.0" },
-    { name = "openai", marker = "extra == 'groq'", specifier = ">=1.0.0" },
-    { name = "openai", marker = "extra == 'groq-explain'", specifier = ">=1.0.0" },
-    { name = "openai", marker = "extra == 'groq-voice'", specifier = ">=1.0.0" },
-    { name = "openai", marker = "extra == 'minimax'", specifier = ">=1.0.0" },
-    { name = "openai", marker = "extra == 'openai'", specifier = ">=1.0.0" },
-    { name = "openai", marker = "extra == 'zhipu'", specifier = ">=1.0.0" },
-    { name = "pathspec", specifier = ">=0.12.0" },
-    { name = "pillow", marker = "extra == 'all'", specifier = ">=10.0.0" },
-    { name = "pillow", marker = "extra == 'groq-explain'", specifier = ">=10.0.0" },
-    { name = "pyyaml", specifier = ">=6.0" },
-    { name = "pyyaml", marker = "extra == 'all'", specifier = ">=6.0" },
-    { name = "pyyaml", marker = "extra == 'bench'", specifier = ">=6.0" },
-    { name = "pyyaml", marker = "extra == 'dbt'", specifier = ">=6.0" },
-    { name = "rich", marker = "extra == 'all'", specifier = ">=13.0" },
-    { name = "rich", marker = "extra == 'bench'", specifier = ">=13.0" },
-    { name = "sentence-transformers", marker = "extra == 'all'", specifier = ">=2.2.0" },
-    { name = "sentence-transformers", marker = "extra == 'semantic'", specifier = ">=2.2.0" },
-    { name = "sounddevice", marker = "extra == 'all'", specifier = ">=0.4.6" },
-    { name = "sounddevice", marker = "extra == 'groq-voice'", specifier = ">=0.4.6" },
-    { name = "starlette", marker = "extra == 'all'", specifier = ">=1.3.1" },
-    { name = "starlette", marker = "extra == 'http'", specifier = ">=1.3.1" },
-    { name = "tree-sitter-language-pack", specifier = ">=0.7.0,<1.0.0" },
-    { name = "uvicorn", marker = "extra == 'all'", specifier = ">=0.20.0" },
-    { name = "uvicorn", marker = "extra == 'http'", specifier = ">=0.20.0" },
-    { name = "watchfiles", marker = "extra == 'all'", specifier = ">=1.0.0" },
-    { name = "watchfiles", marker = "extra == 'watch'", specifier = ">=1.0.0" },
-]
-provides-extras = ["anthropic", "gemini", "openai", "minimax", "zhipu", "dbt", "http", "watch", "semantic", "local-embed", "groq", "groq-voice", "groq-explain", "keyring", "bench", "all"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "hypothesis", specifier = ">=6.0.0" },
-    { name = "pytest", specifier = ">=9.0.2" },
-    { name = "pytest-asyncio", specifier = ">=1.3.0" },
-    { name = "pytest-cov", specifier = ">=7.0.0" },
-    { name = "ruff", specifier = ">=0.6.0" },
 ]
 
 [[package]]

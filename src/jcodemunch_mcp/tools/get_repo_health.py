@@ -25,12 +25,11 @@ import logging
 import math
 import re
 import time
-from collections import defaultdict
 from typing import Any, Optional
 
 from ..storage import IndexStore
 from ._graph_utils import build_adjacency
-from ._utils import get_file_churn, index_status_to_tool_error, resolve_repo, run_git
+from ._utils import get_file_churn, resolve_repo, run_git
 from .get_dead_code_v2 import get_dead_code_v2
 
 logger = logging.getLogger(__name__)

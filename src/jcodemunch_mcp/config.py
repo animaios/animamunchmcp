@@ -295,6 +295,7 @@ DEFAULTS = {
     "languages": None,  # None = all languages
     "languages_adaptive": False,
     "compact_schemas": False,
+    "tool_surface": "full",
     "server_output": "adaptive",  # "raw", "encoded", or "adaptive"
     "server_output_threshold": 0.15,  # Minimum savings ratio for adaptive mode
     "disabled_tools": ["test_summarizer"],
@@ -378,6 +379,7 @@ CONFIG_TYPES = {
     "languages": (list, type(None)),
     "languages_adaptive": bool,
     "compact_schemas": bool,
+    "tool_surface": str,
     "server_output": str,
     "server_output_threshold": float,
     "disabled_tools": list,
@@ -1857,6 +1859,11 @@ def generate_template() -> str:
   // fuzzy_*, etc.) from tool schemas. The server still accepts them — they're just
   // hidden from the LLM to save tokens. Saves ~1-2k tokens on top of any profile.
   // "compact_schemas": false,
+
+  // Tool-surface mode. "full" keeps the normal catalog. "counter" exposes the
+  // 3-tool front door. "reading" (alias: "jmri") exposes only the unified
+  // code/docs reading tools backed by jCodeMunch + integrated jDocMunch.
+  // "tool_surface": "full",
 
   // === Server Output ===
   // Controls how tool responses are emitted:
