@@ -309,8 +309,14 @@ def _reading_surface_tools() -> list:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Local folder or file path."},
-                    "url": {"type": "string", "description": "GitHub repository URL or owner/repo."},
+                    "path": {
+                        "type": "string",
+                        "description": "Local folder or file path.",
+                    },
+                    "url": {
+                        "type": "string",
+                        "description": "GitHub repository URL or owner/repo.",
+                    },
                     "domain": {**domain_prop, "default": "both"},
                     "use_ai_summaries": {"type": "boolean", "default": True},
                     "use_embeddings": {
@@ -336,10 +342,16 @@ def _reading_surface_tools() -> list:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "repo": {"type": "string", "description": "Code or docs repo handle."},
+                    "repo": {
+                        "type": "string",
+                        "description": "Code or docs repo handle.",
+                    },
                     "domain": {**domain_prop, "default": "both"},
                     "path_prefix": {"type": "string", "default": ""},
-                    "path_glob": {"type": "string", "description": "Docs path glob, e.g. docs/api/**."},
+                    "path_glob": {
+                        "type": "string",
+                        "description": "Docs path glob, e.g. docs/api/**.",
+                    },
                     "tree": {"type": "boolean", "default": False},
                     "include_summaries": {"type": "boolean", "default": False},
                     "max_files": {"type": "integer"},
@@ -381,11 +393,20 @@ def _reading_surface_tools() -> list:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "repo": {"type": "string", "description": "Repo handle. Required for code; optional for docs repo_group fan-out in future."},
+                    "repo": {
+                        "type": "string",
+                        "description": "Repo handle. Required for code; optional for docs repo_group fan-out in future.",
+                    },
                     "query": {"type": "string"},
                     "domain": {**domain_prop, "default": "both"},
-                    "file_path": {"type": "string", "description": "Exact file/doc path scope."},
-                    "path_glob": {"type": "string", "description": "Glob scope for files/docs."},
+                    "file_path": {
+                        "type": "string",
+                        "description": "Exact file/doc path scope.",
+                    },
+                    "path_glob": {
+                        "type": "string",
+                        "description": "Glob scope for files/docs.",
+                    },
                     "max_results": {"type": "integer", "default": 10},
                     "mode": {
                         "type": "string",
@@ -3139,6 +3160,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     paths=arguments.get("paths"),
                     name=arguments.get("name"),
                     storage_path=storage_path,
+                    doc_storage_path=storage_path,
                 )
             )
             _result_cache_invalidate()
@@ -3156,6 +3178,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     include_summaries=arguments.get("include_summaries", False),
                     max_files=arguments.get("max_files"),
                     storage_path=storage_path,
+                    doc_storage_path=storage_path,
                 )
             )
         elif name == "get_outline":
@@ -3168,6 +3191,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     file_path=arguments["file_path"],
                     domain=arguments.get("domain", "auto"),
                     storage_path=storage_path,
+                    doc_storage_path=storage_path,
                 )
             )
         elif name == "get_file":
@@ -3182,6 +3206,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     start_line=arguments.get("start_line"),
                     end_line=arguments.get("end_line"),
                     storage_path=storage_path,
+                    doc_storage_path=storage_path,
                 )
             )
         elif name == "search_units":
@@ -3200,6 +3225,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     kind=arguments.get("kind"),
                     language=arguments.get("language"),
                     storage_path=storage_path,
+                    doc_storage_path=storage_path,
                 )
             )
         elif name == "get_unit":
@@ -3217,6 +3243,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     strip_boilerplate=arguments.get("strip_boilerplate", False),
                     compress_code=arguments.get("compress_code", False),
                     storage_path=storage_path,
+                    doc_storage_path=storage_path,
                 )
             )
         elif name == "get_unit_context":
@@ -3232,6 +3259,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     include_related=arguments.get("include_related", False),
                     strip_boilerplate=arguments.get("strip_boilerplate", False),
                     storage_path=storage_path,
+                    doc_storage_path=storage_path,
                 )
             )
         elif name == "index_repo":

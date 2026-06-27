@@ -9,21 +9,26 @@ from typing import Optional
 
 import pathspec
 
-from ..parser import parse_file, preprocess_content, ALL_EXTENSIONS
-from ..retrieval.roles import annotate_sections as _annotate_roles
+from ..embeddings import embed_sections, get_provider_name, should_embed
+from ..parser import ALL_EXTENSIONS, parse_file, preprocess_content
 from ..retrieval.glossary import extract_glossary, write_terms
+from ..retrieval.roles import annotate_sections as _annotate_roles
 from ..security import (
-    validate_path,
-    is_symlink_escape,
-    is_secret_file,
     DEFAULT_MAX_FILE_SIZE,
+    is_secret_file,
+    is_symlink_escape,
+    validate_path,
 )
 from ..storage import DocStore
 from ..storage.doc_store import normalize_commit_sha
 from ..summarizer import summarize_sections
-from ..embeddings import embed_sections, get_provider_name, should_embed
-from ._git import local_git_head, local_git_paths_dirty, local_git_paths_tracked, stable_local_git_state
 from ._constants import SKIP_PATTERNS
+from ._git import (
+    local_git_head,
+    local_git_paths_dirty,
+    local_git_paths_tracked,
+    stable_local_git_state,
+)
 
 
 def _default_local_name(folder_name: str, folder_path: Optional[str] = None) -> str:
@@ -148,7 +153,9 @@ def discover_doc_files(
     extra_spec = None
     if extra_ignore_patterns:
         try:
-            extra_spec = pathspec.PathSpec.from_lines("gitignore", extra_ignore_patterns)
+            extra_spec = pathspec.PathSpec.from_lines(
+                "gitignore", extra_ignore_patterns
+            )
         except Exception:
             pass
 
@@ -162,10 +169,21 @@ def discover_doc_files(
 
         # Prune skipped directories in-place so os.walk won't descend into them
         dirnames[:] = [
-            d for d in dirnames
-            if not _should_skip(f"{dir_rel}/{d}/".lstrip("./"))
-            and not (gitignore_spec and gitignore_spec.match_file(f"{dir_rel}/{d}/".lstrip("./")))
-            and not (extra_spec and extra_spec.match_file(f"{dir_rel}/{d}/".lstrip("./")))
+            d
+            for d in dirnames
+            if not _should_skip(f"{dir_rel}/{d}/" if dir_rel != "." else f"{d}/")
+            and not (
+                gitignore_spec
+                and gitignore_spec.match_file(
+                    f"{dir_rel}/{d}/" if dir_rel != "." else f"{d}/"
+                )
+            )
+            and not (
+                extra_spec
+                and extra_spec.match_file(
+                    f"{dir_rel}/{d}/" if dir_rel != "." else f"{d}/"
+                )
+            )
         ]
 
         for filename in filenames:
@@ -181,7 +199,7 @@ def discover_doc_files(
                 warnings.append(f"Skipped path traversal: {file_path}")
                 continue
 
-            rel_path = f"{dir_rel}/{filename}".lstrip("./") if dir_rel != "." else filename
+            rel_path = f"{dir_rel}/{filename}" if dir_rel != "." else filename
 
             if _should_skip(rel_path):
                 continue
@@ -258,7 +276,7 @@ def _resolve_explicit_paths(
             continue
         p = Path(raw).expanduser()
         if not p.is_absolute():
-            p = (folder_path / p)
+            p = folder_path / p
         try:
             p = p.resolve()
         except OSError as e:
@@ -459,7 +477,9 @@ def index_local(
                 # address the real on-disk bytes, matching the GitHub leg and
                 # the disk file (#52). Path.read_text lacks newline before 3.13,
                 # so use open(). errors="replace" stays for invalid UTF-8.
-                with open(file_path, encoding="utf-8", errors="replace", newline="") as fh:
+                with open(
+                    file_path, encoding="utf-8", errors="replace", newline=""
+                ) as fh:
                     content = fh.read()
                 parsed_content = preprocess_content(content, rel_path)
                 current_files[rel_path] = parsed_content
@@ -467,7 +487,9 @@ def index_local(
                 warnings.append(f"Failed to read {file_path}: {e}")
 
         final_git_state = (local_git_head(folder_path), False)
-        head_sha, source_dirty = stable_local_git_state(initial_git_state, final_git_state)
+        head_sha, source_dirty = stable_local_git_state(
+            initial_git_state, final_git_state
+        )
         cert_paths = set(current_files.keys())
         if existing_index is not None:
             cert_paths.update(existing_index.doc_paths)
@@ -480,7 +502,9 @@ def index_local(
 
         # --- Incremental path ---
         if incremental and existing_index is not None:
-            changed, new, deleted = store.detect_changes(owner, repo_name, current_files)
+            changed, new, deleted = store.detect_changes(
+                owner, repo_name, current_files
+            )
 
             # jdoc#31: `paths` narrows current_files to a subset, so the
             # corpus-wide diff above marks every unlisted indexed file as
@@ -494,9 +518,12 @@ def index_local(
                     covered = old_files  # the root itself was listed
                 else:
                     covered = {
-                        fp for fp in old_files
-                        if any(fp == req or fp.startswith(req + "/")
-                               for req in requested_rels)
+                        fp
+                        for fp in old_files
+                        if any(
+                            fp == req or fp.startswith(req + "/")
+                            for req in requested_rels
+                        )
                     }
                 deleted = sorted(covered - set(current_files))
 
@@ -508,15 +535,23 @@ def index_local(
                     or bool(existing_index.sha_certified) != bool(sha_certified)
                     or getattr(existing_index, "source_root", "") != str(folder_path)
                 ):
-                    updated = store.incremental_save(
-                        owner=owner, name=repo_name,
-                        changed_files=[], new_files=[], deleted_files=[],
-                        new_sections=[], raw_files={}, doc_types={},
-                        head_sha=head_sha,
-                        source_dirty=source_dirty,
-                        sha_certified=sha_certified,
-                        source_root=str(folder_path),
-                    ) or existing_index
+                    updated = (
+                        store.incremental_save(
+                            owner=owner,
+                            name=repo_name,
+                            changed_files=[],
+                            new_files=[],
+                            deleted_files=[],
+                            new_sections=[],
+                            raw_files={},
+                            doc_types={},
+                            head_sha=head_sha,
+                            source_dirty=source_dirty,
+                            sha_certified=sha_certified,
+                            source_root=str(folder_path),
+                        )
+                        or existing_index
+                    )
                 latency_ms = int((time.perf_counter() - t0) * 1000)
                 nochange_result: dict = {
                     "success": True,
@@ -524,7 +559,9 @@ def index_local(
                     "repo": f"{owner}/{repo_name}",
                     "folder_path": str(folder_path),
                     "incremental": True,
-                    "changed": 0, "new": 0, "deleted": 0,
+                    "changed": 0,
+                    "new": 0,
+                    "deleted": 0,
                     "_meta": {"latency_ms": latency_ms},
                 }
                 nochange_result.update(derivation_fields)
@@ -561,13 +598,20 @@ def index_local(
             if use_embeddings:
                 new_sections = embed_sections(
                     new_sections,
-                    owner=owner, name=repo_name, storage_path=storage_path,
+                    owner=owner,
+                    name=repo_name,
+                    storage_path=storage_path,
                 )
 
             updated = store.incremental_save(
-                owner=owner, name=repo_name,
-                changed_files=changed, new_files=new, deleted_files=deleted,
-                new_sections=new_sections, raw_files=raw_subset, doc_types=doc_types,
+                owner=owner,
+                name=repo_name,
+                changed_files=changed,
+                new_files=new,
+                deleted_files=deleted,
+                new_sections=new_sections,
+                raw_files=raw_subset,
+                doc_types=doc_types,
                 head_sha=head_sha,
                 source_dirty=source_dirty,
                 sha_certified=sha_certified,
@@ -580,7 +624,9 @@ def index_local(
                 "repo": f"{owner}/{repo_name}",
                 "folder_path": str(folder_path),
                 "incremental": True,
-                "changed": len(changed), "new": len(new), "deleted": len(deleted),
+                "changed": len(changed),
+                "new": len(new),
+                "deleted": len(deleted),
                 "section_count": len(updated.sections) if updated else 0,
                 "indexed_at": updated.indexed_at if updated else "",
                 "semantic_search": use_embeddings and get_provider_name() is not None,
@@ -630,7 +676,9 @@ def index_local(
         if use_embeddings:
             all_sections = embed_sections(
                 all_sections,
-                owner=owner, name=repo_name, storage_path=storage_path,
+                owner=owner,
+                name=repo_name,
+                storage_path=storage_path,
             )
 
         # jdoc#62: persist the core index BEFORE the optional sidecars. The
@@ -659,6 +707,7 @@ def index_local(
         # v1.24.0: related-graph adjacency list sidecar.
         try:
             from ..retrieval.related_persist import write as _write_related
+
             _write_related(storage_path, owner, repo_name, all_sections)
         except Exception:
             pass
@@ -666,6 +715,7 @@ def index_local(
         # v1.24.0: boilerplate detector sidecar.
         try:
             from ..retrieval.boilerplate import write as _write_boilerplate
+
             _write_boilerplate(storage_path, owner, repo_name, all_sections)
         except Exception:
             pass
@@ -673,8 +723,16 @@ def index_local(
         # v1.34.0: section near-duplicate detector sidecar.
         try:
             from ..retrieval.dedup import write as _write_dedup
-            _write_dedup(storage_path, owner, repo_name,
-                         [s.to_dict() | {"content": getattr(s, "content", "") or ""} for s in all_sections])
+
+            _write_dedup(
+                storage_path,
+                owner,
+                repo_name,
+                [
+                    s.to_dict() | {"content": getattr(s, "content", "") or ""}
+                    for s in all_sections
+                ],
+            )
         except Exception:
             pass
 
@@ -685,6 +743,7 @@ def index_local(
         if autotune:
             try:
                 from .tune_weights import tune_weights as _tune_weights
+
                 autotune_result = _tune_weights(
                     repo=f"{owner}/{repo_name}",
                     storage_path=storage_path,
