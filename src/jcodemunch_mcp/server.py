@@ -294,6 +294,147 @@ def _counter_front_door_tools() -> list:
     ]
 
 
+def _reading_surface_tools() -> list:
+    """Unified jMRI-style tools backed by code and doc indexes."""
+    domain_prop = {
+        "type": "string",
+        "enum": ["auto", "both", "code", "docs"],
+        "description": "Which index domain to query. auto routes by id/path when possible.",
+        "default": "auto",
+    }
+    return [
+        Tool(
+            name="index_content",
+            description="Index code, docs, or both from a local path or GitHub URL. Docs are handled by the integrated jDocMunch engine.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Local folder or file path."},
+                    "url": {"type": "string", "description": "GitHub repository URL or owner/repo."},
+                    "domain": {**domain_prop, "default": "both"},
+                    "use_ai_summaries": {"type": "boolean", "default": True},
+                    "use_embeddings": {
+                        "description": "Docs embedding mode passed to jDocMunch.",
+                        "default": "auto",
+                    },
+                    "incremental": {"type": "boolean", "default": True},
+                    "paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional explicit paths relative to path.",
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Optional docs storage name for jDocMunch local/GitHub indexes.",
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="list_content",
+            description="List indexed code files and/or documentation files/TOC without reading bodies.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string", "description": "Code or docs repo handle."},
+                    "domain": {**domain_prop, "default": "both"},
+                    "path_prefix": {"type": "string", "default": ""},
+                    "path_glob": {"type": "string", "description": "Docs path glob, e.g. docs/api/**."},
+                    "tree": {"type": "boolean", "default": False},
+                    "include_summaries": {"type": "boolean", "default": False},
+                    "max_files": {"type": "integer"},
+                },
+                "required": ["repo"],
+            },
+        ),
+        Tool(
+            name="get_outline",
+            description="Get a code symbol outline or documentation section outline for a file path.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string"},
+                    "file_path": {"type": "string"},
+                    "domain": domain_prop,
+                },
+                "required": ["repo", "file_path"],
+            },
+        ),
+        Tool(
+            name="get_file",
+            description="Read cached code source or cached preprocessed document content by file path.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string"},
+                    "file_path": {"type": "string"},
+                    "domain": domain_prop,
+                    "start_line": {"type": "integer"},
+                    "end_line": {"type": "integer"},
+                },
+                "required": ["repo", "file_path"],
+            },
+        ),
+        Tool(
+            name="search_units",
+            description="Search semantic units: code symbols and/or documentation sections.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string", "description": "Repo handle. Required for code; optional for docs repo_group fan-out in future."},
+                    "query": {"type": "string"},
+                    "domain": {**domain_prop, "default": "both"},
+                    "file_path": {"type": "string", "description": "Exact file/doc path scope."},
+                    "path_glob": {"type": "string", "description": "Glob scope for files/docs."},
+                    "max_results": {"type": "integer", "default": 10},
+                    "mode": {
+                        "type": "string",
+                        "enum": ["default", "title"],
+                        "default": "default",
+                    },
+                    "kind": {"type": "string"},
+                    "language": {"type": "string"},
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="get_unit",
+            description="Retrieve one or more units: code symbol source or documentation section content. Prefix ids with code: or doc: to force routing.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string"},
+                    "unit_id": {"type": "string"},
+                    "unit_ids": {"type": "array", "items": {"type": "string"}},
+                    "domain": domain_prop,
+                    "verify": {"type": "boolean", "default": False},
+                    "context_lines": {"type": "integer", "default": 0},
+                    "strip_boilerplate": {"type": "boolean", "default": False},
+                    "compress_code": {"type": "boolean", "default": False},
+                },
+                "required": ["repo"],
+            },
+        ),
+        Tool(
+            name="get_unit_context",
+            description="Retrieve surrounding context for a code symbol or documentation section.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string"},
+                    "unit_id": {"type": "string"},
+                    "domain": domain_prop,
+                    "token_budget": {"type": "integer"},
+                    "include_related": {"type": "boolean", "default": False},
+                    "strip_boilerplate": {"type": "boolean", "default": False},
+                },
+                "required": ["repo", "unit_id"],
+            },
+        ),
+    ]
+
+
 def _raw_catalog_tools() -> list:
     """Return the unfiltered catalog, building it once on demand."""
     global _RAW_CATALOG
@@ -2395,6 +2536,10 @@ def _build_tools_list() -> list[Tool]:
         tools = [t for t in all_tools if t.name in keep]
         _apply_description_overrides(tools)
         return tools
+    if surface in {"reading", "jmri"}:
+        tools = _reading_surface_tools()
+        _apply_description_overrides(tools)
+        return tools
     # Non-counter surfaces: front-door tools stay hidden
     # (still callable via call_tool), only non-front-door tools appear.
     all_tools = [t for t in all_tools if t.name not in _COUNTER_FRONT_DOOR]
@@ -2977,7 +3122,119 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
             except Exception:
                 logger.debug("Progress setup failed", exc_info=True)
 
-        if name == "index_repo":
+        if name == "index_content":
+            from .tools.content_router import index_content
+
+            result = await asyncio.to_thread(
+                functools.partial(
+                    index_content,
+                    path=arguments.get("path"),
+                    url=arguments.get("url"),
+                    domain=arguments.get("domain", "both"),
+                    use_ai_summaries=arguments.get(
+                        "use_ai_summaries", _default_use_ai_summaries()
+                    ),
+                    use_embeddings=arguments.get("use_embeddings", "auto"),
+                    incremental=arguments.get("incremental", True),
+                    paths=arguments.get("paths"),
+                    name=arguments.get("name"),
+                    storage_path=storage_path,
+                )
+            )
+            _result_cache_invalidate()
+        elif name == "list_content":
+            from .tools.content_router import list_content
+
+            result = await asyncio.to_thread(
+                functools.partial(
+                    list_content,
+                    repo=arguments["repo"],
+                    domain=arguments.get("domain", "both"),
+                    path_prefix=arguments.get("path_prefix", ""),
+                    path_glob=arguments.get("path_glob"),
+                    tree=arguments.get("tree", False),
+                    include_summaries=arguments.get("include_summaries", False),
+                    max_files=arguments.get("max_files"),
+                    storage_path=storage_path,
+                )
+            )
+        elif name == "get_outline":
+            from .tools.content_router import get_outline
+
+            result = await asyncio.to_thread(
+                functools.partial(
+                    get_outline,
+                    repo=arguments["repo"],
+                    file_path=arguments["file_path"],
+                    domain=arguments.get("domain", "auto"),
+                    storage_path=storage_path,
+                )
+            )
+        elif name == "get_file":
+            from .tools.content_router import get_file
+
+            result = await asyncio.to_thread(
+                functools.partial(
+                    get_file,
+                    repo=arguments["repo"],
+                    file_path=arguments["file_path"],
+                    domain=arguments.get("domain", "auto"),
+                    start_line=arguments.get("start_line"),
+                    end_line=arguments.get("end_line"),
+                    storage_path=storage_path,
+                )
+            )
+        elif name == "search_units":
+            from .tools.content_router import search_units
+
+            result = await asyncio.to_thread(
+                functools.partial(
+                    search_units,
+                    repo=arguments.get("repo"),
+                    query=arguments["query"],
+                    domain=arguments.get("domain", "both"),
+                    file_path=arguments.get("file_path"),
+                    path_glob=arguments.get("path_glob"),
+                    max_results=arguments.get("max_results", 10),
+                    mode=arguments.get("mode", "default"),
+                    kind=arguments.get("kind"),
+                    language=arguments.get("language"),
+                    storage_path=storage_path,
+                )
+            )
+        elif name == "get_unit":
+            from .tools.content_router import get_unit
+
+            result = await asyncio.to_thread(
+                functools.partial(
+                    get_unit,
+                    repo=arguments["repo"],
+                    unit_id=arguments.get("unit_id"),
+                    unit_ids=arguments.get("unit_ids"),
+                    domain=arguments.get("domain", "auto"),
+                    verify=arguments.get("verify", False),
+                    context_lines=arguments.get("context_lines", 0),
+                    strip_boilerplate=arguments.get("strip_boilerplate", False),
+                    compress_code=arguments.get("compress_code", False),
+                    storage_path=storage_path,
+                )
+            )
+        elif name == "get_unit_context":
+            from .tools.content_router import get_unit_context
+
+            result = await asyncio.to_thread(
+                functools.partial(
+                    get_unit_context,
+                    repo=arguments["repo"],
+                    unit_id=arguments["unit_id"],
+                    domain=arguments.get("domain", "auto"),
+                    token_budget=arguments.get("token_budget"),
+                    include_related=arguments.get("include_related", False),
+                    strip_boilerplate=arguments.get("strip_boilerplate", False),
+                    storage_path=storage_path,
+                )
+            )
+        elif name == "index_repo":
             from .tools.index_repo import index_repo
 
             result = await index_repo(

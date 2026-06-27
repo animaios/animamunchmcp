@@ -15,7 +15,6 @@ import logging
 import math
 import re
 import time
-from collections import defaultdict
 from fnmatch import fnmatch
 from typing import Any, Callable, Optional
 

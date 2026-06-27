@@ -731,6 +731,8 @@ Set it in `config.jsonc` (or the `JCODEMUNCH_TOOL_SURFACE` env var, which wins):
 
 `counter` keeps the always-present controls (`set_tool_tier`, `announce_model`, `jcodemunch_guide`) alongside the front door. Any other value (default `full`) leaves the existing behavior unchanged — the front-door tools stay hidden (still callable), so upgrading changes nothing until you opt in. The two mechanisms compose: under `counter`, `order` / `route` still reach every action regardless of the active `core` / `standard` / `full` tier.
 
+For code+docs sessions, `tool_surface` also accepts `"reading"` (alias `"jmri"`). That mode exposes only seven unified tools: `index_content`, `list_content`, `get_outline`, `get_file`, `search_units`, `get_unit`, and `get_unit_context`. The router resolves code files to jCodeMunch and documentation files to the integrated jDocMunch engine, using index membership first and filename/path heuristics as fallback.
+
 #### `disabled_tools` precedence
 
 `disabled_tools` applies **after** tier filtering. A tool listed in both a tier bundle and `disabled_tools` will not be exposed. The server logs a `WARNING` on startup and `jcodemunch-mcp config --check` prints a `WARN:` row if this happens.
