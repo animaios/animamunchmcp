@@ -384,7 +384,11 @@ def _reading_surface_tools() -> list:
                     },
                     "domain": domain_prop,
                 },
-                "required": ["repo", "file_path"],
+                "required": ["repo"],
+                "anyOf": [
+                    {"required": ["file_path"]},
+                    {"required": ["file_paths"]},
+                ],
             },
         ),
         Tool(
@@ -417,6 +421,10 @@ def _reading_surface_tools() -> list:
                     "file_path": {
                         "type": "string",
                         "description": "Exact file/doc path scope.",
+                    },
+                    "file_pattern": {
+                        "type": "string",
+                        "description": "Code file glob scope.",
                     },
                     "path_glob": {
                         "type": "string",
@@ -506,16 +514,6 @@ def _reading_surface_tools() -> list:
                         "description": "Enable multi-signal fusion (Weighted Reciprocal Rank) across lexical, structural, similarity, and identity channels.",
                         "default": False,
                     },
-                    "order": {
-                        "type": "string",
-                        "enum": ["asc", "desc"],
-                        "default": "desc",
-                    },
-                    "rank_by": {
-                        "type": "string",
-                        "enum": ["importance", "complexity", "churn", "name"],
-                        "default": "importance",
-                    },
                     "fqn": {
                         "type": "string",
                         "description": "PHP fully-qualified class name (e.g. 'App\\Models\\User'). Resolves via PSR-4 and uses the class name as query.",
@@ -574,6 +572,11 @@ def _reading_surface_tools() -> list:
                     "compress_code": {"type": "boolean", "default": False},
                 },
                 "required": ["repo"],
+                "anyOf": [
+                    {"required": ["unit_id"]},
+                    {"required": ["unit_ids"]},
+                    {"required": ["fqn"]},
+                ],
             },
         ),
         Tool(
@@ -608,6 +611,187 @@ def _reading_surface_tools() -> list:
                     "include_related": {"type": "boolean", "default": False},
                 },
                 "required": ["repo", "unit_id"],
+            },
+        ),
+    ]
+
+
+def _legacy_reading_tool_schemas() -> list:
+    """Schemas for removed tool names that remain directly dispatchable."""
+    return [
+        Tool(
+            name="index_repo",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string"},
+                    "use_ai_summaries": {"type": "boolean", "default": True},
+                    "incremental": {"type": "boolean", "default": True},
+                    "extra_ignore_patterns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                },
+                "required": ["url"],
+            },
+        ),
+        Tool(
+            name="index_folder",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "use_ai_summaries": {"type": "boolean", "default": True},
+                    "incremental": {"type": "boolean", "default": True},
+                    "extra_ignore_patterns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "follow_symlinks": {"type": "boolean", "default": False},
+                    "paths": {"type": "array", "items": {"type": "string"}},
+                    "identity_mode": {
+                        "type": "string",
+                        "enum": ["config", "local", "git"],
+                        "default": "config",
+                    },
+                },
+                "required": ["path"],
+            },
+        ),
+        Tool(
+            name="get_file_tree",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string"},
+                    "path_prefix": {"type": "string", "default": ""},
+                    "include_summaries": {"type": "boolean", "default": False},
+                    "max_files": {"type": "integer"},
+                },
+                "required": ["repo"],
+            },
+        ),
+        Tool(
+            name="get_file_outline",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string"},
+                    "file_path": {"type": "string"},
+                    "file": {"type": "string"},
+                    "file_paths": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["repo"],
+                "anyOf": [
+                    {"required": ["file_path"]},
+                    {"required": ["file"]},
+                    {"required": ["file_paths"]},
+                ],
+            },
+        ),
+        Tool(
+            name="get_file_content",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string"},
+                    "file_path": {"type": "string"},
+                    "start_line": {"type": "integer"},
+                    "end_line": {"type": "integer"},
+                },
+                "required": ["repo", "file_path"],
+            },
+        ),
+        Tool(
+            name="search_symbols",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string"},
+                    "query": {"type": "string"},
+                    "kind": {"type": "string", "enum": sorted(VALID_KINDS)},
+                    "file_pattern": {"type": "string"},
+                    "language": {"type": "string"},
+                    "decorator": {"type": "string"},
+                    "max_results": {"type": "integer", "default": 10},
+                    "token_budget": {"type": "integer"},
+                    "detail_level": {
+                        "type": "string",
+                        "enum": ["compact", "standard", "full"],
+                        "default": "standard",
+                    },
+                    "debug": {"type": "boolean", "default": False},
+                    "fuzzy": {"type": "boolean", "default": False},
+                    "fuzzy_threshold": {"type": "number", "default": 0.4},
+                    "max_edit_distance": {"type": "integer", "default": 2},
+                    "sort_by": {
+                        "type": "string",
+                        "enum": ["relevance", "centrality", "combined"],
+                        "default": "relevance",
+                    },
+                    "semantic": {"type": "boolean", "default": False},
+                    "semantic_weight": {"type": "number", "default": 0.5},
+                    "semantic_only": {"type": "boolean", "default": False},
+                    "fusion": {"type": "boolean", "default": False},
+                    "fqn": {"type": "string"},
+                },
+                "required": ["repo", "query"],
+            },
+        ),
+        Tool(
+            name="get_symbol_source",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string"},
+                    "symbol_id": {"type": "string"},
+                    "symbol_ids": {"type": "array", "items": {"type": "string"}},
+                    "verify": {"type": "boolean", "default": False},
+                    "verify_against": {
+                        "type": "string",
+                        "enum": ["cache", "git_sha"],
+                        "default": "cache",
+                    },
+                    "context_lines": {"type": "integer", "default": 0},
+                    "fqn": {"type": "string"},
+                    "source_start_line": {"type": "integer"},
+                    "source_end_line": {"type": "integer"},
+                    "max_source_lines": {"type": "integer"},
+                    "max_source_bytes": {"type": "integer"},
+                    "max_total_source_bytes": {"type": "integer"},
+                },
+                "required": ["repo"],
+            },
+        ),
+        Tool(
+            name="get_context_bundle",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string"},
+                    "symbol_id": {"type": "string"},
+                    "symbol_ids": {"type": "array", "items": {"type": "string"}},
+                    "include_callers": {"type": "boolean", "default": False},
+                    "output_format": {
+                        "type": "string",
+                        "enum": ["json", "markdown"],
+                        "default": "json",
+                    },
+                    "token_budget": {"type": "integer"},
+                    "budget_strategy": {
+                        "type": "string",
+                        "enum": ["most_relevant", "core_first", "compact"],
+                        "default": "most_relevant",
+                    },
+                    "include_budget_report": {"type": "boolean", "default": False},
+                    "fqn": {"type": "string"},
+                },
+                "required": ["repo"],
+                "anyOf": [
+                    {"required": ["symbol_id"]},
+                    {"required": ["symbol_ids"]},
+                    {"required": ["fqn"]},
+                ],
             },
         ),
     ]
@@ -1047,20 +1231,15 @@ async def _ensure_tool_schemas() -> dict[str, dict]:
     if _TOOL_SCHEMAS is None:
         tools = await list_tools()
         _TOOL_SCHEMAS = {t.name: t.inputSchema for t in tools if t.inputSchema}
-        # Add backward-compat aliases: old name → unified tool schema
-        _ALIAS_TO_UNIFIED = {
-            "index_repo": "index_content",
-            "index_folder": "index_content",
-            "get_file_tree": "list_content",
-            "get_file_outline": "get_outline",
-            "get_file_content": "get_file",
-            "search_symbols": "search_units",
-            "get_symbol_source": "get_unit",
-            "get_context_bundle": "get_unit_context",
-        }
-        for alias, unified in _ALIAS_TO_UNIFIED.items():
-            if alias not in _TOOL_SCHEMAS and unified in _TOOL_SCHEMAS:
-                _TOOL_SCHEMAS[alias] = _TOOL_SCHEMAS[unified]
+        for tool in _raw_catalog_tools():
+            if tool.inputSchema:
+                _TOOL_SCHEMAS.setdefault(tool.name, tool.inputSchema)
+        # Backward-compat aliases are no longer listed, but callers may still
+        # dispatch them directly. Validate/coerce them with their original
+        # schemas so legacy arg names like symbol_id/file_paths keep working.
+        for tool in _legacy_reading_tool_schemas():
+            if tool.inputSchema:
+                _TOOL_SCHEMAS.setdefault(tool.name, tool.inputSchema)
     return _TOOL_SCHEMAS
 
 
@@ -2314,6 +2493,13 @@ def _build_tools_list() -> list[Tool]:
     ]
     # --- The Counter: register the front door ------
     all_tools = all_tools + _counter_front_door_tools()
+    # Capture the raw catalog for menu/order before any surface-specific return.
+    # This catalog intentionally excludes the front door and includes the
+    # unified reading tools that replace the removed code-only definitions.
+    raw_catalog = [t for t in all_tools if t.name not in _COUNTER_FRONT_DOOR]
+    raw_catalog = raw_catalog + _reading_surface_tools()
+    global _RAW_CATALOG
+    _RAW_CATALOG = list(raw_catalog)
     surface = _effective_surface()
     if surface == "counter":
         # Collapse to the front door. Surface choice bypasses disabled_tools.
@@ -2327,12 +2513,7 @@ def _build_tools_list() -> list[Tool]:
         return tools
     # Non-counter surfaces: front-door tools stay hidden
     # (still callable via call_tool), only non-front-door tools appear.
-    all_tools = [t for t in all_tools if t.name not in _COUNTER_FRONT_DOOR]
-    # Merge unified reading tools into the default surface
-    all_tools = all_tools + _reading_surface_tools()
-    # Capture the raw catalog for menu/order (after unified tools are added)
-    global _RAW_CATALOG
-    _RAW_CATALOG = list(all_tools)
+    all_tools = list(raw_catalog)
     # Filter out disabled tools (simple set difference).
     disabled = config_module.get("disabled_tools", [])
     if disabled:
@@ -2894,7 +3075,13 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
 
         # Progress notifications for long-running tools
         _progress_cb = None
-        if name in ("index_repo", "index_folder", "index_file", "embed_repo"):
+        if name in (
+            "index_content",
+            "index_repo",
+            "index_folder",
+            "index_file",
+            "embed_repo",
+        ):
             try:
                 from .progress import ProgressReporter, make_progress_notify
 
@@ -2903,6 +3090,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     _label = {
                         "index_repo": "Index",
                         "index_folder": "Index",
+                        "index_content": "Index",
                         "index_file": "Index",
                         "embed_repo": "Embed",
                     }[name]
@@ -2928,6 +3116,10 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     incremental=arguments.get("incremental", True),
                     paths=arguments.get("paths"),
                     name=arguments.get("name"),
+                    extra_ignore_patterns=arguments.get("extra_ignore_patterns"),
+                    follow_symlinks=arguments.get("follow_symlinks", False),
+                    identity_mode=arguments.get("identity_mode", "config"),
+                    progress_cb=_progress_cb,
                     storage_path=storage_path,
                     doc_storage_path=storage_path,
                 )
@@ -2957,8 +3149,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                 functools.partial(
                     get_outline,
                     repo=arguments["repo"],
-                    file_path=arguments["file_path"],
+                    file_path=arguments.get("file_path", ""),
                     domain=arguments.get("domain", "auto"),
+                    file_paths=arguments.get("file_paths"),
                     storage_path=storage_path,
                     doc_storage_path=storage_path,
                 )
@@ -2993,6 +3186,20 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     mode=arguments.get("mode", "default"),
                     kind=arguments.get("kind"),
                     language=arguments.get("language"),
+                    file_pattern=arguments.get("file_pattern"),
+                    decorator=arguments.get("decorator"),
+                    token_budget=arguments.get("token_budget"),
+                    detail_level=arguments.get("detail_level", "standard"),
+                    debug=arguments.get("debug", False),
+                    fuzzy=arguments.get("fuzzy", False),
+                    fuzzy_threshold=arguments.get("fuzzy_threshold", 0.4),
+                    max_edit_distance=arguments.get("max_edit_distance", 2),
+                    sort_by=arguments.get("sort_by", "relevance"),
+                    semantic=arguments.get("semantic", False),
+                    semantic_weight=arguments.get("semantic_weight", 0.5),
+                    semantic_only=arguments.get("semantic_only", False),
+                    fusion=arguments.get("fusion", False),
+                    fqn=arguments.get("fqn"),
                     storage_path=storage_path,
                     doc_storage_path=storage_path,
                 )
@@ -3008,7 +3215,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     unit_ids=arguments.get("unit_ids"),
                     domain=arguments.get("domain", "auto"),
                     verify=arguments.get("verify", False),
+                    verify_against=arguments.get("verify_against", "cache"),
                     context_lines=arguments.get("context_lines", 0),
+                    fqn=arguments.get("fqn"),
+                    source_start_line=arguments.get("source_start_line"),
+                    source_end_line=arguments.get("source_end_line"),
+                    max_source_lines=arguments.get("max_source_lines"),
+                    max_source_bytes=arguments.get("max_source_bytes"),
+                    max_total_source_bytes=arguments.get("max_total_source_bytes"),
                     strip_boilerplate=arguments.get("strip_boilerplate", False),
                     compress_code=arguments.get("compress_code", False),
                     storage_path=storage_path,
@@ -3025,6 +3239,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     unit_id=arguments["unit_id"],
                     domain=arguments.get("domain", "auto"),
                     token_budget=arguments.get("token_budget"),
+                    include_callers=arguments.get("include_callers", False),
+                    output_format=arguments.get("output_format", "json"),
+                    budget_strategy=arguments.get("budget_strategy", "most_relevant"),
+                    include_budget_report=arguments.get("include_budget_report", False),
+                    fqn=arguments.get("fqn"),
                     include_related=arguments.get("include_related", False),
                     strip_boilerplate=arguments.get("strip_boilerplate", False),
                     storage_path=storage_path,
@@ -3169,7 +3388,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                 functools.partial(
                     get_outline,
                     repo=arguments["repo"],
-                    file_path=arguments.get("file_path") or arguments.get("file"),
+                    file_path=arguments.get("file_path")
+                    or arguments.get("file")
+                    or "",
                     file_paths=arguments.get("file_paths"),
                     domain="code",
                     storage_path=storage_path,
@@ -3305,15 +3526,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                 )
             )
         elif name == "get_context_bundle":
-            from .tools.content_router import get_unit_context
+            from .tools.get_context_bundle import get_context_bundle
 
             result = await asyncio.to_thread(
                 functools.partial(
-                    get_unit_context,
+                    get_context_bundle,
                     repo=arguments["repo"],
-                    unit_id=arguments.get("symbol_id")
-                    or (arguments.get("symbol_ids") or [None])[0],
-                    domain="code",
+                    symbol_id=arguments.get("symbol_id"),
+                    symbol_ids=arguments.get("symbol_ids"),
                     token_budget=arguments.get("token_budget"),
                     include_callers=arguments.get("include_callers", False),
                     output_format=arguments.get("output_format", "json"),
@@ -3321,7 +3541,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                     include_budget_report=arguments.get("include_budget_report", False),
                     fqn=arguments.get("fqn"),
                     storage_path=storage_path,
-                    doc_storage_path=storage_path,
                 )
             )
             # Unwrap the single-domain wrapper so old callers see the native shape

@@ -340,7 +340,7 @@ def shape_execute_args(action: str, repo: Optional[str], task: str) -> Optional[
     qarg = _QUERY_ARG.get(action)
     if qarg is None:
         return None
-    if action == "get_file_outline":
+    if action == "get_outline":
         # Needs a concrete file path, which a free-form task rarely provides.
         return None
     if not repo:

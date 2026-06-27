@@ -80,6 +80,15 @@ def test_counter_surface_collapses_to_front_door():
     assert "search_units" not in names
 
 
+def test_counter_surface_menu_still_sees_full_catalog():
+    _surface("counter")
+    out = _call("menu", {"limit": 5})
+    assert out["tool"] == "menu"
+    assert out["total_actions"] >= 31
+    assert out["actions"]
+    assert not any(a["action"] in counter.FRONT_DOOR for a in out["actions"])
+
+
 # --- 3. order: dispatch + charter gate ------------------------------------- #
 
 
@@ -180,6 +189,21 @@ def test_route_execute_blocks_state_changing_top_pick():
     # search_text is read-only and repo-scoped -> route should have executed it
     # (or returned a clean execute_error if args couldn't be shaped); never a crash.
     assert out["tool"] == "route"
+
+
+def test_route_execute_does_not_fabricate_outline_file_path():
+    out = _call(
+        "route",
+        {
+            "task": "show the outline of the main service file",
+            "repo": "x",
+            "execute": True,
+        },
+    )
+    assert out["tool"] == "route"
+    assert out["recommended"][0]["action"] == "get_outline"
+    assert out["executed"] is False
+    assert "Cannot auto-build args" in out["execute_error"]
 
 
 def test_route_classify_intent_pure():
