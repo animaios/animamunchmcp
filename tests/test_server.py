@@ -29,7 +29,7 @@ async def test_server_lists_all_tools():
     try:
         tools = await list_tools()
 
-        assert len(tools) == 39
+        assert len(tools) == 46  # 39 code + 7 unified reading tools
 
         names = {t.name for t in tools}
         expected = {
@@ -72,6 +72,14 @@ async def test_server_lists_all_tools():
             "get_symbol_complexity",
             "get_file_tree",
             "index_file",
+            # Unified reading tools (jDocMunch surface)
+            "index_content",
+            "list_content",
+            "get_outline",
+            "get_file",
+            "search_units",
+            "get_unit",
+            "get_unit_context",
         }
         assert names == expected
         assert "test_summarizer" not in names  # disabled by default in DEFAULTS
@@ -167,7 +175,6 @@ async def test_call_tool_defaults_index_repo_incremental_true():
         storage_path=None,
         incremental=True,
         extra_ignore_patterns=None,
-        progress_cb=None,
     )
 
 

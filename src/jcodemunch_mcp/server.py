@@ -3285,37 +3285,50 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                 )
             )
         elif name == "index_repo":
-            from .tools.index_repo import index_repo
+            from .tools.content_router import index_content
 
-            result = await index_repo(
-                url=arguments["url"],
-                use_ai_summaries=arguments.get(
-                    "use_ai_summaries", _default_use_ai_summaries()
-                ),
-                storage_path=storage_path,
-                incremental=arguments.get("incremental", True),
-                extra_ignore_patterns=arguments.get("extra_ignore_patterns"),
-                progress_cb=_progress_cb,
+            result = await asyncio.to_thread(
+                functools.partial(
+                    index_content,
+                    url=arguments["url"],
+                    domain="code",
+                    use_ai_summaries=arguments.get(
+                        "use_ai_summaries", _default_use_ai_summaries()
+                    ),
+                    incremental=arguments.get("incremental", True),
+                    extra_ignore_patterns=arguments.get("extra_ignore_patterns"),
+                    progress_cb=_progress_cb,
+                    storage_path=storage_path,
+                    doc_storage_path=storage_path,
+                )
             )
+            # Unwrap the single-domain wrapper so old callers see the native shape
+            if isinstance(result, dict) and result.get("results"):
+                result = result["results"][0].get("result", result)
             _result_cache_invalidate()
         elif name == "index_folder":
-            from .tools.index_folder import index_folder
+            from .tools.content_router import index_content
 
             _ai = arguments.get("use_ai_summaries", _default_use_ai_summaries())
             result = await asyncio.to_thread(
                 functools.partial(
-                    index_folder,
+                    index_content,
                     path=arguments["path"],
+                    domain="code",
                     use_ai_summaries=_ai,
-                    storage_path=storage_path,
+                    incremental=arguments.get("incremental", True),
                     extra_ignore_patterns=arguments.get("extra_ignore_patterns"),
                     follow_symlinks=arguments.get("follow_symlinks", False),
-                    incremental=arguments.get("incremental", True),
                     paths=arguments.get("paths"),
                     identity_mode=arguments.get("identity_mode", "config"),
                     progress_cb=_progress_cb,
+                    storage_path=storage_path,
+                    doc_storage_path=storage_path,
                 )
             )
+            # Unwrap the single-domain wrapper so old callers see the native shape
+            if isinstance(result, dict) and result.get("results"):
+                result = result["results"][0].get("result", result)
             _result_cache_invalidate()
         elif name == "summarize_repo":
             from .tools.summarize_repo import summarize_repo
@@ -3385,66 +3398,86 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                 )
             )
         elif name == "get_file_tree":
-            from .tools.get_file_tree import get_file_tree
+            from .tools.content_router import list_content
 
             result = await asyncio.to_thread(
                 functools.partial(
-                    get_file_tree,
+                    list_content,
                     repo=arguments["repo"],
+                    domain="code",
                     path_prefix=arguments.get("path_prefix", ""),
                     include_summaries=arguments.get("include_summaries", False),
                     max_files=arguments.get("max_files"),
                     storage_path=storage_path,
+                    doc_storage_path=storage_path,
                 )
             )
+            # Unwrap the single-domain wrapper so old callers see the native shape
+            if isinstance(result, dict) and result.get("results"):
+                result = result["results"][0].get("result", result)
         elif name == "get_file_outline":
-            from .tools.get_file_outline import get_file_outline
+            from .tools.content_router import get_outline
 
             result = await asyncio.to_thread(
                 functools.partial(
-                    get_file_outline,
+                    get_outline,
                     repo=arguments["repo"],
                     file_path=arguments.get("file_path") or arguments.get("file"),
                     file_paths=arguments.get("file_paths"),
+                    domain="code",
                     storage_path=storage_path,
+                    doc_storage_path=storage_path,
                 )
             )
+            # Unwrap the single-domain wrapper so old callers see the native shape
+            if isinstance(result, dict) and result.get("results"):
+                result = result["results"][0].get("result", result)
         elif name == "get_file_content":
-            from .tools.get_file_content import get_file_content
+            from .tools.content_router import get_file
 
             result = await asyncio.to_thread(
                 functools.partial(
-                    get_file_content,
+                    get_file,
                     repo=arguments["repo"],
                     file_path=arguments["file_path"],
+                    domain="code",
                     start_line=arguments.get("start_line"),
                     end_line=arguments.get("end_line"),
                     storage_path=storage_path,
+                    doc_storage_path=storage_path,
                 )
             )
+            # Unwrap the single-domain wrapper so old callers see the native shape
+            if isinstance(result, dict) and result.get("results"):
+                result = result["results"][0].get("result", result)
         elif name == "get_symbol_source":
-            from .tools.get_symbol import get_symbol_source
+            from .tools.content_router import get_unit
 
             result = await asyncio.to_thread(
                 functools.partial(
-                    get_symbol_source,
+                    get_unit,
                     repo=arguments["repo"],
-                    symbol_id=arguments.get("symbol_id"),
-                    symbol_ids=arguments.get("symbol_ids"),
+                    unit_id=arguments.get("symbol_id"),
+                    unit_ids=arguments.get("symbol_ids"),
+                    domain="code",
                     verify=arguments.get("verify", False),
                     verify_against=arguments.get("verify_against", "cache"),
                     context_lines=arguments.get("context_lines", 0),
-                    storage_path=storage_path,
                     fqn=arguments.get("fqn"),
                     source_start_line=arguments.get("source_start_line"),
                     source_end_line=arguments.get("source_end_line"),
                     max_source_lines=arguments.get("max_source_lines"),
                     max_source_bytes=arguments.get("max_source_bytes"),
                     max_total_source_bytes=arguments.get("max_total_source_bytes"),
+                    storage_path=storage_path,
+                    doc_storage_path=storage_path,
                 )
             )
+            # Unwrap the single-domain wrapper so old callers see the native shape
+            if isinstance(result, dict) and result.get("results"):
+                result = result["results"][0].get("result", result)
         elif name == "search_symbols":
-            from .tools.search_symbols import search_symbols
+            from .tools.content_router import search_units
 
             kind_filter = arguments.get("kind")
             if kind_filter and kind_filter not in VALID_KINDS:
@@ -3454,9 +3487,10 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
             else:
                 result = await asyncio.to_thread(
                     functools.partial(
-                        search_symbols,
-                        repo=arguments["repo"],
+                        search_units,
                         query=arguments["query"],
+                        repo=arguments["repo"],
+                        domain="code",
                         kind=kind_filter,
                         file_pattern=arguments.get("file_pattern"),
                         language=arguments.get("language"),
@@ -3473,10 +3507,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                         semantic_weight=arguments.get("semantic_weight", 0.5),
                         semantic_only=arguments.get("semantic_only", False),
                         fusion=arguments.get("fusion", False),
-                        storage_path=storage_path,
                         fqn=arguments.get("fqn"),
+                        storage_path=storage_path,
+                        doc_storage_path=storage_path,
                     )
                 )
+            # Unwrap the single-domain wrapper so old callers see the native shape
+            if isinstance(result, dict) and result.get("results"):
+                result = result["results"][0].get("result", result)
         elif name == "search_text":
             from .tools.search_text import search_text
 
@@ -3520,23 +3558,28 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                 )
             )
         elif name == "get_context_bundle":
-            from .tools.get_context_bundle import get_context_bundle
+            from .tools.content_router import get_unit_context
 
             result = await asyncio.to_thread(
                 functools.partial(
-                    get_context_bundle,
+                    get_unit_context,
                     repo=arguments["repo"],
-                    symbol_id=arguments.get("symbol_id"),
-                    symbol_ids=arguments.get("symbol_ids"),
+                    unit_id=arguments.get("symbol_id")
+                    or (arguments.get("symbol_ids") or [None])[0],
+                    domain="code",
+                    token_budget=arguments.get("token_budget"),
                     include_callers=arguments.get("include_callers", False),
                     output_format=arguments.get("output_format", "json"),
-                    token_budget=arguments.get("token_budget"),
                     budget_strategy=arguments.get("budget_strategy", "most_relevant"),
                     include_budget_report=arguments.get("include_budget_report", False),
-                    storage_path=storage_path,
                     fqn=arguments.get("fqn"),
+                    storage_path=storage_path,
+                    doc_storage_path=storage_path,
                 )
             )
+            # Unwrap the single-domain wrapper so old callers see the native shape
+            if isinstance(result, dict) and result.get("results"):
+                result = result["results"][0].get("result", result)
         elif name == "assemble_task_context":
             from .tools.assemble_task_context import assemble_task_context
 

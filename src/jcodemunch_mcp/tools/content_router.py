@@ -268,6 +268,10 @@ def index_content(
     name: Optional[str] = None,
     storage_path: Optional[str] = None,
     doc_storage_path: Optional[str] = None,
+    extra_ignore_patterns: Optional[list] = None,
+    follow_symlinks: bool = False,
+    identity_mode: str = "config",
+    progress_cb=None,
 ) -> dict:
     """Index code, docs, or both from a local path or GitHub URL."""
     requested = _normalize_domain(domain)
@@ -289,17 +293,26 @@ def index_content(
                     path=path,
                     use_ai_summaries=use_ai_summaries,
                     storage_path=storage_path,
+                    extra_ignore_patterns=extra_ignore_patterns,
+                    follow_symlinks=follow_symlinks,
                     incremental=incremental,
                     paths=paths,
+                    identity_mode=identity_mode,
+                    progress_cb=progress_cb,
                 )
             else:
+                import asyncio as _asyncio
+
                 from .index_repo import index_repo
 
-                result = index_repo(
-                    url=url or "",
-                    use_ai_summaries=use_ai_summaries,
-                    storage_path=storage_path,
-                    incremental=incremental,
+                result = _asyncio.run(
+                    index_repo(
+                        url=url or "",
+                        use_ai_summaries=use_ai_summaries,
+                        storage_path=storage_path,
+                        incremental=incremental,
+                        extra_ignore_patterns=extra_ignore_patterns,
+                    )
                 )
             if not doc_name and path and isinstance(result, dict):
                 repo_id = result.get("repo", "")
@@ -320,7 +333,9 @@ def index_content(
                     paths=paths,
                 )
             else:
-                from jcodemunch_mcp._jdocmunch.tools.index_repo import index_repo as doc_index_repo
+                from jcodemunch_mcp._jdocmunch.tools.index_repo import (
+                    index_repo as doc_index_repo,
+                )
 
                 result = doc_index_repo(
                     url=url or "",
@@ -384,10 +399,11 @@ def list_content(
 
 def get_outline(
     repo: str,
-    file_path: str,
+    file_path: str = "",
     domain: str = "auto",
     storage_path: Optional[str] = None,
     doc_storage_path: Optional[str] = None,
+    file_paths: Optional[list[str]] = None,
 ) -> dict:
     """Return a code symbol outline or document section outline for a file."""
     doc_store = _doc_storage_path(doc_storage_path)
@@ -401,11 +417,14 @@ def get_outline(
             result = get_file_outline(
                 repo=code_repo,
                 file_path=file_path,
+                file_paths=file_paths,
                 storage_path=storage_path,
             )
             results.append(_wrap("code", "symbol", result))
         else:
-            from jcodemunch_mcp._jdocmunch.tools.get_document_outline import get_document_outline
+            from jcodemunch_mcp._jdocmunch.tools.get_document_outline import (
+                get_document_outline,
+            )
 
             doc_repo = _resolve_doc_repo_for_call(repo, storage_path, doc_store)
             result = get_document_outline(
@@ -522,6 +541,20 @@ def search_units(
     language: Optional[str] = None,
     storage_path: Optional[str] = None,
     doc_storage_path: Optional[str] = None,
+    file_pattern: Optional[str] = None,
+    decorator: Optional[str] = None,
+    token_budget: Optional[int] = None,
+    detail_level: str = "standard",
+    debug: bool = False,
+    fuzzy: bool = False,
+    fuzzy_threshold: float = 0.4,
+    max_edit_distance: int = 2,
+    sort_by: str = "relevance",
+    semantic: bool = False,
+    semantic_weight: float = 0.5,
+    semantic_only: bool = False,
+    fusion: bool = False,
+    fqn: Optional[str] = None,
 ) -> dict:
     """Search symbols and/or documentation sections."""
     requested = _normalize_domain(domain)
@@ -544,10 +577,23 @@ def search_units(
                 repo=code_repo,
                 query=query,
                 kind=kind,
-                file_pattern=file_path or path_glob,
+                file_pattern=file_pattern or file_path or path_glob,
                 language=language,
+                decorator=decorator,
                 max_results=max_results,
+                token_budget=token_budget,
+                detail_level=detail_level,
+                debug=debug,
+                fuzzy=fuzzy,
+                fuzzy_threshold=fuzzy_threshold,
+                max_edit_distance=max_edit_distance,
+                sort_by=sort_by,
+                semantic=semantic,
+                semantic_weight=semantic_weight,
+                semantic_only=semantic_only,
+                fusion=fusion,
                 storage_path=storage_path,
+                fqn=fqn,
             )
             results.append(_wrap("code", "symbol", result))
         else:
@@ -571,7 +617,9 @@ def search_units(
                     storage_path=doc_store,
                 )
             else:
-                from jcodemunch_mcp._jdocmunch.tools.search_sections import search_sections
+                from jcodemunch_mcp._jdocmunch.tools.search_sections import (
+                    search_sections,
+                )
 
                 doc_repo = (
                     _resolve_doc_repo_for_call(repo, storage_path, doc_store)
@@ -601,6 +649,13 @@ def get_unit(
     compress_code: bool = False,
     storage_path: Optional[str] = None,
     doc_storage_path: Optional[str] = None,
+    verify_against: str = "cache",
+    fqn: Optional[str] = None,
+    source_start_line: Optional[int] = None,
+    source_end_line: Optional[int] = None,
+    max_source_lines: Optional[int] = None,
+    max_source_bytes: Optional[int] = None,
+    max_total_source_bytes: Optional[int] = None,
 ) -> dict:
     """Retrieve source for a code symbol or content for a doc section."""
     if not unit_id and not unit_ids:
@@ -624,8 +679,15 @@ def get_unit(
             symbol_id=code_ids[0] if len(code_ids) == 1 else None,
             symbol_ids=code_ids if len(code_ids) > 1 else None,
             verify=verify,
+            verify_against=verify_against,
             context_lines=context_lines,
             storage_path=storage_path,
+            fqn=fqn,
+            source_start_line=source_start_line,
+            source_end_line=source_end_line,
+            max_source_lines=max_source_lines,
+            max_source_bytes=max_source_bytes,
+            max_total_source_bytes=max_total_source_bytes,
         )
         results.append(_wrap("code", "symbol", result))
     if by_domain["docs"]:
@@ -666,6 +728,11 @@ def get_unit_context(
     strip_boilerplate: bool = False,
     storage_path: Optional[str] = None,
     doc_storage_path: Optional[str] = None,
+    include_callers: bool = False,
+    output_format: str = "json",
+    budget_strategy: str = "most_relevant",
+    include_budget_report: bool = False,
+    fqn: Optional[str] = None,
 ) -> dict:
     """Retrieve surrounding context for a code symbol or doc section."""
     doc_store = _doc_storage_path(doc_storage_path)
@@ -680,11 +747,18 @@ def get_unit_context(
                 repo=code_repo,
                 symbol_id=bare,
                 token_budget=token_budget,
+                include_callers=include_callers,
+                output_format=output_format,
+                budget_strategy=budget_strategy,
+                include_budget_report=include_budget_report,
                 storage_path=storage_path,
+                fqn=fqn,
             )
             results.append(_wrap("code", "symbol", result))
         else:
-            from jcodemunch_mcp._jdocmunch.tools.get_section_context import get_section_context
+            from jcodemunch_mcp._jdocmunch.tools.get_section_context import (
+                get_section_context,
+            )
 
             doc_repo = _resolve_doc_repo_for_call(repo, storage_path, doc_store)
             result = get_section_context(
