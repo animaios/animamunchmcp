@@ -44,8 +44,7 @@ FRONT_DOOR: frozenset[str] = frozenset({"order", "menu", "route"})
 # dispatching one, so the front door reads as read-only by default.
 STATE_CHANGING_ACTIONS: frozenset[str] = frozenset(
     {
-        "index_repo",
-        "index_folder",
+        "index_content",
         "index_file",
         "register_edit",
         "embed_repo",
@@ -263,7 +262,7 @@ _INTENT_RULES: list[tuple[re.Pattern, str, str]] = [
         re.compile(
             r"\boutline\b|\bstructure of\b|\bwhat'?s in .*\bfile\b|\bsymbols in\b", re.I
         ),
-        "get_file_outline",
+        "get_outline",
         "List the symbols/structure of a file.",
     ),
     (
@@ -300,18 +299,18 @@ _INTENT_RULES: list[tuple[re.Pattern, str, str]] = [
         re.compile(
             r"\b(find|locate|where is|look up|search for|definition of)\b", re.I
         ),
-        "search_symbols",
-        "Find a symbol by name.",
+        "search_units",
+        "Find a symbol or documentation section by name.",
     ),
 ]
 
 # Repo-scoped actions whose primary query arg is named differently. Used by
 # route(execute=true) to shape args from (repo, task).
 _QUERY_ARG: dict[str, str] = {
-    "search_symbols": "query",
+    "search_units": "query",
     "search_text": "query",
     "assemble_task_context": "task",
-    "get_file_outline": "file_path",
+    "get_outline": "file_path",
 }
 
 

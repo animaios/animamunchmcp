@@ -59,20 +59,19 @@ _watcher_manager: Optional["WatcherManager"] = None
 # `claude-md --generate` to detect CLAUDE.md / hook-script drift.
 _CANONICAL_TOOL_NAMES: tuple[str, ...] = (
     # Indexing
-    "index_repo",
-    "index_folder",
+    "index_content",  # replaces index_repo + index_folder
     "summarize_repo",
     "index_file",
     # Discovery
     "list_repos",
     "resolve_repo",
-    "get_file_tree",
-    "get_file_outline",
+    "list_content",  # replaces get_file_tree
+    "get_outline",  # replaces get_file_outline
     # Search & Retrieval
-    "search_symbols",
-    "get_symbol_source",
-    "get_context_bundle",
-    "get_file_content",
+    "search_units",  # replaces search_symbols
+    "get_unit",  # replaces get_symbol_source
+    "get_unit_context",  # replaces get_context_bundle
+    "get_file",  # replaces get_file_content
     "search_text",
     "search_columns",
     "assemble_task_context",
@@ -106,13 +105,6 @@ _CANONICAL_TOOL_NAMES: tuple[str, ...] = (
     # Agent stand-up briefing
     # Composite retrieval
     # Unified Reading (code + docs)
-    "index_content",
-    "list_content",
-    "get_outline",
-    "get_file",
-    "search_units",
-    "get_unit",
-    "get_unit_context",
     # Runtime trace ingest + analytics
     "import_runtime_signal",
     "find_hot_paths",
@@ -124,18 +116,18 @@ _CANONICAL_TOOL_NAMES: tuple[str, ...] = (
 # meta-test fails listing the gap. Keeps a new tool from drifting across the
 # registration surfaces (the recurring "added the tool in 4 of 5 places" trap).
 _SNIPPET_TOOL_CATEGORIES: list[tuple[str, list[str]]] = [
-    ("Indexing", ["index_repo", "index_folder", "summarize_repo", "index_file"]),
+    ("Indexing", ["index_content", "summarize_repo", "index_file"]),
     (
         "Discovery",
-        ["list_repos", "resolve_repo", "get_file_tree", "get_file_outline"],
+        ["list_repos", "resolve_repo", "list_content", "get_outline"],
     ),
     (
         "Search & Retrieval",
         [
-            "search_symbols",
-            "get_symbol_source",
-            "get_context_bundle",
-            "get_file_content",
+            "search_units",
+            "get_unit",
+            "get_unit_context",
+            "get_file",
             "search_text",
             "search_columns",
             "assemble_task_context",
@@ -178,26 +170,8 @@ _SNIPPET_TOOL_CATEGORIES: list[tuple[str, list[str]]] = [
         ],
     ),
     ("Diffs & Embeddings", ["embed_repo"]),
-    (
-        "Session",
-        ["register_edit"],
-    ),
-    (
-        "Unified Reading",
-        [
-            "index_content",
-            "list_content",
-            "get_outline",
-            "get_file",
-            "search_units",
-            "get_unit",
-            "get_unit_context",
-        ],
-    ),
-    (
-        "Runtime Trace Ingest & Analytics",
-        ["import_runtime_signal", "find_hot_paths"],
-    ),
+    ("Session", ["register_edit"]),
+    ("Runtime Trace Ingest & Analytics", ["import_runtime_signal", "find_hot_paths"]),
 ]
 
 
@@ -353,6 +327,22 @@ def _reading_surface_tools() -> list:
                         "type": "string",
                         "description": "Optional docs storage name for jDocMunch local/GitHub indexes.",
                     },
+                    "extra_ignore_patterns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Additional gitignore-style patterns to exclude from indexing.",
+                    },
+                    "follow_symlinks": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Include symlinked files. Symlinked directories are never followed.",
+                    },
+                    "identity_mode": {
+                        "type": "string",
+                        "enum": ["config", "local", "git"],
+                        "description": "Repo-identity strategy. config (default): respect existing index. local: path-keyed. git: git-root-keyed (monorepo subdir merging).",
+                        "default": "config",
+                    },
                 },
             },
         ),
@@ -387,6 +377,11 @@ def _reading_surface_tools() -> list:
                 "properties": {
                     "repo": {"type": "string"},
                     "file_path": {"type": "string"},
+                    "file_paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of file paths to query in batch mode. Returns a grouped results array.",
+                    },
                     "domain": domain_prop,
                 },
                 "required": ["repo", "file_path"],
@@ -433,8 +428,98 @@ def _reading_surface_tools() -> list:
                         "enum": ["default", "title"],
                         "default": "default",
                     },
-                    "kind": {"type": "string"},
-                    "language": {"type": "string"},
+                    "kind": {
+                        "type": "string",
+                        "description": "Optional filter by symbol kind",
+                        "enum": [
+                            "function",
+                            "class",
+                            "method",
+                            "constant",
+                            "type",
+                            "template",
+                            "import",
+                        ],
+                    },
+                    "language": {
+                        "type": "string",
+                        "description": "Optional filter by language",
+                        "enum": _build_language_enum(),
+                    },
+                    "decorator": {
+                        "type": "string",
+                        "description": "Optional filter: only return symbols with this decorator (case-insensitive substring match, e.g. 'route', 'property', 'Deprecated')",
+                    },
+                    "token_budget": {
+                        "type": "integer",
+                        "description": "Token budget cap. When set, results are sorted by score and greedily packed until the budget is exhausted.",
+                    },
+                    "detail_level": {
+                        "type": "string",
+                        "description": "Controls result verbosity. 'compact' returns id/name/kind/file/line only. 'standard' returns signatures and summaries (default). 'full' inlines source code, docstring, and end_line.",
+                        "enum": ["compact", "standard", "full"],
+                        "default": "standard",
+                    },
+                    "debug": {
+                        "type": "boolean",
+                        "description": "When true, each result includes a score_breakdown showing per-field scoring contributions.",
+                        "default": False,
+                    },
+                    "fuzzy": {
+                        "type": "boolean",
+                        "description": "Enable fuzzy matching. When true, uses trigram overlap + Levenshtein distance as fallback when BM25 scores are low.",
+                        "default": False,
+                    },
+                    "fuzzy_threshold": {
+                        "type": "number",
+                        "description": "Minimum Jaccard trigram similarity (0.0–1.0) for fuzzy candidates.",
+                        "default": 0.4,
+                    },
+                    "max_edit_distance": {
+                        "type": "integer",
+                        "description": "Maximum Levenshtein distance for direct name matching (catches typos).",
+                        "default": 2,
+                    },
+                    "sort_by": {
+                        "type": "string",
+                        "enum": ["relevance", "centrality", "combined"],
+                        "description": "Ranking strategy. 'relevance' (default) = BM25 text match. 'centrality' = filter by query, rank by PageRank. 'combined' = BM25 + PageRank weighted.",
+                        "default": "relevance",
+                    },
+                    "semantic": {
+                        "type": "boolean",
+                        "description": "Enable semantic (embedding-based) search. Requires an embedding provider.",
+                        "default": False,
+                    },
+                    "semantic_weight": {
+                        "type": "number",
+                        "description": "Weight for semantic score in hybrid BM25+embedding ranking (0.0–1.0).",
+                        "default": 0.5,
+                    },
+                    "semantic_only": {
+                        "type": "boolean",
+                        "description": "Skip BM25 entirely and rank solely by embedding cosine similarity.",
+                        "default": False,
+                    },
+                    "fusion": {
+                        "type": "boolean",
+                        "description": "Enable multi-signal fusion (Weighted Reciprocal Rank) across lexical, structural, similarity, and identity channels.",
+                        "default": False,
+                    },
+                    "order": {
+                        "type": "string",
+                        "enum": ["asc", "desc"],
+                        "default": "desc",
+                    },
+                    "rank_by": {
+                        "type": "string",
+                        "enum": ["importance", "complexity", "churn", "name"],
+                        "default": "importance",
+                    },
+                    "fqn": {
+                        "type": "string",
+                        "description": "PHP fully-qualified class name (e.g. 'App\\Models\\User'). Resolves via PSR-4 and uses the class name as query.",
+                    },
                 },
                 "required": ["query"],
             },
@@ -450,7 +535,41 @@ def _reading_surface_tools() -> list:
                     "unit_ids": {"type": "array", "items": {"type": "string"}},
                     "domain": domain_prop,
                     "verify": {"type": "boolean", "default": False},
-                    "context_lines": {"type": "integer", "default": 0},
+                    "verify_against": {
+                        "type": "string",
+                        "enum": ["cache", "git_sha"],
+                        "description": "Where to source the comparison target when verify=True. 'cache' (default) compares against the content_hash stored in the index. 'git_sha' additionally compares against the file slice at the working-tree git HEAD.",
+                        "default": "cache",
+                    },
+                    "context_lines": {
+                        "type": "integer",
+                        "description": "Number of lines before/after symbol to include for context",
+                        "default": 0,
+                    },
+                    "fqn": {
+                        "type": "string",
+                        "description": "PHP fully-qualified class name (e.g. 'App\\Models\\User'). Resolves to symbol_id via PSR-4. Alternative to unit_id.",
+                    },
+                    "source_start_line": {
+                        "type": "integer",
+                        "description": "Bounded mode: absolute file line (1-based, same frame as line/end_line) to start the returned source slice; clamped to the symbol body.",
+                    },
+                    "source_end_line": {
+                        "type": "integer",
+                        "description": "Bounded mode: absolute file line (1-based, inclusive) to end the returned source slice; clamped to the symbol body.",
+                    },
+                    "max_source_lines": {
+                        "type": "integer",
+                        "description": "Bounded mode: keep at most the first N lines of the (ranged) slice. Sets source_truncated + metadata when it shortens the body.",
+                    },
+                    "max_source_bytes": {
+                        "type": "integer",
+                        "description": "Bounded mode: UTF-8-safe per-symbol byte cap on the returned source. Verify still hashes the full body.",
+                    },
+                    "max_total_source_bytes": {
+                        "type": "integer",
+                        "description": "Bounded mode (batch): cap on total returned source bytes across all symbols. Oversized symbols come back partial rather than dropped.",
+                    },
                     "strip_boilerplate": {"type": "boolean", "default": False},
                     "compress_code": {"type": "boolean", "default": False},
                 },
@@ -467,8 +586,26 @@ def _reading_surface_tools() -> list:
                     "unit_id": {"type": "string"},
                     "domain": domain_prop,
                     "token_budget": {"type": "integer"},
-                    "include_related": {"type": "boolean", "default": False},
+                    "include_callers": {"type": "boolean", "default": False},
+                    "output_format": {
+                        "type": "string",
+                        "enum": ["json", "markdown"],
+                        "default": "json",
+                        "description": "'json' (default) or 'markdown' — markdown renders a paste-ready document with imports, docstrings, and source blocks.",
+                    },
+                    "budget_strategy": {
+                        "type": "string",
+                        "enum": ["most_relevant", "core_first", "compact"],
+                        "default": "most_relevant",
+                        "description": "'most_relevant' (default) ranks by file centrality. 'core_first' keeps the primary symbol first. 'compact' strips source bodies — returns signatures only.",
+                    },
+                    "include_budget_report": {"type": "boolean", "default": False},
+                    "fqn": {
+                        "type": "string",
+                        "description": "PHP fully-qualified class name (e.g. 'App\\Models\\User'). Resolves to unit_id via PSR-4. Alternative to unit_id.",
+                    },
                     "strip_boilerplate": {"type": "boolean", "default": False},
+                    "include_related": {"type": "boolean", "default": False},
                 },
                 "required": ["repo", "unit_id"],
             },
@@ -546,7 +683,7 @@ def _get_mcp_session(mcp_server: Server | None = None) -> Any | None:
 # These are advanced/rarely-used params that cost tokens every session but
 # are used <5% of the time.  The underlying handler still accepts them.
 _COMPACT_STRIP_PARAMS: dict[str, set[str]] = {
-    "search_symbols": {
+    "search_units": {
         "debug",
         "fusion",
         "semantic",
@@ -563,18 +700,17 @@ _COMPACT_STRIP_PARAMS: dict[str, set[str]] = {
     # Bounded-source mode is an advanced opt-in; the tool still accepts these
     # params under compact, they're just hidden from the schema to protect the
     # core_compact budget (the body is always callable with them).
-    "get_symbol_source": {
+    "get_unit": {
         "source_start_line",
         "source_end_line",
         "max_source_lines",
         "max_source_bytes",
         "max_total_source_bytes",
     },
-    "get_context_bundle": {"budget_strategy"},
+    "get_unit_context": {"budget_strategy"},
     "get_blast_radius": {"cross_repo", "max_depth"},
     "get_dependency_graph": {"cross_repo"},
-    "index_repo": {"extra_ignore_patterns", "incremental"},
-    "index_folder": {"extra_ignore_patterns", "incremental"},
+    "index_content": {"extra_ignore_patterns", "incremental"},
 }
 
 # Params whose enum is demoted to a plain string filter under compact_schemas.
@@ -587,10 +723,10 @@ _COMPACT_DEMOTE_ENUM_PARAMS: frozenset[str] = frozenset({"language"})
 # Tools eligible for Agent Selector complexity scoring
 _AGENT_SELECTOR_TOOLS = frozenset(
     {
-        "get_context_bundle",
-        "search_symbols",
+        "get_unit_context",  # replaces get_context_bundle
+        "search_units",  # replaces search_symbols
         "search_text",
-        "get_symbol_source",
+        "get_unit",  # replaces get_symbol_source
         "get_blast_radius",
         "get_call_hierarchy",
         "get_dependency_graph",
@@ -602,8 +738,9 @@ _EXCLUDED_FROM_STRICT = frozenset(
     {
         "list_repos",
         "resolve_repo",
-        "index_repo",
-        "index_folder",
+        "index_content",  # unified tool replaces index_repo + index_folder
+        "index_repo",  # backward-compat alias
+        "index_folder",  # backward-compat alias
         "index_file",
     }
 )
@@ -903,11 +1040,27 @@ async def _ensure_tool_schemas() -> dict[str, dict]:
 
     Uses our own list_tools() — no coupling to private MCP SDK internals.
     Populated once on the first tool call, then cached for the process lifetime.
+    Also includes backward-compat aliases so coercion/validation works when
+    call_tool receives old tool names.
     """
     global _TOOL_SCHEMAS
     if _TOOL_SCHEMAS is None:
         tools = await list_tools()
         _TOOL_SCHEMAS = {t.name: t.inputSchema for t in tools if t.inputSchema}
+        # Add backward-compat aliases: old name → unified tool schema
+        _ALIAS_TO_UNIFIED = {
+            "index_repo": "index_content",
+            "index_folder": "index_content",
+            "get_file_tree": "list_content",
+            "get_file_outline": "get_outline",
+            "get_file_content": "get_file",
+            "search_symbols": "search_units",
+            "get_symbol_source": "get_unit",
+            "get_context_bundle": "get_unit_context",
+        }
+        for alias, unified in _ALIAS_TO_UNIFIED.items():
+            if alias not in _TOOL_SCHEMAS and unified in _TOOL_SCHEMAS:
+                _TOOL_SCHEMAS[alias] = _TOOL_SCHEMAS[unified]
     return _TOOL_SCHEMAS
 
 
@@ -943,80 +1096,6 @@ async def list_tools() -> list[Tool]:
 def _build_tools_list() -> list[Tool]:
     """Build the full tool list, applying config-driven filtering and overrides."""
     all_tools = [
-        Tool(
-            name="index_repo",
-            description="Index a GitHub repository's source code. Fetches files, parses ASTs, extracts symbols, and saves to local storage. Set JCODEMUNCH_USE_AI_SUMMARIES=false to disable AI summaries globally.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "url": {
-                        "type": "string",
-                        "description": "GitHub repository URL or owner/repo string",
-                    },
-                    "use_ai_summaries": {
-                        "type": "boolean",
-                        "description": "Use AI to generate symbol summaries. Supports Anthropic, Gemini, OpenAI-compatible endpoints, MiniMax, and GLM-5 via env vars. When false, uses docstrings or signature fallback.",
-                        "default": True,
-                    },
-                    "extra_ignore_patterns": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Additional gitignore-style patterns to exclude from indexing (merged with JCODEMUNCH_EXTRA_IGNORE_PATTERNS env var)",
-                    },
-                    "incremental": {
-                        "type": "boolean",
-                        "description": "When true and an existing index exists, only re-index changed files.",
-                        "default": True,
-                    },
-                },
-                "required": ["url"],
-            },
-        ),
-        Tool(
-            name="index_folder",
-            description="Index a local folder of source code. Response surfaces `discovery_skip_counts` and `no_symbols_files` for diagnosing missing files.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Path to local folder (absolute or relative; ~ expands).",
-                    },
-                    "use_ai_summaries": {
-                        "type": "boolean",
-                        "description": "Generate symbol summaries via AI. When false, falls back to docstrings or signature.",
-                        "default": True,
-                    },
-                    "extra_ignore_patterns": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Additional gitignore-style exclude patterns.",
-                    },
-                    "follow_symlinks": {
-                        "type": "boolean",
-                        "description": "Include symlinked files. Symlinked directories are never followed.",
-                        "default": False,
-                    },
-                    "incremental": {
-                        "type": "boolean",
-                        "description": "When an existing index exists, only re-index changed files.",
-                        "default": True,
-                    },
-                    "paths": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Optional explicit paths (absolute or relative to `path`). When set, skips the directory walk; directories in the list are recursed. Walk-path validation applies.",
-                    },
-                    "identity_mode": {
-                        "type": "string",
-                        "enum": ["config", "local", "git"],
-                        "description": "Repo-identity strategy. `config` (default): respect existing index. `local`: path-keyed. `git`: git-root-keyed (monorepo subdir merging).",
-                        "default": "config",
-                    },
-                },
-                "required": ["path"],
-            },
-        ),
         Tool(
             name="summarize_repo",
             description=(
@@ -1170,277 +1249,6 @@ def _build_tools_list() -> list[Tool]:
             },
         ),
         Tool(
-            name="get_file_tree",
-            description="Get the file tree of an indexed repository, optionally filtered by path prefix. Results are capped at max_files (default 500) to prevent token overflow; use path_prefix to scope large trees.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository identifier (owner/repo or just repo name)",
-                    },
-                    "path_prefix": {
-                        "type": "string",
-                        "description": "Optional path prefix to filter (e.g., 'src/utils')",
-                        "default": "",
-                    },
-                    "include_summaries": {
-                        "type": "boolean",
-                        "description": "Include file-level summaries in the tree nodes",
-                        "default": False,
-                    },
-                    "max_files": {
-                        "type": "integer",
-                        "description": "Maximum number of files to return (default 500). When truncated, response includes total_file_count and a hint to use path_prefix.",
-                        "default": 500,
-                    },
-                },
-                "required": ["repo"],
-            },
-        ),
-        Tool(
-            name="get_file_outline",
-            description="Get all symbols (functions, classes, methods) in a file with full signatures (including parameter names) and summaries. Use signatures to review naming at parameter granularity without reading the full file. Pass repo and file_path (e.g. 'src/main.py').",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository identifier (owner/repo or just repo name)",
-                    },
-                    "file_path": {
-                        "type": "string",
-                        "description": "Path to the file within the repository (e.g., 'src/main.py')",
-                    },
-                    "file_paths": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "List of file paths to query in batch mode. Returns a grouped results array.",
-                    },
-                },
-                "required": ["repo"],
-            },
-        ),
-        Tool(
-            name="get_symbol_source",
-            description="Get full source of one symbol (symbol_id → flat object) or many (symbol_ids[] → {symbols, errors}). Supports verify, context_lines, fqn (PHP FQN via PSR-4), and an optional bounded mode that caps returned source for large symbols/batches.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository identifier (owner/repo or just repo name)",
-                    },
-                    "symbol_id": {
-                        "type": "string",
-                        "description": "Single symbol ID — returns flat symbol object",
-                    },
-                    "symbol_ids": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Multiple symbol IDs — returns {symbols, errors}",
-                    },
-                    "verify": {
-                        "type": "boolean",
-                        "description": "Verify content hash matches stored hash (detects source drift)",
-                        "default": False,
-                    },
-                    "verify_against": {
-                        "type": "string",
-                        "enum": ["cache", "git_sha"],
-                        "description": "Where to source the comparison target when verify=True. 'cache' (default) compares against the content_hash stored in the index — self-referential, only catches incoherent tamper of ~/.code-index/. 'git_sha' additionally compares the cached source against the file slice at the working-tree git HEAD — externally attested, catches divergence between the cache and the upstream source. Adds a git_sha_verification field to the response.",
-                        "default": "cache",
-                    },
-                    "context_lines": {
-                        "type": "integer",
-                        "description": "Number of lines before/after symbol to include for context",
-                        "default": 0,
-                    },
-                    "fqn": {
-                        "type": "string",
-                        "description": "PHP fully-qualified class name (e.g. 'App\\Models\\User'). Resolves to symbol_id via PSR-4. Alternative to symbol_id.",
-                    },
-                    "source_start_line": {
-                        "type": "integer",
-                        "description": "Bounded mode: absolute file line (1-based, same frame as `line`/`end_line`) to start the returned source slice; clamped to the symbol body.",
-                    },
-                    "source_end_line": {
-                        "type": "integer",
-                        "description": "Bounded mode: absolute file line (1-based, inclusive) to end the returned source slice; clamped to the symbol body.",
-                    },
-                    "max_source_lines": {
-                        "type": "integer",
-                        "description": "Bounded mode: keep at most the first N lines of the (ranged) slice. Sets source_truncated + metadata when it shortens the body.",
-                    },
-                    "max_source_bytes": {
-                        "type": "integer",
-                        "description": "Bounded mode: UTF-8-safe per-symbol byte cap on the returned source. Verify still hashes the full body.",
-                    },
-                    "max_total_source_bytes": {
-                        "type": "integer",
-                        "description": "Bounded mode (batch): cap on total returned source bytes across all symbols. Oversized symbols come back partial (source_truncated) rather than dropped, preventing an N×per-symbol blowup.",
-                    },
-                },
-                "required": ["repo"],
-            },
-        ),
-        Tool(
-            name="get_file_content",
-            description="Get cached source for a file, optionally sliced to a line range.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository identifier (owner/repo or just repo name)",
-                    },
-                    "file_path": {
-                        "type": "string",
-                        "description": "Path to the file within the repository (e.g., 'src/main.py')",
-                    },
-                    "start_line": {
-                        "type": "integer",
-                        "description": "Optional 1-based start line (inclusive)",
-                    },
-                    "end_line": {
-                        "type": "integer",
-                        "description": "Optional 1-based end line (inclusive)",
-                    },
-                },
-                "required": ["repo", "file_path"],
-            },
-        ),
-        Tool(
-            name="search_symbols",
-            description="Search for symbols matching a query across the entire indexed repository. Returns matches with signatures and summaries.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository identifier (owner/repo or just repo name)",
-                    },
-                    "query": {
-                        "type": "string",
-                        "description": "Search query (matches symbol names, signatures, summaries, docstrings)",
-                    },
-                    "kind": {
-                        "type": "string",
-                        "description": "Optional filter by symbol kind",
-                        "enum": [
-                            "function",
-                            "class",
-                            "method",
-                            "constant",
-                            "type",
-                            "template",
-                            "import",
-                        ],
-                    },
-                    "file_pattern": {
-                        "type": "string",
-                        "description": "Optional glob pattern to filter files (e.g., 'src/**/*.py')",
-                    },
-                    "language": {
-                        "type": "string",
-                        "description": "Optional filter by language",
-                        "enum": _build_language_enum(),
-                    },
-                    "decorator": {
-                        "type": "string",
-                        "description": "Optional filter: only return symbols with this decorator (case-insensitive substring match, e.g. 'route', 'property', 'Deprecated')",
-                    },
-                    "max_results": {
-                        "type": "integer",
-                        "description": "Maximum number of results to return (ignored when token_budget is set)",
-                        "default": 10,
-                    },
-                    "token_budget": {
-                        "type": "integer",
-                        "description": "Token budget cap. When set, results are sorted by score and greedily packed until the budget is exhausted, charging each row's actual payload size (compact rows ~15 tokens, so a budget can admit many rows). Overrides max_results — pass max_results without token_budget when row count matters. Reports token_budget, tokens_used, and tokens_remaining in _meta.",
-                    },
-                    "detail_level": {
-                        "type": "string",
-                        "description": "Controls result verbosity. 'compact' returns id/name/kind/file/line only (~15 tokens each, best for broad discovery). 'standard' returns signatures and summaries (default). 'full' inlines source code, docstring, and end_line — equivalent to search + get_symbol in one call.",
-                        "enum": ["compact", "standard", "full"],
-                        "default": "standard",
-                    },
-                    "debug": {
-                        "type": "boolean",
-                        "description": "When true, each result includes a score_breakdown showing per-field scoring contributions (name_exact, name_contains, name_word_overlap, signature_phrase, signature_word_overlap, summary_phrase, summary_word_overlap, keywords, docstring_word_overlap). Also adds candidates_scored to _meta.",
-                        "default": False,
-                    },
-                    "fuzzy": {
-                        "type": "boolean",
-                        "description": "Enable fuzzy matching. When true, uses trigram overlap + Levenshtein distance as fallback when BM25 scores are low. Fuzzy results include match_type, fuzzy_similarity, and edit_distance fields.",
-                        "default": False,
-                    },
-                    "fuzzy_threshold": {
-                        "type": "number",
-                        "description": "Minimum Jaccard trigram similarity (0.0–1.0) for fuzzy candidates. Lower values surface more candidates. Default 0.4.",
-                        "default": 0.4,
-                    },
-                    "max_edit_distance": {
-                        "type": "integer",
-                        "description": "Maximum Levenshtein distance for direct name matching (catches typos). Default 2.",
-                        "default": 2,
-                    },
-                    "sort_by": {
-                        "type": "string",
-                        "enum": ["relevance", "centrality", "combined"],
-                        "description": "Ranking strategy. 'relevance' (default) = BM25 text match. 'centrality' = filter by query, rank by PageRank. 'combined' = BM25 + PageRank weighted.",
-                        "default": "relevance",
-                    },
-                    "semantic": {
-                        "type": "boolean",
-                        "description": "Enable semantic (embedding-based) search. Requires an embedding provider: JCODEMUNCH_EMBED_MODEL (sentence-transformers), GOOGLE_API_KEY+GOOGLE_EMBED_MODEL (Gemini), or OPENAI_API_KEY+OPENAI_EMBED_MODEL (OpenAI). When false (default) there is zero performance impact.",
-                        "default": False,
-                    },
-                    "semantic_weight": {
-                        "type": "number",
-                        "description": "Weight for semantic score in hybrid BM25+embedding ranking (0.0–1.0). BM25 receives 1-weight. Default 0.5. Set to 0.0 for identical results to pure BM25; set to 1.0 for pure semantic.",
-                        "default": 0.5,
-                    },
-                    "semantic_only": {
-                        "type": "boolean",
-                        "description": "Skip BM25 entirely and rank solely by embedding cosine similarity. Implies semantic=true.",
-                        "default": False,
-                    },
-                    "fusion": {
-                        "type": "boolean",
-                        "description": "Enable multi-signal fusion (Weighted Reciprocal Rank) across lexical, structural, similarity, and identity channels. Produces higher-quality ranking than linear score addition. When True, sort_by is ignored.",
-                        "default": False,
-                    },
-                    "mode": {
-                        "type": "string",
-                        "enum": ["search", "winnow", "context"],
-                        "default": "search",
-                        "description": "Operation mode: 'search' (default, normal search), 'winnow' (multi-axis constraint query, former winnow_symbols), 'context' (query-less ranked context assembly, former get_ranked_context).",
-                    },
-                    "criteria": {
-                        "type": "array",
-                        "description": "Ordered list of filter criteria for winnow mode. Each item: {axis, op, value}. Supported axes: kind, language, name, file, complexity, decorator, calls, summary, churn.",
-                        "items": {"type": "object"},
-                    },
-                    "order": {
-                        "type": "string",
-                        "enum": ["asc", "desc"],
-                        "default": "desc",
-                    },
-                    "rank_by": {
-                        "type": "string",
-                        "enum": ["importance", "complexity", "churn", "name"],
-                        "default": "importance",
-                    },
-                    "fqn": {
-                        "type": "string",
-                        "description": "PHP fully-qualified class name (e.g. 'App\\Models\\User'). Resolves via PSR-4 and uses the class name as query. Alternative to query.",
-                    },
-                },
-                "required": ["repo", "query"],
-            },
-        ),
-        Tool(
             name="search_text",
             description="Full-text search across indexed file contents. Useful when symbol search misses (e.g., string literals, comments, config values). Supports regex (is_regex=true) and context lines around matches (context_lines=N, like grep -C).",
             inputSchema={
@@ -1571,68 +1379,6 @@ def _build_tools_list() -> list[Tool]:
                     },
                 },
                 "required": ["repo", "query"],
-            },
-        ),
-        Tool(
-            name="get_context_bundle",
-            description=(
-                "Get full source + imports for one or more symbols in one call. "
-                "Multi-symbol bundles deduplicate shared imports. "
-                "Set token_budget to cap response size; use budget_strategy to control what's kept. "
-                "Supports fqn (PHP FQN via PSR-4) as alternative to symbol_id."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "repo": {
-                        "type": "string",
-                        "description": "Repository identifier (owner/repo or just repo name)",
-                    },
-                    "symbol_id": {
-                        "type": "string",
-                        "description": "Single symbol ID (backward-compatible). Use symbol_ids for multi-symbol bundles.",
-                    },
-                    "symbol_ids": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "List of symbol IDs for a multi-symbol bundle. Imports are deduplicated across symbols that share a file.",
-                    },
-                    "include_callers": {
-                        "type": "boolean",
-                        "description": "When true, each symbol entry includes a 'callers' list of files that directly import its defining file.",
-                        "default": False,
-                    },
-                    "output_format": {
-                        "type": "string",
-                        "description": "'json' (default) or 'markdown' — markdown renders a paste-ready document with imports, docstrings, and source blocks.",
-                        "enum": ["json", "markdown"],
-                        "default": "json",
-                    },
-                    "token_budget": {
-                        "type": "integer",
-                        "description": "Max tokens to return. When set, symbols are ranked and trimmed to fit. Uses budget_strategy to prioritize.",
-                    },
-                    "budget_strategy": {
-                        "type": "string",
-                        "enum": ["most_relevant", "core_first", "compact"],
-                        "description": (
-                            "'most_relevant' (default) ranks by file centrality (import in-degree). "
-                            "'core_first' keeps the primary symbol first, ranks rest by centrality. "
-                            "'compact' strips source bodies — returns signatures only."
-                        ),
-                        "default": "most_relevant",
-                    },
-                    "include_budget_report": {
-                        "type": "boolean",
-                        "description": "When true, include a 'budget_report' field showing tokens used, symbols included/excluded, and strategy applied.",
-                        "default": False,
-                    },
-                    "fqn": {
-                        "type": "string",
-                        "description": "PHP fully-qualified class name (e.g. 'App\\Models\\User'). Resolves to symbol_id via PSR-4. Alternative to symbol_id.",
-                    },
-                },
-                "required": ["repo"],
             },
         ),
         Tool(
@@ -2566,10 +2312,8 @@ def _build_tools_list() -> list[Tool]:
             },
         ),
     ]
-    # --- The Counter: register the front door + capture the raw catalog ------
+    # --- The Counter: register the front door ------
     all_tools = all_tools + _counter_front_door_tools()
-    global _RAW_CATALOG
-    _RAW_CATALOG = list(all_tools)
     surface = _effective_surface()
     if surface == "counter":
         # Collapse to the front door. Surface choice bypasses disabled_tools.
@@ -2586,6 +2330,9 @@ def _build_tools_list() -> list[Tool]:
     all_tools = [t for t in all_tools if t.name not in _COUNTER_FRONT_DOOR]
     # Merge unified reading tools into the default surface
     all_tools = all_tools + _reading_surface_tools()
+    # Capture the raw catalog for menu/order (after unified tools are added)
+    global _RAW_CATALOG
+    _RAW_CATALOG = list(all_tools)
     # Filter out disabled tools (simple set difference).
     disabled = config_module.get("disabled_tools", [])
     if disabled:

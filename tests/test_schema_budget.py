@@ -23,13 +23,17 @@ DRIFT_TOLERANCE = 0.05  # 5%
 
 try:
     import tiktoken  # noqa: F401
+
     _HAS_TIKTOKEN = True
 except ImportError:
     _HAS_TIKTOKEN = False
 
 
 @pytest.mark.skipif(not _HAS_TIKTOKEN, reason="tiktoken not installed")
-@pytest.mark.skipif(not BASELINE.is_file(), reason="benchmarks/schema_baseline.json missing — run benchmarks/harness/capture_schema_baseline.py")
+@pytest.mark.skipif(
+    not BASELINE.is_file(),
+    reason="benchmarks/schema_baseline.json missing — run benchmarks/harness/capture_schema_baseline.py",
+)
 def test_schema_tokens_within_baseline_tolerance():
     """tools/list token count must stay within 5% of baseline for every
     profile x compact_schemas combo. Catches accidental bloat from new
@@ -52,7 +56,11 @@ def test_schema_tokens_within_baseline_tolerance():
                 cfg["compact_schemas"] = compact
                 tools = _build_tools_list()
                 payload = [
-                    {"name": t.name, "description": t.description, "inputSchema": t.inputSchema}
+                    {
+                        "name": t.name,
+                        "description": t.description,
+                        "inputSchema": t.inputSchema,
+                    }
                     for t in tools
                 ]
                 text = json.dumps(payload, separators=(",", ":"))
@@ -61,7 +69,9 @@ def test_schema_tokens_within_baseline_tolerance():
                 key = f"{profile}_{'compact' if compact else 'full'}"
                 base = baseline.get(key)
                 if base is None:
-                    drifts.append(f"{key}: no baseline entry (add {count} to schema_baseline.json)")
+                    drifts.append(
+                        f"{key}: no baseline entry (add {count} to schema_baseline.json)"
+                    )
                     continue
                 ceiling = int(base * (1 + DRIFT_TOLERANCE))
                 if count > ceiling:
@@ -83,7 +93,9 @@ def test_schema_tokens_within_baseline_tolerance():
     )
 
 
-@pytest.mark.skipif(not BASELINE.is_file(), reason="benchmarks/schema_baseline.json missing")
+@pytest.mark.skipif(
+    not BASELINE.is_file(), reason="benchmarks/schema_baseline.json missing"
+)
 def test_v2_success_criterion_core_compact_under_4000():
     """§10 success criterion: core + compact_schemas stays under 4,000 tokens."""
     baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
@@ -150,17 +162,19 @@ def test_compact_demotes_language_enum_keeps_capability():
         cfg["tool_profile"] = "core"
 
         cfg["compact_schemas"] = True
-        ss = next(t for t in _build_tools_list() if t.name == "search_symbols")
+        ss = next(t for t in _build_tools_list() if t.name == "search_units")
         lang = ss.inputSchema["properties"]["language"]
         assert "enum" not in lang, "language enum must be demoted under compact"
-        assert lang.get("type") == "string", "demoted language must remain a string filter"
+        assert lang.get("type") == "string", (
+            "demoted language must remain a string filter"
+        )
         assert lang.get("description"), "demoted language must keep its description"
 
         cfg["compact_schemas"] = False
-        ss_full = next(t for t in _build_tools_list() if t.name == "search_symbols")
-        assert len(ss_full.inputSchema["properties"]["language"].get("enum", [])) > 10, (
-            "full surface must keep the language enum"
-        )
+        ss_full = next(t for t in _build_tools_list() if t.name == "search_units")
+        assert (
+            len(ss_full.inputSchema["properties"]["language"].get("enum", [])) > 10
+        ), "full surface must keep the language enum"
     finally:
         for k, v in original.items():
             if v is None:

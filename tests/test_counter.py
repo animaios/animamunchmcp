@@ -63,7 +63,7 @@ def test_full_surface_count_matches_standard_default():
     _surface(None)
     full = {t.name for t in asyncio.run(server.list_tools())}
     # Adding the Counter must not change the resident 'full' catalog at all.
-    assert "search_symbols" in full and "get_blast_radius" in full
+    assert "search_units" in full and "get_blast_radius" in full
     assert "order" not in full
 
 
@@ -77,7 +77,7 @@ def test_counter_surface_collapses_to_front_door():
     # Counter surface collapses to just the front door.
     assert counter.FRONT_DOOR == names
     # Everything else is collapsed away.
-    assert "search_symbols" not in names
+    assert "search_units" not in names
 
 
 # --- 3. order: dispatch + charter gate ------------------------------------- #
@@ -95,13 +95,13 @@ def test_order_gate_rejects_front_door_recursion():
 
 
 def test_order_gate_allows_read_action():
-    assert counter.order_gate("search_symbols", server._catalog_names(), False) is None
+    assert counter.order_gate("search_units", server._catalog_names(), False) is None
 
 
 def test_order_gate_blocks_state_change_without_optin():
-    err = counter.order_gate("index_repo", server._catalog_names(), False)
+    err = counter.order_gate("index_content", server._catalog_names(), False)
     assert err and "allow_state_change" in err
-    assert counter.order_gate("index_repo", server._catalog_names(), True) is None
+    assert counter.order_gate("index_content", server._catalog_names(), True) is None
 
 
 def test_order_gate_exec_tripwire_is_unconditional():
@@ -126,7 +126,7 @@ def test_order_dispatches_read_action_through_pipeline():
 
 
 def test_order_rejects_bad_args_type():
-    out = _call("order", {"action": "search_symbols", "args": "not-an-object"})
+    out = _call("order", {"action": "search_units", "args": "not-an-object"})
     assert "error" in out
 
 
@@ -136,7 +136,7 @@ def test_order_rejects_bad_args_type():
 def test_menu_lists_full_catalog():
     out = _call("menu", {})
     assert out["tool"] == "menu"
-    assert out["total_actions"] >= 35
+    assert out["total_actions"] >= 31
     assert not any(a["action"] in counter.FRONT_DOOR for a in out["actions"])
 
 
@@ -149,8 +149,8 @@ def test_menu_query_ranks_relevant_actions():
 def test_menu_rows_flag_state_changing():
     out = _call("menu", {"query": "index a repository", "limit": 10})
     by_name = {a["action"]: a for a in out["actions"]}
-    if "index_repo" in by_name:
-        assert by_name["index_repo"]["state_changing"] is True
+    if "index_content" in by_name:
+        assert by_name["index_content"]["state_changing"] is True
 
 
 # --- 5. route: intent -> action -------------------------------------------- #

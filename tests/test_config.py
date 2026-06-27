@@ -1948,17 +1948,17 @@ class TestClaudeMdGenerate:
         claude_dir = tmp_path / ".claude"
         claude_dir.mkdir()
         (claude_dir / "CLAUDE.md").write_text(
-            "list_repos search_symbols", encoding="utf-8"
+            "list_repos search_units", encoding="utf-8"
         )
         monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
 
         _run_claude_md(generate=True, fmt="append")
         out = capsys.readouterr().out
         # Should include tools not in the existing file
-        assert "index_repo" in out
+        assert "index_content" in out
         # Should NOT include tools already present
         assert "list_repos" not in out
-        assert "search_symbols" not in out
+        assert "search_units" not in out
 
     def test_generate_append_silent_when_current(self, monkeypatch, tmp_path, capsys):
         """--format=append prints nothing to stdout when CLAUDE.md is up to date."""

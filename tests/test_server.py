@@ -29,7 +29,7 @@ async def test_server_lists_all_tools():
     try:
         tools = await list_tools()
 
-        assert len(tools) == 46  # 39 code + 7 unified reading tools
+        assert len(tools) == 38  # 31 code + 7 unified reading tools
 
         names = {t.name for t in tools}
         expected = {
@@ -38,7 +38,6 @@ async def test_server_lists_all_tools():
             "assemble_task_context",
             "search_columns",
             "search_ast",
-            "index_repo",
             "plan_refactoring",
             "embed_repo",
             "check_safe",
@@ -46,32 +45,25 @@ async def test_server_lists_all_tools():
             "get_repo_map",
             "search_text",
             "resolve_repo",
-            "index_folder",
             "get_dead_code_v2",
             "get_pr_risk_profile",
             "list_workspaces",
             "get_dependency_graph",
             "import_runtime_signal",
             "get_project_intel",
-            "get_file_content",
-            "search_symbols",
-            "list_repos",
             "find_hot_paths",
             "get_call_hierarchy",
             "get_class_hierarchy",
             "find_references",
             "find_similar_symbols",
-            "get_file_outline",
             "get_tectonic_map",
-            "get_context_bundle",
             "get_blast_radius",
             "find_implementations",
             "summarize_repo",
-            "get_symbol_source",
             "get_repo_health",
             "get_symbol_complexity",
-            "get_file_tree",
             "index_file",
+            "list_repos",
             # Unified reading tools (jDocMunch surface)
             "index_content",
             "list_content",
@@ -89,29 +81,32 @@ async def test_server_lists_all_tools():
 
 
 @pytest.mark.asyncio
-async def test_index_repo_tool_schema():
-    """Test index_repo tool has correct schema."""
+async def test_index_content_tool_schema():
+    """Test index_content tool has correct schema."""
     tools = await list_tools()
 
-    index_repo = next(t for t in tools if t.name == "index_repo")
+    index_content = next(t for t in tools if t.name == "index_content")
 
-    assert "url" in index_repo.inputSchema["properties"]
-    assert "use_ai_summaries" in index_repo.inputSchema["properties"]
-    assert "url" in index_repo.inputSchema["required"]
+    assert "url" in index_content.inputSchema["properties"]
+    assert "path" in index_content.inputSchema["properties"]
+    assert "use_ai_summaries" in index_content.inputSchema["properties"]
+    # The schema uses oneOf for url OR path, so neither is strictly required
+    required = index_content.inputSchema.get("required", [])
+    assert "url" not in required  # url is part of oneOf, not individually required
+    assert "path" not in required  # path is part of oneOf, not individually required
 
 
 @pytest.mark.asyncio
-async def test_search_symbols_tool_schema():
-    """Test search_symbols tool has correct schema."""
+async def test_search_units_tool_schema():
+    """Test search_units tool has correct schema."""
     tools = await list_tools()
 
-    search = next(t for t in tools if t.name == "search_symbols")
+    search = next(t for t in tools if t.name == "search_units")
 
     props = search.inputSchema["properties"]
     assert "repo" in props
     assert "query" in props
     assert "kind" in props
-    assert "file_pattern" in props
     assert "max_results" in props
 
     # kind should have enum
@@ -147,12 +142,12 @@ async def test_search_text_tool_schema():
 
 
 @pytest.mark.asyncio
-async def test_get_file_content_tool_schema():
-    """get_file_content should accept optional line bounds."""
+async def test_get_file_tool_schema():
+    """get_file should accept optional line bounds."""
     tools = await list_tools()
 
-    get_file_content = next(t for t in tools if t.name == "get_file_content")
-    props = get_file_content.inputSchema["properties"]
+    get_file = next(t for t in tools if t.name == "get_file")
+    props = get_file.inputSchema["properties"]
 
     assert "repo" in props
     assert "file_path" in props
@@ -245,14 +240,14 @@ async def test_index_folder_dispatched_via_to_thread():
 
 
 @pytest.mark.asyncio
-async def test_call_tool_forwards_get_file_content_bounds():
+async def test_call_tool_forwards_get_file_bounds():
     """Dispatcher should route file-content lookups with optional bounds."""
     with patch(
-        "jcodemunch_mcp.tools.get_file_content.get_file_content",
+        "jcodemunch_mcp.tools.content_router.get_file",
         return_value={"file": "src/main.py"},
-    ) as mock_get_file_content:
+    ) as mock_get_file:
         await call_tool(
-            "get_file_content",
+            "get_file",
             {
                 "repo": "owner/repo",
                 "file_path": "src/main.py",
@@ -261,12 +256,14 @@ async def test_call_tool_forwards_get_file_content_bounds():
             },
         )
 
-    mock_get_file_content.assert_called_once_with(
+    mock_get_file.assert_called_once_with(
         repo="owner/repo",
         file_path="src/main.py",
         start_line=5,
         end_line=8,
         storage_path=None,
+        domain="auto",
+        doc_storage_path=None,
     )
 
 
@@ -440,10 +437,10 @@ async def test_call_tool_coerces_string_boolean_to_false():
 async def test_call_tool_coerces_string_integer():
     """call_tool coerces string integers to int before dispatching."""
     with patch(
-        "jcodemunch_mcp.tools.search_symbols.search_symbols", return_value={}
+        "jcodemunch_mcp.tools.content_router.search_units", return_value={}
     ) as mock_search:
         await call_tool(
-            "search_symbols",
+            "search_units",
             {"repo": "owner/repo", "query": "foo", "max_results": "20"},
         )
 
@@ -457,7 +454,7 @@ async def test_call_tool_coerces_string_integer():
 async def test_call_tool_validation_error_returns_json_error():
     """call_tool returns a JSON error when coerced arguments still fail validation."""
     result = await call_tool(
-        "search_symbols",
+        "search_units",
         {"repo": "owner/repo", "query": "foo", "max_results": "not_an_int"},
     )
 
@@ -522,7 +519,7 @@ async def test_descriptions_shared_applied_to_all_tools(monkeypatch):
 
         tools = await list_tools()
 
-        for tool_name in ["search_symbols", "get_file_tree", "get_symbol_source"]:
+        for tool_name in ["search_units", "list_content", "get_unit"]:
             tool = next((t for t in tools if t.name == tool_name), None)
             if tool:
                 repo_param = tool.inputSchema.get("properties", {}).get("repo", {})
@@ -546,22 +543,22 @@ async def test_descriptions_tool_specific_overrides_shared(monkeypatch):
     try:
         config_module._GLOBAL_CONFIG["descriptions"] = {
             "_shared": {"repo": "Shared description"},
-            "search_symbols": {"repo": "search_symbols specific desc"},
+            "search_units": {"repo": "search_units specific desc"},
         }
         config_module._GLOBAL_CONFIG["disabled_tools"] = []
 
         tools = await list_tools()
 
-        search_tool = next((t for t in tools if t.name == "search_symbols"), None)
+        search_tool = next((t for t in tools if t.name == "search_units"), None)
         assert search_tool is not None
         repo_param = search_tool.inputSchema.get("properties", {}).get("repo", {})
-        assert "search_symbols specific desc" in repo_param.get("description", "")
+        assert "search_units specific desc" in repo_param.get("description", "")
 
-        tree_tool = next((t for t in tools if t.name == "get_file_tree"), None)
+        tree_tool = next((t for t in tools if t.name == "list_content"), None)
         assert tree_tool is not None
         repo_param = tree_tool.inputSchema.get("properties", {}).get("repo", {})
         assert "Shared description" in repo_param.get("description", "")
-        assert "search_symbols specific" not in repo_param.get("description", "")
+        assert "search_units specific" not in repo_param.get("description", "")
     finally:
         config_module._GLOBAL_CONFIG.clear()
         config_module._GLOBAL_CONFIG.update(orig_config)
@@ -577,8 +574,8 @@ async def test_descriptions_config_overrides_tool_descriptions(monkeypatch):
 
     try:
         config_module._GLOBAL_CONFIG["descriptions"] = {
-            "search_symbols": {
-                "_tool": "Custom search_symbols description",
+            "search_units": {
+                "_tool": "Custom search_units description",
                 "repo": "Custom repo description",
             },
             "_shared": {"repo": "Shared custom repo desc"},
@@ -586,12 +583,12 @@ async def test_descriptions_config_overrides_tool_descriptions(monkeypatch):
         config_module._GLOBAL_CONFIG["disabled_tools"] = []
 
         tools = await list_tools()
-        search_symbols = next((t for t in tools if t.name == "search_symbols"), None)
-        assert search_symbols is not None
-        assert search_symbols.description == "Custom search_symbols description"
+        search_units = next((t for t in tools if t.name == "search_units"), None)
+        assert search_units is not None
+        assert search_units.description == "Custom search_units description"
 
         # Param description should also be overridden
-        repo_param = search_symbols.inputSchema.get("properties", {}).get("repo", {})
+        repo_param = search_units.inputSchema.get("properties", {}).get("repo", {})
         assert repo_param.get("description") == "Custom repo description"
     finally:
         config_module._GLOBAL_CONFIG.clear()
@@ -611,11 +608,11 @@ async def test_no_descriptions_config_keeps_original(monkeypatch):
         config_module._GLOBAL_CONFIG["disabled_tools"] = []
 
         tools = await list_tools()
-        search_symbols = next((t for t in tools if t.name == "search_symbols"), None)
-        assert search_symbols is not None
+        search_units = next((t for t in tools if t.name == "search_units"), None)
+        assert search_units is not None
 
-        # Should keep original description (starts with "Search for")
-        assert search_symbols.description.startswith("Search for")
+        # Should keep original description (starts with "Search semantic")
+        assert search_units.description.startswith("Search semantic")
     finally:
         config_module._GLOBAL_CONFIG.clear()
         config_module._GLOBAL_CONFIG.update(orig_config)
@@ -699,12 +696,10 @@ async def test_language_enum_reflects_config_limited(monkeypatch):
         config_module._GLOBAL_CONFIG["disabled_tools"] = []
 
         tools = await list_tools()
-        search_symbols_tool = next(
-            (t for t in tools if t.name == "search_symbols"), None
-        )
-        assert search_symbols_tool is not None
+        search_units_tool = next((t for t in tools if t.name == "search_units"), None)
+        assert search_units_tool is not None
 
-        lang_param = search_symbols_tool.inputSchema.get("properties", {}).get(
+        lang_param = search_units_tool.inputSchema.get("properties", {}).get(
             "language", {}
         )
         enum_values = lang_param.get("enum", [])
@@ -734,10 +729,8 @@ async def test_language_enum_all_languages_when_config_none(monkeypatch):
         config_module._GLOBAL_CONFIG["disabled_tools"] = []
 
         tools = await list_tools()
-        search_symbols_tool = next(
-            (t for t in tools if t.name == "search_symbols"), None
-        )
-        lang_param = search_symbols_tool.inputSchema.get("properties", {}).get(
+        search_units_tool = next((t for t in tools if t.name == "search_units"), None)
+        lang_param = search_units_tool.inputSchema.get("properties", {}).get(
             "language", {}
         )
         enum_values = lang_param.get("enum", [])
@@ -760,17 +753,17 @@ async def test_disabled_tools_filtered_from_schema(monkeypatch):
 
     try:
         config_module._GLOBAL_CONFIG["disabled_tools"] = [
-            "index_repo",
-            "search_symbols",
+            "index_content",  # replaces index_repo
+            "search_units",  # replaces search_symbols
         ]
 
         tools = await list_tools()
         tool_names = [t.name for t in tools]
 
-        assert "index_repo" not in tool_names
-        assert "search_symbols" not in tool_names
-        assert "get_file_tree" in tool_names  # Not disabled
-        assert len(tools) == 44  # 46 - 2 disabled
+        assert "index_content" not in tool_names
+        assert "search_units" not in tool_names
+        assert "list_content" in tool_names  # Not disabled
+        assert len(tools) == 36  # 38 - 2 disabled
     finally:
         config_module._GLOBAL_CONFIG.clear()
         config_module._GLOBAL_CONFIG.update(orig_config)
@@ -778,7 +771,7 @@ async def test_disabled_tools_filtered_from_schema(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_disabled_tools_empty_all_tools_present(monkeypatch):
-    """When disabled_tools is empty, all tools are present (40 default + test_summarizer)."""
+    """When disabled_tools is empty, all tools are present (31 code + 7 unified reading)."""
     from jcodemunch_mcp import config as config_module
 
     orig_config = config_module._GLOBAL_CONFIG.copy()
@@ -789,8 +782,8 @@ async def test_disabled_tools_empty_all_tools_present(monkeypatch):
 
         tools = await list_tools()
         assert (
-            len(tools) == 46
-        )  # 39 code + 7 unified reading tools (config cleared, so disabled gate off)
+            len(tools) == 38
+        )  # 31 code + 7 unified reading tools (config cleared, so disabled gate off)
     finally:
         config_module._GLOBAL_CONFIG.clear()
         config_module._GLOBAL_CONFIG.update(orig_config)
@@ -871,8 +864,8 @@ async def test_sql_language_gating_removes_search_columns(monkeypatch):
         # search_columns must be absent when sql is not in languages
         assert "search_columns" not in tool_names
         # Other tools should remain
-        assert "search_symbols" in tool_names
-        assert "get_file_tree" in tool_names
+        assert "search_units" in tool_names
+        assert "list_content" in tool_names
     finally:
         config_module._GLOBAL_CONFIG.clear()
         config_module._GLOBAL_CONFIG.update(orig_config)
@@ -914,15 +907,15 @@ async def test_descriptions_empty_string_tool_clears_description():
     try:
         # Set _tool to empty string — should clear the description
         config_module._GLOBAL_CONFIG["descriptions"] = {
-            "search_symbols": {"_tool": ""},
+            "search_units": {"_tool": ""},
         }
         config_module._GLOBAL_CONFIG["disabled_tools"] = []
 
         tools = await list_tools()
-        search_symbols = next((t for t in tools if t.name == "search_symbols"), None)
-        assert search_symbols is not None
+        search_units = next((t for t in tools if t.name == "search_units"), None)
+        assert search_units is not None
         # Empty string means "use hardcoded minimal base only"
-        assert search_symbols.description == ""
+        assert search_units.description == ""
     finally:
         config_module._GLOBAL_CONFIG.clear()
         config_module._GLOBAL_CONFIG.update(orig_config)
@@ -944,11 +937,11 @@ async def test_descriptions_empty_string_param_clears_description():
         config_module._GLOBAL_CONFIG["disabled_tools"] = []
 
         tools = await list_tools()
-        search_symbols = next((t for t in tools if t.name == "search_symbols"), None)
-        assert search_symbols is not None
+        search_units = next((t for t in tools if t.name == "search_units"), None)
+        assert search_units is not None
 
         # repo param description should be cleared to empty string
-        repo_param = search_symbols.inputSchema.get("properties", {}).get("repo", {})
+        repo_param = search_units.inputSchema.get("properties", {}).get("repo", {})
         assert repo_param.get("description") == ""
     finally:
         config_module._GLOBAL_CONFIG.clear()
@@ -965,16 +958,16 @@ async def test_descriptions_flat_string_overrides_tool_description():
 
     try:
         config_module._GLOBAL_CONFIG["descriptions"] = {
-            "search_symbols": "Find symbols in this Python project",
+            "search_units": "Find symbols in this Python project",
         }
         config_module._GLOBAL_CONFIG["disabled_tools"] = []
 
         tools = await list_tools()
-        search_symbols = next(t for t in tools if t.name == "search_symbols")
-        assert search_symbols.description == "Find symbols in this Python project"
+        search_units = next(t for t in tools if t.name == "search_units")
+        assert search_units.description == "Find symbols in this Python project"
 
         # Param descriptions should be unchanged (flat format doesn't touch params)
-        repo_param = search_symbols.inputSchema.get("properties", {}).get("repo", {})
+        repo_param = search_units.inputSchema.get("properties", {}).get("repo", {})
         assert repo_param.get("description")  # should still have original description
     finally:
         config_module._GLOBAL_CONFIG.clear()
@@ -1097,7 +1090,7 @@ async def test_tool_profile_combined_with_disabled_tools():
         tools = await list_tools()
         names = {t.name for t in tools}
         assert "search_text" not in names
-        assert "search_symbols" in names
+        assert "search_units" in names
     finally:
         config_module._GLOBAL_CONFIG.clear()
         config_module._GLOBAL_CONFIG.update(orig_config)
@@ -1110,7 +1103,7 @@ async def test_tool_profile_combined_with_disabled_tools():
 
 @pytest.mark.asyncio
 async def test_compact_schemas_strips_advanced_params():
-    """compact_schemas should remove advanced params from search_symbols schema."""
+    """compact_schemas should remove advanced params from search_units schema."""
     from copy import deepcopy
 
     from jcodemunch_mcp import config as config_module
@@ -1123,7 +1116,7 @@ async def test_compact_schemas_strips_advanced_params():
 
     try:
         tools = await list_tools()
-        search = next(t for t in tools if t.name == "search_symbols")
+        search = next(t for t in tools if t.name == "search_units")
         props = search.inputSchema["properties"]
         # Core params still present
         assert "repo" in props
@@ -1156,7 +1149,7 @@ async def test_compact_schemas_off_preserves_all_params():
 
     try:
         tools = await list_tools()
-        search = next(t for t in tools if t.name == "search_symbols")
+        search = next(t for t in tools if t.name == "search_units")
         props = search.inputSchema["properties"]
         assert "debug" in props
         assert "fusion" in props
