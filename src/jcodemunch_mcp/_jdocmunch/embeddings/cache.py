@@ -132,18 +132,3 @@ def write(
                     continue
                 fh.write(json.dumps({"hash": h, "vector": vec}) + "\n")
         tmp.replace(path)
-
-
-def purge(base_path: Optional[str], owner: str, name: str) -> bool:
-    """Delete the cache for one index. Returns True on success."""
-    try:
-        path = _cache_path(base_path, owner, name)
-    except ValueError:
-        return False
-    if path.exists():
-        try:
-            path.unlink()
-            return True
-        except OSError:
-            return False
-    return False

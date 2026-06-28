@@ -83,44 +83,9 @@ def local_git_head(folder_path: Path) -> Optional[str]:
     return normalize_commit_sha(head) if ok else None
 
 
-def local_git_state(folder_path: Path, scope_path: Optional[Path] = None) -> tuple[Optional[str], bool]:
-    """Return (HEAD sha, dirty) for a local Git worktree.
-
-    "Dirty" means tracked content in scope differs from HEAD. Untracked files
-    are deliberately ignored (``--untracked-files=no``): they do not affect
-    whether the *indexed corpus* is reproducible at HEAD, and that corpus is
-    independently proven fully tracked by ``local_git_paths_tracked``. The
-    explicit ``no`` mode also overrides any ``status.showUntrackedFiles`` repo
-    config so the result is deterministic.
-
-    Non-Git folders return ``(None, False)``. Once a worktree is detected,
-    failure to prove clean status is treated as dirty so callers never emit an
-    immutable repo@sha handle for an unknown state.
-    """
-    folder_path = folder_path.resolve()
-    git_root = _git_root(folder_path)
-    if git_root is None:
-        return None, False
-
-    head_sha = local_git_head(folder_path)
-    if not head_sha:
-        return None, False
-
-    status_args = ["status", "--porcelain", "--untracked-files=no"]
-    if scope_path is not None:
-        try:
-            rel = scope_path.resolve().relative_to(git_root).as_posix()
-        except ValueError:
-            rel = scope_path.resolve().as_posix()
-        status_args.extend(["--", rel or "."])
-
-    ok, status = _git(git_root, status_args)
-    if not ok:
-        return head_sha, True
-    return head_sha, bool(status)
-
-
-def _indexed_git_paths(folder_path: Path, indexed_paths: Iterable[str]) -> tuple[Optional[Path], Optional[set[str]]]:
+def _indexed_git_paths(
+    folder_path: Path, indexed_paths: Iterable[str]
+) -> tuple[Optional[Path], Optional[set[str]]]:
     folder_path = folder_path.resolve()
     git_root = _git_root(folder_path)
     if git_root is None:
@@ -131,7 +96,9 @@ def _indexed_git_paths(folder_path: Path, indexed_paths: Iterable[str]) -> tuple
         if not isinstance(rel_path, str) or not rel_path:
             return git_root, None
         try:
-            git_rel = (folder_path / rel_path).resolve().relative_to(git_root).as_posix()
+            git_rel = (
+                (folder_path / rel_path).resolve().relative_to(git_root).as_posix()
+            )
         except ValueError:
             return git_root, None
         wanted.add(git_rel)
@@ -153,7 +120,13 @@ def local_git_paths_dirty(folder_path: Path, indexed_paths: Iterable[str]) -> bo
     for i in range(0, len(ordered), chunk_size):
         ok, status = _git(
             git_root,
-            ["status", "--porcelain", "--untracked-files=no", "--", *ordered[i:i + chunk_size]],
+            [
+                "status",
+                "--porcelain",
+                "--untracked-files=no",
+                "--",
+                *ordered[i : i + chunk_size],
+            ],
         )
         if not ok or status:
             return True
@@ -173,7 +146,9 @@ def local_git_paths_tracked(folder_path: Path, indexed_paths: Iterable[str]) -> 
     ordered = sorted(wanted)
     chunk_size = 200
     for i in range(0, len(ordered), chunk_size):
-        ok, output = _git_bytes(git_root, ["ls-files", "-z", "--", *ordered[i:i + chunk_size]])
+        ok, output = _git_bytes(
+            git_root, ["ls-files", "-z", "--", *ordered[i : i + chunk_size]]
+        )
         if not ok:
             return False
         tracked.update(

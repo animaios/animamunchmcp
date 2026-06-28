@@ -97,10 +97,6 @@ class TurnBudget:
             self._maybe_reset_locked(time.time())
             return self._turn_tokens / self._turn_budget
 
-    def is_enabled(self) -> bool:
-        """Return True if turn budget tracking is active."""
-        return self._turn_budget > 0
-
     def configure(self, budget_tokens: int, gap_seconds: float) -> None:
         """Reconfigure budget parameters (thread-safe)."""
         with self._lock:

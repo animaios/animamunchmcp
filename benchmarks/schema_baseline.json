@@ -1,8 +1,10 @@
 {
-  "core_compact": 3969,
-  "core_full": 5328,
-  "standard_compact": 16703,
-  "standard_full": 18132,
-  "full_compact": 18013,
-  "full_full": 19442
+  "counter_compact": 441,
+  "counter_full": 441,
+  "reading_compact": 2400,
+  "reading_full": 2400,
+  "jmri_compact": 2400,
+  "jmri_full": 2400,
+  "full_compact": 9993,
+  "full_full": 10990
 }

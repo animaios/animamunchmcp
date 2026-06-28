@@ -79,7 +79,7 @@ class Legends:
             return value
         for v in self._order:
             if value.startswith(v):
-                return f"{self.prefix}{self._index[v]}{value[len(v):]}"
+                return f"{self.prefix}{self._index[v]}{value[len(v) :]}"
         return value
 
     def write(self) -> str:
@@ -96,7 +96,7 @@ class Legends:
                 continue
             handle, _, value = line.partition("=")
             try:
-                idx = int(handle[len(prefix):])
+                idx = int(handle[len(prefix) :])
             except ValueError:
                 continue
             while len(leg._order) < idx:
@@ -115,7 +115,7 @@ class Legends:
         if i == len(self.prefix):
             return value
         try:
-            idx = int(value[len(self.prefix):i])
+            idx = int(value[len(self.prefix) : i])
         except ValueError:
             return value
         if 1 <= idx <= len(self._order):
@@ -136,24 +136,6 @@ def encode_scalar(value: Any) -> str:
     if isinstance(value, (int, float)):
         return repr(value) if isinstance(value, float) else str(value)
     return str(value)
-
-
-def decode_scalar(raw: str, type_hint: str = "str") -> Any:
-    if raw == "":
-        return None
-    if type_hint == "bool":
-        return raw == "T"
-    if type_hint == "int":
-        try:
-            return int(raw)
-        except ValueError:
-            return None
-    if type_hint == "float":
-        try:
-            return float(raw)
-        except ValueError:
-            return None
-    return raw
 
 
 def write_header(tool: str, encoding_id: str) -> str:
@@ -253,9 +235,9 @@ def _quote_if_needed(value: str) -> str:
         # collide with the block separator in `assemble` (audit finding F1).
         escaped = (
             value.replace("\\", "\\\\")
-                 .replace('"', '""')
-                 .replace("\n", "\\n")
-                 .replace("\r", "\\r")
+            .replace('"', '""')
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
         )
         return '"' + escaped + '"'
     return value

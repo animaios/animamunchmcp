@@ -40,38 +40,63 @@ _TRACE_PATTERNS: list[tuple[str, re.Pattern]] = [
     # SQL string literals — single-quoted values
     ("sql_string_literal", re.compile(r"'(?:[^']|'')*'")),
     # SQL numeric parameters in clauses (heuristic: only after =/IN/BETWEEN/VALUES)
-    ("sql_numeric_param", re.compile(
-        r"(?i)(?:=|<|>|<=|>=|<>|!=|\bIN\b|\bBETWEEN\b|\bVALUES\b)\s*\(?\s*(?P<secret>-?\d+(?:\.\d+)?)"
-    )),
+    (
+        "sql_numeric_param",
+        re.compile(
+            r"(?i)(?:=|<|>|<=|>=|<>|!=|\bIN\b|\bBETWEEN\b|\bVALUES\b)\s*\(?\s*(?P<secret>-?\d+(?:\.\d+)?)"
+        ),
+    ),
     # JSON-ish key:value blocks where values are arbitrary scalars (request
     # bodies, query params, header values). Anchored on quoted keys.
-    ("json_value_string", re.compile(
-        r'"(?P<key>[A-Za-z_][A-Za-z0-9_\-]{0,64})"\s*:\s*"(?P<secret>[^"\\\n]{0,256})"'
-    )),
+    (
+        "json_value_string",
+        re.compile(
+            r'"(?P<key>[A-Za-z_][A-Za-z0-9_\-]{0,64})"\s*:\s*"(?P<secret>[^"\\\n]{0,256})"'
+        ),
+    ),
     # Python-style local-variable repr (kwargs={...}, locals={...}, vars={...})
-    ("python_locals_block", re.compile(
-        r"(?i)\b(?:kwargs|locals|vars|self|args)\s*=\s*\{(?P<secret>[^{}]{0,2048})\}"
-    )),
+    (
+        "python_locals_block",
+        re.compile(
+            r"(?i)\b(?:kwargs|locals|vars|self|args)\s*=\s*\{(?P<secret>[^{}]{0,2048})\}"
+        ),
+    ),
     # IP addresses (v4 only — v6 too noisy across the codebase)
-    ("ipv4_address", re.compile(
-        r"(?<![0-9.])(?P<secret>(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.(?:25[0-5]|2[0-4]\d|[01]?\d\d?))(?![0-9.])"
-    )),
+    (
+        "ipv4_address",
+        re.compile(
+            r"(?<![0-9.])(?P<secret>(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.(?:25[0-5]|2[0-4]\d|[01]?\d\d?))(?![0-9.])"
+        ),
+    ),
     # Email addresses
-    ("email_address", re.compile(
-        r"(?P<secret>[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})"
-    )),
+    (
+        "email_address",
+        re.compile(r"(?P<secret>[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})"),
+    ),
 ]
 
 
 # Fields on a trace record that are *structural* and must never be redacted.
 # Anything else gets the redact treatment.
-_STRUCTURAL_KEYS = frozenset({
-    "symbol_id", "caller_id", "callee_id", "import_id",
-    "file_path", "line_no", "function_name",
-    "source", "count", "p50_ms", "p95_ms",
-    "first_seen", "last_seen",
-    "kind", "language",
-})
+_STRUCTURAL_KEYS = frozenset(
+    {
+        "symbol_id",
+        "caller_id",
+        "callee_id",
+        "import_id",
+        "file_path",
+        "line_no",
+        "function_name",
+        "source",
+        "count",
+        "p50_ms",
+        "p95_ms",
+        "first_seen",
+        "last_seen",
+        "kind",
+        "language",
+    }
+)
 
 
 def redact_trace_record(record: dict, source: str) -> tuple[dict, list[str]]:
@@ -138,20 +163,17 @@ def _redact_string(value: str) -> tuple[str, list[str]]:
     out = value
     # Secrets registry first (bearer tokens, API keys, JWTs, etc.)
     for label, pattern in _SECRET_PATTERNS:
-        def _sub_secret(m: re.Match, _label: str = label) -> str:
-            fired.append(_label)
-            secret = m.groupdict().get("secret")
-            if secret:
-                return m.group(0).replace(secret, f"[REDACTED:{_label}]")
-            return f"[REDACTED:{_label}]"
-        out = pattern.sub(_sub_secret, out)
+        out = pattern.sub(lambda m, _l=label: _redact_match(m, _l, fired), out)
     # Trace patterns (IPs, emails, SQL literals, JSON values, locals blocks)
     for label, pattern in _TRACE_PATTERNS:
-        def _sub_trace(m: re.Match, _label: str = label) -> str:
-            fired.append(_label)
-            secret = m.groupdict().get("secret")
-            if secret:
-                return m.group(0).replace(secret, f"[REDACTED:{_label}]")
-            return f"[REDACTED:{_label}]"
-        out = pattern.sub(_sub_trace, out)
+        out = pattern.sub(lambda m, _l=label: _redact_match(m, _l, fired), out)
     return out, fired
+
+
+def _redact_match(m: re.Match, label: str, fired: list[str]) -> str:
+    """Replace a matched secret with a redacted marker."""
+    fired.append(label)
+    secret = m.groupdict().get("secret")
+    if secret:
+        return m.group(0).replace(secret, f"[REDACTED:{label}]")
+    return f"[REDACTED:{label}]"

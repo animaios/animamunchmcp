@@ -97,8 +97,9 @@ def detect_clusters(
     sigs: list[tuple[str, int, set]] = []
     for sec in sections:
         sid = sec.get("id") if isinstance(sec, dict) else getattr(sec, "id", "")
-        text = (sec.get("content") if isinstance(sec, dict)
-                else getattr(sec, "content", "")) or ""
+        text = (
+            sec.get("content") if isinstance(sec, dict) else getattr(sec, "content", "")
+        ) or ""
         if not sid:
             continue
         toks = tokenize(text)
@@ -223,19 +224,7 @@ def build_member_to_rep(clusters: list[dict]) -> dict[str, str]:
         rep = c.get("representative_id")
         if not rep:
             continue
-        for m in (c.get("member_ids") or []):
+        for m in c.get("member_ids") or []:
             if m and m != rep:
                 out[m] = rep
     return out
-
-
-def purge(base_path: Optional[str], owner: str, name: str) -> bool:
-    """Delete the sidecar. Returns True on success."""
-    path = _path(base_path, owner, name)
-    if path.exists():
-        try:
-            path.unlink()
-            return True
-        except OSError:
-            return False
-    return False

@@ -12,6 +12,7 @@ from .template_shared import TEMPLATE_ENGINE_LANGUAGES, TEMPLATE_EXTENSIONS
 @dataclass
 class LanguageSpec:
     """Specification for extracting symbols from a language's AST."""
+
     # tree-sitter language name (for tree-sitter-language-pack)
     ts_language: str
 
@@ -44,8 +45,8 @@ class LanguageSpec:
     container_node_types: list[str]
 
     # Additional extraction: constants, type aliases
-    constant_patterns: list[str]   # Node types for constants
-    type_patterns: list[str]       # Node types for type definitions
+    constant_patterns: list[str]  # Node types for constants
+    type_patterns: list[str]  # Node types for type definitions
 
     # If True, decorators are direct children of the declaration node (e.g. C#)
     # If False (default), decorators are preceding siblings (e.g. Python, Java)
@@ -339,7 +340,11 @@ TSX_SPEC = LanguageSpec(
     decorator_node_type="decorator",
     container_node_types=["class_declaration", "class"],
     constant_patterns=["lexical_declaration"],
-    type_patterns=["interface_declaration", "type_alias_declaration", "enum_declaration"],
+    type_patterns=[
+        "interface_declaration",
+        "type_alias_declaration",
+        "enum_declaration",
+    ],
 )
 
 
@@ -376,7 +381,11 @@ TYPESCRIPT_SPEC = LanguageSpec(
     decorator_node_type="decorator",
     container_node_types=["class_declaration", "class"],
     constant_patterns=["lexical_declaration"],
-    type_patterns=["interface_declaration", "type_alias_declaration", "enum_declaration"],
+    type_patterns=[
+        "interface_declaration",
+        "type_alias_declaration",
+        "enum_declaration",
+    ],
 )
 
 
@@ -467,7 +476,11 @@ JAVA_SPEC = LanguageSpec(
     },
     docstring_strategy="preceding_comment",
     decorator_node_type="marker_annotation",
-    container_node_types=["class_declaration", "interface_declaration", "enum_declaration"],
+    container_node_types=[
+        "class_declaration",
+        "interface_declaration",
+        "enum_declaration",
+    ],
     constant_patterns=["field_declaration"],
     type_patterns=["interface_declaration", "enum_declaration"],
 )
@@ -504,7 +517,11 @@ PHP_SPEC = LanguageSpec(
     },
     docstring_strategy="preceding_comment",
     decorator_node_type="attribute",  # PHP 8 #[Attribute] syntax
-    container_node_types=["class_declaration", "trait_declaration", "interface_declaration"],
+    container_node_types=[
+        "class_declaration",
+        "trait_declaration",
+        "interface_declaration",
+    ],
     constant_patterns=["const_declaration"],
     type_patterns=["interface_declaration", "trait_declaration", "enum_declaration"],
 )
@@ -535,7 +552,11 @@ DART_SPEC = LanguageSpec(
     return_type_fields={},
     docstring_strategy="preceding_comment",
     decorator_node_type="annotation",
-    container_node_types=["class_definition", "mixin_declaration", "extension_declaration"],
+    container_node_types=[
+        "class_definition",
+        "mixin_declaration",
+        "extension_declaration",
+    ],
     constant_patterns=[],
     type_patterns=["type_alias", "enum_declaration"],
 )
@@ -583,9 +604,20 @@ CSHARP_SPEC = LanguageSpec(
     docstring_strategy="preceding_comment",
     decorator_node_type="attribute_list",
     decorator_from_children=True,
-    container_node_types=["class_declaration", "struct_declaration", "record_declaration", "interface_declaration"],
+    container_node_types=[
+        "class_declaration",
+        "struct_declaration",
+        "record_declaration",
+        "interface_declaration",
+    ],
     constant_patterns=[],
-    type_patterns=["interface_declaration", "enum_declaration", "struct_declaration", "delegate_declaration", "record_declaration"],
+    type_patterns=[
+        "interface_declaration",
+        "enum_declaration",
+        "struct_declaration",
+        "delegate_declaration",
+        "record_declaration",
+    ],
 )
 
 
@@ -658,7 +690,12 @@ C_SPEC = LanguageSpec(
     decorator_node_type=None,
     container_node_types=[],
     constant_patterns=["preproc_def"],
-    type_patterns=["type_definition", "enum_specifier", "struct_specifier", "union_specifier"],
+    type_patterns=[
+        "type_definition",
+        "enum_specifier",
+        "struct_specifier",
+        "union_specifier",
+    ],
 )
 
 
@@ -672,7 +709,7 @@ SWIFT_SPEC = LanguageSpec(
     ts_language="swift",
     symbol_node_types={
         "function_declaration": "function",
-        "class_declaration": "class",    # covers class, struct, enum, extension
+        "class_declaration": "class",  # covers class, struct, enum, extension
         "protocol_declaration": "type",
         "typealias_declaration": "type",
         "init_declaration": "method",
@@ -681,11 +718,11 @@ SWIFT_SPEC = LanguageSpec(
     },
     name_fields={
         "function_declaration": "name",  # simple_identifier child
-        "class_declaration": "name",     # type_identifier child
+        "class_declaration": "name",  # type_identifier child
         "protocol_declaration": "name",  # type_identifier child
-        "typealias_declaration": "name", # user_type child
-        "init_declaration": "name",      # "init" keyword token
-        "deinit_declaration": "name",    # "deinit" keyword token
+        "typealias_declaration": "name",  # user_type child
+        "init_declaration": "name",  # "init" keyword token
+        "deinit_declaration": "name",  # "deinit" keyword token
         "property_declaration": "name",  # pattern child
     },
     param_fields={},  # Swift params are unnamed children; signature captured via source range
@@ -737,7 +774,14 @@ CPP_SPEC = LanguageSpec(
     decorator_node_type=None,
     container_node_types=["class_specifier", "struct_specifier", "union_specifier"],
     constant_patterns=["preproc_def"],
-    type_patterns=["class_specifier", "struct_specifier", "union_specifier", "enum_specifier", "type_definition", "alias_declaration"],
+    type_patterns=[
+        "class_specifier",
+        "struct_specifier",
+        "union_specifier",
+        "enum_specifier",
+        "type_definition",
+        "alias_declaration",
+    ],
 )
 
 
@@ -780,7 +824,14 @@ ARDUINO_SPEC = LanguageSpec(
     decorator_node_type=None,
     container_node_types=["class_specifier", "struct_specifier", "union_specifier"],
     constant_patterns=["preproc_def"],
-    type_patterns=["class_specifier", "struct_specifier", "union_specifier", "enum_specifier", "type_definition", "alias_declaration"],
+    type_patterns=[
+        "class_specifier",
+        "struct_specifier",
+        "union_specifier",
+        "enum_specifier",
+        "type_definition",
+        "alias_declaration",
+    ],
 )
 
 
@@ -862,8 +913,8 @@ PERL_SPEC = LanguageSpec(
 RUBY_SPEC = LanguageSpec(
     ts_language="ruby",
     symbol_node_types={
-        "method": "function",           # top-level → function; inside class/module → method
-        "singleton_method": "function", # def self.foo → always has class parent → method
+        "method": "function",  # top-level → function; inside class/module → method
+        "singleton_method": "function",  # def self.foo → always has class parent → method
         "class": "class",
         "module": "type",
     },
@@ -965,13 +1016,13 @@ AL_SPEC = LanguageSpec(
 KOTLIN_SPEC = LanguageSpec(
     ts_language="kotlin",
     symbol_node_types={
-        "class_declaration": "class",     # class, interface, enum class, data class
-        "object_declaration": "class",    # object declarations (singletons)
+        "class_declaration": "class",  # class, interface, enum class, data class
+        "object_declaration": "class",  # object declarations (singletons)
         "function_declaration": "function",
         "type_alias": "type",
     },
-    name_fields={},     # Names extracted via special-case in extractor.py
-    param_fields={},    # Parameters captured via source range in _build_signature
+    name_fields={},  # Names extracted via special-case in extractor.py
+    param_fields={},  # Parameters captured via source range in _build_signature
     return_type_fields={},
     docstring_strategy="preceding_comment",
     decorator_node_type=None,  # Annotations live inside modifiers node; captured in signature
@@ -991,8 +1042,8 @@ GLEAM_SPEC = LanguageSpec(
         "constant": "constant",
     },
     name_fields={
-        "function": "name",    # identifier field
-        "constant": "name",    # identifier field
+        "function": "name",  # identifier field
+        "constant": "name",  # identifier field
         # type_definition and type_alias: name via type_name child, special-cased in extractor.py
     },
     param_fields={
@@ -1254,7 +1305,12 @@ SCALA_SPEC = LanguageSpec(
     },
     docstring_strategy="preceding_comment",
     decorator_node_type="annotation",
-    container_node_types=["class_definition", "object_definition", "trait_definition", "enum_definition"],
+    container_node_types=[
+        "class_definition",
+        "object_definition",
+        "trait_definition",
+        "enum_definition",
+    ],
     constant_patterns=["val_definition", "var_definition"],
     type_patterns=["trait_definition", "enum_definition", "type_definition"],
 )
@@ -2027,19 +2083,32 @@ _APPLIED_EXTENSIONS = False
 _EXTENSIONS_LOCK = threading.Lock()
 
 
-_OPENAPI_BASENAMES = frozenset({
-    "openapi.yaml", "openapi.yml", "openapi.json",
-    "swagger.yaml", "swagger.yml", "swagger.json",
-})
+_OPENAPI_BASENAMES = frozenset(
+    {
+        "openapi.yaml",
+        "openapi.yml",
+        "openapi.json",
+        "swagger.yaml",
+        "swagger.yml",
+        "swagger.json",
+    }
+)
 
 _ANSIBLE_PLAYBOOK_DIRS = frozenset({"playbooks", "playbook"})
-_ANSIBLE_ROLE_DIR_SEGMENTS = frozenset({"tasks", "handlers", "vars", "defaults", "meta"})
+_ANSIBLE_ROLE_DIR_SEGMENTS = frozenset(
+    {"tasks", "handlers", "vars", "defaults", "meta"}
+)
 _ANSIBLE_SPECIAL_DIRS = frozenset({"group_vars", "host_vars"})
-_ANSIBLE_BASENAMES = frozenset({
-    "site.yml", "site.yaml",
-    "requirements.yml", "requirements.yaml",
-    "galaxy.yml", "galaxy.yaml",
-})
+_ANSIBLE_BASENAMES = frozenset(
+    {
+        "site.yml",
+        "site.yaml",
+        "requirements.yml",
+        "requirements.yaml",
+        "galaxy.yml",
+        "galaxy.yaml",
+    }
+)
 
 
 def _looks_like_ansible_path(path: str) -> bool:
@@ -2084,10 +2153,18 @@ def _apply_extra_extensions() -> None:
         extra_extensions = _cfg.get("extra_extensions", {})
         for ext, lang in extra_extensions.items():
             if not ext or not lang:
-                logger.warning("extra_extensions: empty extension or language %r:%r — skipped", ext, lang)
+                logger.warning(
+                    "extra_extensions: empty extension or language %r:%r — skipped",
+                    ext,
+                    lang,
+                )
                 continue
             if lang not in LANGUAGE_REGISTRY:
-                logger.warning("extra_extensions: unknown language %r for extension %r — skipped", lang, ext)
+                logger.warning(
+                    "extra_extensions: unknown language %r for extension %r — skipped",
+                    lang,
+                    ext,
+                )
                 continue
             LANGUAGE_EXTENSIONS[ext] = lang
 
@@ -2109,14 +2186,30 @@ def _looks_like_matlab_path(path: str) -> bool:
     lower = path.lower().replace("\\", "/")
     parts = [p for p in lower.split("/") if p]
     # Objective-C indicators: Xcode project dirs, iOS/macOS frameworks
-    _OBJC_MARKERS = frozenset({
-        "ios", "macos", "xcode", "cocoa", "objc", "objective-c",
-        "appdelegate", "viewcontroller", "uikit", "foundation",
-    })
+    _OBJC_MARKERS = frozenset(
+        {
+            "ios",
+            "macos",
+            "xcode",
+            "cocoa",
+            "objc",
+            "objective-c",
+            "appdelegate",
+            "viewcontroller",
+            "uikit",
+            "foundation",
+        }
+    )
     # MATLAB indicators: typical MATLAB project dirs
-    _MATLAB_MARKERS = frozenset({
-        "matlab", "+", "toolbox", "simulink", "mex",
-    })
+    _MATLAB_MARKERS = frozenset(
+        {
+            "matlab",
+            "+",
+            "toolbox",
+            "simulink",
+            "mex",
+        }
+    )
     for part in parts:
         if part in _OBJC_MARKERS:
             return False
@@ -2139,6 +2232,7 @@ def get_language_for_path(path: str) -> "Optional[str]":
     """
     _apply_extra_extensions()
     import os as _os
+
     lower = path.lower()
     base = _os.path.basename(lower)
     # 1. Basename match for OpenAPI sentinel files

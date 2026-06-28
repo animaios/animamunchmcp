@@ -25,7 +25,7 @@ import time
 from fnmatch import fnmatch
 from typing import Optional
 
-from ..storage import IndexStore, record_savings, estimate_savings, cost_avoided
+from ..storage import IndexStore, cost_avoided, estimate_savings, record_savings
 from ._utils import index_status_to_tool_error, resolve_repo
 from .get_context_bundle import _count_tokens
 
@@ -35,25 +35,45 @@ logger = logging.getLogger(__name__)
 # Tunables
 # ---------------------------------------------------------------------------
 _DEFAULT_THRESHOLD = 0.80
-_DEFAULT_MIN_SIZE = 30          # byte_length floor; kills getter/wrapper noise
+_DEFAULT_MIN_SIZE = 30  # byte_length floor; kills getter/wrapper noise
 _DEFAULT_MAX_CLUSTERS = 25
 _DEFAULT_SEMANTIC_WEIGHT = 0.6
 _DEFAULT_TOKEN_BUDGET = 4000
-_MAX_PAIRS_PER_BUCKET = 200     # cap to keep pair count bounded on dense terms
-_HARD_PAIR_CAP = 100_000        # absolute cap on pairs scored (safety)
-_NEAR_DUP_THRESHOLD = 0.92      # avg cluster similarity → near_duplicate verdict
+_MAX_PAIRS_PER_BUCKET = 200  # cap to keep pair count bounded on dense terms
+_HARD_PAIR_CAP = 100_000  # absolute cap on pairs scored (safety)
+_NEAR_DUP_THRESHOLD = 0.92  # avg cluster similarity → near_duplicate verdict
 
 # Filenames we skip even when include_tests is True.
 _GENERATED_PATTERNS = (
-    "_pb2.py", "_pb2_grpc.py", ".pb.go", ".gen.go", ".g.dart",
-    ".generated.ts", ".generated.tsx", "_generated.py", ".min.js",
+    "_pb2.py",
+    "_pb2_grpc.py",
+    ".pb.go",
+    ".gen.go",
+    ".g.dart",
+    ".generated.ts",
+    ".generated.tsx",
+    "_generated.py",
+    ".min.js",
 )
 # Dunders that look identical structurally but are forced by language.
-_DUNDER_SKIP = frozenset({
-    "__init__", "__repr__", "__str__", "__hash__", "__eq__",
-    "__lt__", "__le__", "__gt__", "__ge__", "__ne__",
-    "__enter__", "__exit__", "__getitem__", "__setitem__",
-})
+_DUNDER_SKIP = frozenset(
+    {
+        "__init__",
+        "__repr__",
+        "__str__",
+        "__hash__",
+        "__eq__",
+        "__lt__",
+        "__le__",
+        "__gt__",
+        "__ge__",
+        "__ne__",
+        "__enter__",
+        "__exit__",
+        "__getitem__",
+        "__setitem__",
+    }
+)
 _TEST_FILENAME_RE = re.compile(r"(^|[/\\])(test_|tests?[/\\]|_test\.)", re.IGNORECASE)
 
 _TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -201,7 +221,9 @@ def find_similar_symbols(
     if token_budget < 1:
         return {"error": "token_budget must be >= 1"}
 
-    kinds_filter = set(include_kinds) if include_kinds else {"function", "method", "class"}
+    kinds_filter = (
+        set(include_kinds) if include_kinds else {"function", "method", "class"}
+    )
 
     try:
         owner, name = resolve_repo(repo, storage_path)
@@ -246,7 +268,11 @@ def find_similar_symbols(
             "total_tokens": 0,
             "budget_tokens": token_budget,
             "note": "Not enough candidates for similarity analysis.",
-            "_meta": {"timing_ms": round(elapsed, 1), "tokens_saved": 0, "total_tokens_saved": 0},
+            "_meta": {
+                "timing_ms": round(elapsed, 1),
+                "tokens_saved": 0,
+                "total_tokens_saved": 0,
+            },
         }
 
     # Index candidates by id for O(1) lookup
@@ -259,6 +285,7 @@ def find_similar_symbols(
     mode = "structural"
     try:
         from ..storage.embedding_store import EmbeddingStore  # noqa: PLC0415
+
         db_path = store._sqlite._db_path(owner, name)
         emb_store = EmbeddingStore(db_path)
         if emb_store.count() > 0:
@@ -268,7 +295,9 @@ def find_similar_symbols(
             if len(embeddings) >= 2:
                 mode = "hybrid"
     except Exception as exc:  # noqa: BLE001
-        logger.debug("find_similar_symbols: embedding load skipped: %s", exc, exc_info=True)
+        logger.debug(
+            "find_similar_symbols: embedding load skipped: %s", exc, exc_info=True
+        )
 
     # ── Pre-filter pairs via BM25 inverted index ───────────────────────
     # Only score pairs that share at least one indexed term.
@@ -367,7 +396,11 @@ def find_similar_symbols(
             "mode": mode,
             "total_tokens": 0,
             "budget_tokens": token_budget,
-            "_meta": {"timing_ms": round(elapsed, 1), "tokens_saved": 0, "total_tokens_saved": 0},
+            "_meta": {
+                "timing_ms": round(elapsed, 1),
+                "tokens_saved": 0,
+                "total_tokens_saved": 0,
+            },
         }
 
     # ── Union-find clustering ──────────────────────────────────────────
@@ -408,8 +441,11 @@ def find_similar_symbols(
             pagerank = cache["pagerank"]
         else:
             from .pagerank import compute_pagerank  # noqa: PLC0415
+
             pr, _ = compute_pagerank(
-                index.imports or {}, index.source_files, index.alias_map,
+                index.imports or {},
+                index.source_files,
+                index.alias_map,
                 psr4_map=getattr(index, "psr4_map", None),
             )
             pagerank = pr
@@ -436,13 +472,14 @@ def find_similar_symbols(
             continue
         avg_sim = sum(sims) / len(sims)
 
-        # Canonical pick: highest PageRank by *file*; ties broken by byte_length.
-        def _rank_key(idx: int) -> tuple:
-            sym = candidates[idx]
-            pr = pagerank.get(sym.get("file", ""), 0.0)
-            bl = int(sym.get("byte_length", 0) or 0)
-            return (-pr, -bl, sym["id"])
-        canonical_idx = min(member_indices, key=_rank_key)
+        canonical_idx = min(
+            member_indices,
+            key=lambda idx: (
+                -pagerank.get(candidates[idx].get("file", ""), 0.0),
+                -int(candidates[idx].get("byte_length", 0) or 0),
+                candidates[idx]["id"],
+            ),
+        )
         canonical = candidates[canonical_idx]
         canonical_pr = pagerank.get(canonical.get("file", ""), 0.0)
         score_reason = "highest_pagerank" if canonical_pr > 0 else "largest_body"
@@ -461,37 +498,44 @@ def find_similar_symbols(
             mb = int(mem.get("byte_length", 0) or 0)
             if mb > max_bytes:
                 max_bytes = mb
-            members_out.append({
-                "symbol_id": mem["id"],
-                "similarity": round(sim_to_canon, 4),
-                "byte_length": mb,
-                "file": mem.get("file", ""),
-                "line": mem.get("line", 0),
-            })
+            members_out.append(
+                {
+                    "symbol_id": mem["id"],
+                    "similarity": round(sim_to_canon, 4),
+                    "byte_length": mb,
+                    "file": mem.get("file", ""),
+                    "line": mem.get("line", 0),
+                }
+            )
         # Cluster impact = size × largest member byte_length
         max_bytes = max(max_bytes, int(canonical.get("byte_length", 0) or 0))
         impact = len(member_indices) * max(max_bytes, 1)
 
-        differs = _differs_by(canonical, candidates[member_indices[1 if member_indices[0] == canonical_idx else 0]])
+        differs = _differs_by(
+            canonical,
+            candidates[member_indices[1 if member_indices[0] == canonical_idx else 0]],
+        )
 
-        cluster_records.append({
-            "verdict": verdict,
-            "size": len(member_indices),
-            "avg_similarity": round(avg_sim, 4),
-            "mode": mode,
-            "impact": impact,
-            "canonical": {
-                "symbol_id": canonical["id"],
-                "score_reason": score_reason,
-                "pagerank": round(canonical_pr, 6),
-                "byte_length": int(canonical.get("byte_length", 0) or 0),
-                "file": canonical.get("file", ""),
-                "line": canonical.get("line", 0),
-                "signature": (canonical.get("signature") or "").strip(),
-            },
-            "members": members_out,
-            "differs_by": differs,
-        })
+        cluster_records.append(
+            {
+                "verdict": verdict,
+                "size": len(member_indices),
+                "avg_similarity": round(avg_sim, 4),
+                "mode": mode,
+                "impact": impact,
+                "canonical": {
+                    "symbol_id": canonical["id"],
+                    "score_reason": score_reason,
+                    "pagerank": round(canonical_pr, 6),
+                    "byte_length": int(canonical.get("byte_length", 0) or 0),
+                    "file": canonical.get("file", ""),
+                    "line": canonical.get("line", 0),
+                    "signature": (canonical.get("signature") or "").strip(),
+                },
+                "members": members_out,
+                "differs_by": differs,
+            }
+        )
 
     # Sort by impact, take top max_clusters, then token-pack.
     cluster_records.sort(key=lambda r: r["impact"], reverse=True)

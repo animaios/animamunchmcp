@@ -62,6 +62,7 @@ def is_onnxruntime_available() -> bool:
     """Return True if ``onnxruntime`` can be imported."""
     try:
         import onnxruntime  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -81,7 +82,10 @@ def download_model(target_dir: Optional[Path] = None, *, quiet: bool = False) ->
     dest.mkdir(parents=True, exist_ok=True)
 
     files_to_fetch = [
-        (f"{_HF_BASE_URL}/{MODEL_REPO}/resolve/main/onnx/{ONNX_FILENAME}", ONNX_FILENAME),
+        (
+            f"{_HF_BASE_URL}/{MODEL_REPO}/resolve/main/onnx/{ONNX_FILENAME}",
+            ONNX_FILENAME,
+        ),
         (f"{_HF_BASE_URL}/{MODEL_REPO}/resolve/main/{VOCAB_FILENAME}", VOCAB_FILENAME),
     ]
 
@@ -151,7 +155,12 @@ class WordPieceTokenizer:
     @staticmethod
     def _is_punctuation(ch: str) -> bool:
         cp = ord(ch)
-        if (33 <= cp <= 47) or (58 <= cp <= 64) or (91 <= cp <= 96) or (123 <= cp <= 126):
+        if (
+            (33 <= cp <= 47)
+            or (58 <= cp <= 64)
+            or (91 <= cp <= 96)
+            or (123 <= cp <= 126)
+        ):
             return True
         return unicodedata.category(ch).startswith("P")
 
@@ -274,8 +283,7 @@ def _get_session():
 
     if not onnx_path.exists():
         raise FileNotFoundError(
-            f"ONNX model not found at {onnx_path}. "
-            f"Run: jcodemunch-mcp download-model"
+            f"ONNX model not found at {onnx_path}. Run: jcodemunch-mcp download-model"
         )
     if not vocab_path.exists():
         raise FileNotFoundError(
@@ -290,9 +298,7 @@ def _get_session():
 
     _session = ort.InferenceSession(str(onnx_path), sess_options=opts)
     _tokenizer = WordPieceTokenizer(vocab_path)
-    logger.info(
-        "Local ONNX encoder loaded: %s (%d-dim)", MODEL_NAME, MODEL_DIM
-    )
+    logger.info("Local ONNX encoder loaded: %s (%d-dim)", MODEL_NAME, MODEL_DIM)
     return _session, _tokenizer
 
 
@@ -304,26 +310,7 @@ def reset_session() -> None:
 
 
 # ── Public API ─────────────────────────────────────────────────────────────
-
-
-def _mean_pool(token_embeddings: list, attention_mask: list) -> list[float]:
-    """Mean-pool token embeddings using the attention mask."""
-    dim = len(token_embeddings[0])
-    pooled = [0.0] * dim
-    total = 0.0
-    for i, mask_val in enumerate(attention_mask):
-        if mask_val == 1:
-            for j in range(dim):
-                pooled[j] += token_embeddings[i][j]
-            total += 1.0
-    if total > 0:
-        for j in range(dim):
-            pooled[j] /= total
-    # L2 normalise
-    norm = sum(x * x for x in pooled) ** 0.5
-    if norm > 0:
-        pooled = [x / norm for x in pooled]
-    return pooled
+# ─── Public API ────────────────────────────────────
 
 
 def encode_batch(texts: list[str]) -> list[list[float]]:

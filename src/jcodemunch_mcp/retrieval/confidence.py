@@ -40,7 +40,9 @@ def compute_confidence(
     components = {
         "gap": 0.0,
         "strength": 0.0,
-        "identity": 1.0 if has_identity_match else (0.7 if has_identity_match is None else 0.6),
+        "identity": 1.0
+        if has_identity_match
+        else (0.7 if has_identity_match is None else 0.6),
         "freshness": 0.6 if is_stale else 1.0,
     }
 
@@ -108,11 +110,13 @@ def _extract_score(entry, field: str) -> Optional[float]:
 def _approx_exp(x: float) -> float:
     """math.exp without importing math at module load (kept tiny)."""
     import math
+
     return math.exp(x)
 
 
 def _approx_log(x: float) -> float:
     import math
+
     return math.log(x)
 
 
@@ -141,35 +145,3 @@ def attach_confidence(
     if include_components:
         meta["confidence_components"] = payload["components"]
     return result
-
-
-def extract_ledger_features(scored_results: list[dict]) -> dict:
-    """Pull (top1_score, top2_score, identity_hit) out of a result list.
-
-    Used by the v1.78.0 ranking ledger so each retrieval tool can record
-    a uniform feature set without duplicating the score-extraction logic.
-    """
-    top1 = None
-    top2 = None
-    if scored_results:
-        s0 = scored_results[0].get("score") if isinstance(scored_results[0], dict) else None
-        try:
-            top1 = float(s0) if s0 is not None else None
-        except (TypeError, ValueError):
-            top1 = None
-        if len(scored_results) > 1:
-            s1 = scored_results[1].get("score") if isinstance(scored_results[1], dict) else None
-            try:
-                top2 = float(s1) if s1 is not None else None
-            except (TypeError, ValueError):
-                top2 = None
-    identity_hit = any(
-        bool(r.get("identity") or r.get("identity_match"))
-        for r in scored_results[:3]
-        if isinstance(r, dict)
-    )
-    return {
-        "top1_score": top1,
-        "top2_score": top2,
-        "identity_hit": identity_hit,
-    }

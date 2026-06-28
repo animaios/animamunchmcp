@@ -55,17 +55,21 @@ _RESULT_CACHE_MAXSIZE = 256  # max tool-result cache entries per session
 _LATENCY_RING_DEFAULT = 512  # per-tool latency ring size
 _PERF_DB_MAX_ROWS_DEFAULT = 100_000  # rolling cap on persisted perf rows
 
+
 def _get_stats_file_interval() -> int:
     """Read stats_file_interval from config. 0 = disabled, default 3."""
     return max(0, _config.get("stats_file_interval", _FLUSH_INTERVAL))
 
+
 # Input token pricing ($ per token). Update as models reprice.
 # Source: https://claude.com/pricing#api (last verified 2026-03-09)
 PRICING = {
-    "claude_opus_4_6":    5.00 / 1_000_000,  # Claude Opus 4.6   — $5.00 / 1M input tokens (≤200K ctx)
-    "claude_sonnet_4_6":  3.00 / 1_000_000,  # Claude Sonnet 4.6 — $3.00 / 1M input tokens (≤200K ctx)
-    "claude_haiku_4_5":   1.00 / 1_000_000,  # Claude Haiku 4.5  — $1.00 / 1M input tokens
-    "gpt5_latest":       10.00 / 1_000_000,  # GPT-5 (latest)    — $10.00 / 1M input tokens
+    "claude_opus_4_6": 5.00
+    / 1_000_000,  # Claude Opus 4.6   — $5.00 / 1M input tokens (≤200K ctx)
+    "claude_sonnet_4_6": 3.00
+    / 1_000_000,  # Claude Sonnet 4.6 — $3.00 / 1M input tokens (≤200K ctx)
+    "claude_haiku_4_5": 1.00 / 1_000_000,  # Claude Haiku 4.5  — $1.00 / 1M input tokens
+    "gpt5_latest": 10.00 / 1_000_000,  # GPT-5 (latest)    — $10.00 / 1M input tokens
 }
 
 
@@ -73,16 +77,18 @@ PRICING = {
 # In-memory state (process-lifetime cache)
 # ---------------------------------------------------------------------------
 
+
 class _State:
     """Holds the in-memory accumulator for the current process."""
+
     def __init__(self):
         self._lock = threading.Lock()
         self._loaded = False
-        self._total: int = 0          # cumulative total (disk + in-flight)
-        self._unflushed: int = 0      # delta not yet written to disk
-        self._encoding_total: int = 0    # cumulative MUNCH encoding savings
+        self._total: int = 0  # cumulative total (disk + in-flight)
+        self._unflushed: int = 0  # delta not yet written to disk
+        self._encoding_total: int = 0  # cumulative MUNCH encoding savings
         self._encoding_unflushed: int = 0
-        self._call_count: int = 0     # calls since last savings flush
+        self._call_count: int = 0  # calls since last savings flush
         self._stats_call_count: int = 0  # calls since last session_stats.json write
         self._anon_id: Optional[str] = None
         self._base_path: Optional[str] = None
@@ -94,7 +100,7 @@ class _State:
         self._session_tool_breakdown: dict = {}
         # Session-level tool-result cache (LRU, evicted at _RESULT_CACHE_MAXSIZE)
         self._result_cache: OrderedDict = OrderedDict()  # (tool, repo, key) -> result
-        self._cache_hits: dict = {}    # tool_name -> hit count
+        self._cache_hits: dict = {}  # tool_name -> hit count
         self._cache_misses: dict = {}  # tool_name -> miss count
         # Per-tool latency ring (process-lifetime; cap _LATENCY_RING_DEFAULT entries)
         self._tool_latencies: dict[str, deque] = {}
@@ -120,7 +126,9 @@ class _State:
         self._anon_id = data.get("anon_id")
         self._loaded = True
 
-    def add(self, delta: int, base_path: Optional[str], tool_name: Optional[str] = None) -> int:
+    def add(
+        self, delta: int, base_path: Optional[str], tool_name: Optional[str] = None
+    ) -> int:
         """Add delta to the running total. Returns new cumulative total."""
         with self._lock:
             self._ensure_loaded(base_path)
@@ -158,7 +166,9 @@ class _State:
             self._cache_misses[tool_name] = self._cache_misses.get(tool_name, 0) + 1
             return None
 
-    def cache_put(self, tool_name: str, repo: str, specific_key: tuple, result: dict) -> None:
+    def cache_put(
+        self, tool_name: str, repo: str, specific_key: tuple, result: dict
+    ) -> None:
         """Store result in LRU cache. Evicts oldest entry when full. Thread-safe."""
         with self._lock:
             full_key = (tool_name, repo, specific_key)
@@ -199,7 +209,9 @@ class _State:
             return {
                 "total_hits": total_hits,
                 "total_misses": total_misses,
-                "hit_rate": round(total_hits / total_lookups, 3) if total_lookups else 0.0,
+                "hit_rate": round(total_hits / total_lookups, 3)
+                if total_lookups
+                else 0.0,
                 "cached_entries": len(self._result_cache),
                 "by_tool": by_tool,
             }
@@ -247,7 +259,9 @@ class _State:
                     self._tool_latencies[tool_name] = ring
                 ring.append(float(duration_ms))
                 if not ok:
-                    self._tool_errors[tool_name] = self._tool_errors.get(tool_name, 0) + 1
+                    self._tool_errors[tool_name] = (
+                        self._tool_errors.get(tool_name, 0) + 1
+                    )
                 if _config.get("perf_telemetry_enabled", False):
                     self._persist_perf_locked(tool_name, duration_ms, ok, repo)
         except Exception:
@@ -285,7 +299,11 @@ class _State:
         if self._perf_db_path_cached is not None:
             return self._perf_db_path_cached
         try:
-            root = Path(self._base_path) if self._base_path else Path.home() / ".code-index"
+            root = (
+                Path(self._base_path)
+                if self._base_path
+                else Path.home() / ".code-index"
+            )
             root.mkdir(parents=True, exist_ok=True)
             path = root / _PERF_DB_FILE
             self._perf_db_path_cached = path
@@ -313,8 +331,12 @@ class _State:
                     repo      TEXT
                 )
             """)
-            conn.execute("CREATE INDEX IF NOT EXISTS ix_tool_calls_tool ON tool_calls(tool)")
-            conn.execute("CREATE INDEX IF NOT EXISTS ix_tool_calls_ts   ON tool_calls(ts)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS ix_tool_calls_tool ON tool_calls(tool)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS ix_tool_calls_ts   ON tool_calls(ts)"
+            )
             # v1.78.0 — ranking ledger (data-collection only; consumed by
             # the online weight tuner in v1.79.0).
             conn.execute("""
@@ -333,9 +355,15 @@ class _State:
                     repo_is_stale  INTEGER NOT NULL
                 )
             """)
-            conn.execute("CREATE INDEX IF NOT EXISTS ix_ranking_events_repo ON ranking_events(repo)")
-            conn.execute("CREATE INDEX IF NOT EXISTS ix_ranking_events_ts   ON ranking_events(ts)")
-            conn.execute("CREATE INDEX IF NOT EXISTS ix_ranking_events_qh   ON ranking_events(query_hash)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS ix_ranking_events_repo ON ranking_events(repo)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS ix_ranking_events_ts   ON ranking_events(ts)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS ix_ranking_events_qh   ON ranking_events(query_hash)"
+            )
             return conn
         except Exception:
             logger.debug("Failed to open perf db at %s", path, exc_info=True)
@@ -370,6 +398,7 @@ class _State:
                 try:
                     import hashlib
                     import json as _json
+
                     qh = hashlib.sha1(query.encode("utf-8")).hexdigest()[:16]
                     conn.execute(
                         "INSERT INTO ranking_events "
@@ -417,7 +446,14 @@ class _State:
             )
             self._perf_rows_since_trim += 1
             if self._perf_rows_since_trim >= 1000:
-                cap = max(1000, int(_config.get("perf_telemetry_max_rows", _PERF_DB_MAX_ROWS_DEFAULT)))
+                cap = max(
+                    1000,
+                    int(
+                        _config.get(
+                            "perf_telemetry_max_rows", _PERF_DB_MAX_ROWS_DEFAULT
+                        )
+                    ),
+                )
                 conn.execute(
                     "DELETE FROM tool_calls WHERE rowid IN ("
                     "  SELECT rowid FROM tool_calls ORDER BY ts ASC LIMIT MAX(0, "
@@ -471,7 +507,9 @@ class _State:
         try:
             data = json.loads(path.read_text()) if path.exists() else {}
         except Exception:
-            logger.debug("Failed to read savings file for flush: %s", path, exc_info=True)
+            logger.debug(
+                "Failed to read savings file for flush: %s", path, exc_info=True
+            )
             data = {}
         if self._anon_id is None:
             if "anon_id" not in data:
@@ -494,7 +532,9 @@ class _State:
         # written above) so the server can GREATEST-converge and recover any
         # previously dropped sends; the delta rides along for legacy servers.
         if self._pending_telemetry > 0 and _config.get("share_savings", True):
-            _share_savings(self._pending_telemetry, data["total_tokens_saved"], self._anon_id)
+            _share_savings(
+                self._pending_telemetry, data["total_tokens_saved"], self._anon_id
+            )
             self._pending_telemetry = 0
 
         self._unflushed = 0
@@ -535,6 +575,7 @@ for _sig in (signal.SIGTERM, signal.SIGINT):
 # ---------------------------------------------------------------------------
 # Public API (unchanged signatures)
 # ---------------------------------------------------------------------------
+
 
 def _savings_path(base_path: Optional[str] = None) -> Path:
     root = Path(base_path) if base_path else Path.home() / ".code-index"
@@ -583,6 +624,7 @@ def _telemetry_worker() -> None:
         delta, total, anon_id = item
         try:
             import httpx
+
             # `total` is the absolute lifetime savings; the server applies
             # GREATEST(stored, total) so a failed post self-corrects on the next
             # one. `delta` rides along for older server builds (additive upsert).
@@ -641,13 +683,9 @@ def record_encoding_savings(
         return _state._encoding_total
 
 
-def get_total_encoding_saved(base_path: Optional[str] = None) -> int:
-    with _state._lock:
-        _state._ensure_loaded(base_path)
-        return _state._encoding_total
-
-
-def record_savings(tokens_saved: int, base_path: Optional[str] = None, tool_name: Optional[str] = None) -> int:
+def record_savings(
+    tokens_saved: int, base_path: Optional[str] = None, tool_name: Optional[str] = None
+) -> int:
     """Add tokens_saved to the running total. Returns new cumulative total.
 
     Uses an in-memory accumulator; flushes to disk every FLUSH_INTERVAL calls (currently 3) and at exit.
@@ -655,7 +693,9 @@ def record_savings(tokens_saved: int, base_path: Optional[str] = None, tool_name
     return _state.add(tokens_saved, base_path, tool_name)
 
 
-def write_pulse(tool_name: str, tokens_saved: int = 0, base_path: Optional[str] = None) -> None:
+def write_pulse(
+    tool_name: str, tokens_saved: int = 0, base_path: Optional[str] = None
+) -> None:
     """Write a per-call pulse file for downstream consumers (dashboards, monitors).
 
     Atomic write of a small JSON file to {storage}/_pulse.json containing the
@@ -696,12 +736,10 @@ def get_session_stats(base_path: Optional[str] = None) -> dict:
     return {
         **stats,
         "session_cost_avoided": {
-            model: round(session_tokens * rate, 4)
-            for model, rate in PRICING.items()
+            model: round(session_tokens * rate, 4) for model, rate in PRICING.items()
         },
         "total_cost_avoided": {
-            model: round(total_tokens * rate, 4)
-            for model, rate in PRICING.items()
+            model: round(total_tokens * rate, 4) for model, rate in PRICING.items()
         },
         "runtime_signal": _runtime_signal_summary(base_path),
     }
@@ -717,6 +755,7 @@ def _runtime_signal_summary(base_path: Optional[str] = None) -> dict:
     Errors are logged at DEBUG and yield zeroes — never block stats.
     """
     import sqlite3 as _sqlite3
+
     summary = {"rows": 0, "by_source": {}}
     try:
         root = Path(base_path) if base_path else Path.home() / ".code-index"
@@ -747,7 +786,9 @@ def _runtime_signal_summary(base_path: Optional[str] = None) -> dict:
                     total += int(r["n"])
                 conn.close()
             except _sqlite3.Error:
-                logger.debug("Runtime signal probe failed on %s", db_path, exc_info=True)
+                logger.debug(
+                    "Runtime signal probe failed on %s", db_path, exc_info=True
+                )
         summary["rows"] = total
         summary["by_source"] = by_source
     except Exception:
@@ -765,7 +806,9 @@ def result_cache_get(tool_name: str, repo: str, specific_key: tuple):
     return _state.cache_get(tool_name, repo, specific_key)
 
 
-def result_cache_put(tool_name: str, repo: str, specific_key: tuple, result: dict) -> None:
+def result_cache_put(
+    tool_name: str, repo: str, specific_key: tuple, result: dict
+) -> None:
     """Store a tool result in the session LRU cache (max 256 entries)."""
     _state.cache_put(tool_name, repo, specific_key, result)
 
@@ -859,43 +902,6 @@ def ranking_db_query(
         return []
     except Exception:
         logger.debug("ranking_db_query failed at %s", path, exc_info=True)
-        return []
-
-
-def perf_db_query(
-    base_path: Optional[str] = None,
-    window_seconds: Optional[float] = None,
-    tool: Optional[str] = None,
-) -> list[tuple]:
-    """Read recent perf rows from telemetry.db for the analyze_perf tool.
-
-    Returns a list of (ts, tool, duration_ms, ok, repo). Empty if the db
-    doesn't exist yet (perf telemetry never enabled or never written).
-    """
-    path = perf_db_path(base_path)
-    if not path.exists():
-        return []
-    try:
-        conn = sqlite3.connect(str(path), timeout=2.0)
-        try:
-            sql = "SELECT ts, tool, duration_ms, ok, repo FROM tool_calls"
-            args: list = []
-            clauses: list[str] = []
-            if window_seconds is not None:
-                clauses.append("ts >= ?")
-                args.append(time.time() - float(window_seconds))
-            if tool:
-                clauses.append("tool = ?")
-                args.append(tool)
-            if clauses:
-                sql += " WHERE " + " AND ".join(clauses)
-            sql += " ORDER BY ts DESC"
-            rows = conn.execute(sql, args).fetchall()
-            return rows
-        finally:
-            conn.close()
-    except Exception:
-        logger.debug("perf_db_query failed at %s", path, exc_info=True)
         return []
 
 

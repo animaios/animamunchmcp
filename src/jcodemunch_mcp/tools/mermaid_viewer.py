@@ -2,7 +2,7 @@
 
 Provides:
   resolve_viewer_path()  — configured path or $PATH lookup
-  open_diagram()         — write .mmd file + spawn viewer
+  was_viewer_used()      — check if viewer was invoked
   cleanup_temp_dir()     — purge only jcodemunch-owned temp files
 
 Files are prefixed with `jcm-` so cleanup is selective and safe.
@@ -45,7 +45,9 @@ def _prune_stale_files(d: Path) -> None:
             if entry.stat().st_mtime < cutoff:
                 entry.unlink()
         except OSError:
-            logger.debug("Failed to prune stale mermaid temp file %s", entry, exc_info=True)
+            logger.debug(
+                "Failed to prune stale mermaid temp file %s", entry, exc_info=True
+            )
 
 
 def _temp_dir(storage_path: Path | None = None) -> Path:
@@ -103,43 +105,8 @@ def resolve_viewer_path() -> str | None:
     return shutil.which("mmd-viewer")
 
 
-def open_diagram(mermaid: str, storage_path: Path | None = None) -> dict:
-    """Write mermaid to a timestamped .mmd file and spawn mmd-viewer on it.
-
-    Returns {opened: bool, path: str, error?: str}. Non-fatal on failure.
-    Sets _viewer_used=True when a file is written (attempt was made).
-    """
-    global _viewer_used
-    viewer = resolve_viewer_path()
-    if not viewer:
-        return {"opened": False, "error": "viewer_not_found"}
-    d = _temp_dir(storage_path)
-    try:
-        d.mkdir(parents=True, exist_ok=True)
-        _prune_stale_files(d)
-        fname = f"{_FILE_PREFIX}diagram-{os.getpid()}-{time.time_ns()}.mmd"
-        p = d / fname
-        p.write_text(mermaid, encoding="utf-8")
-    except OSError as e:
-        logger.warning("Failed to write mermaid temp file: %s", e, exc_info=True)
-        return {"opened": False, "error": f"write_failed: {e}"}
-    _viewer_used = True
-    try:
-        with open(p, "rb") as f:
-            subprocess.Popen(
-                [viewer],
-                stdin=f,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                close_fds=(os.name != "nt"),
-            )
-    except Exception as e:
-        return {"opened": False, "path": str(p), "error": f"spawn_failed: {e}"}
-    return {"opened": True, "path": str(p)}
-
-
 def was_viewer_used() -> bool:
-    """Return True if open_diagram was called at least once this session."""
+    """Return True if the viewer was invoked at least once this session."""
     return _viewer_used
 
 
@@ -165,5 +132,7 @@ def cleanup_temp_dir(storage_path: Path | None = None) -> int:
                     entry.unlink()
                     removed += 1
                 except OSError:
-                    logger.debug("Failed to remove mermaid temp file %s", entry, exc_info=True)
+                    logger.debug(
+                        "Failed to remove mermaid temp file %s", entry, exc_info=True
+                    )
     return removed

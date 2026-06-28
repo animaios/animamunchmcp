@@ -44,9 +44,11 @@ logger = logging.getLogger(__name__)
 # Data types
 # ───────────────────────────────────────────────────────────────────
 
+
 @dataclass
 class Position:
     """Zero-indexed line/character position in a text document."""
+
     line: int
     character: int
 
@@ -54,31 +56,34 @@ class Position:
 @dataclass
 class CallSite:
     """An unresolved call site to be resolved via LSP."""
-    file: str          # Absolute path to the source file
-    position: Position # Position of the call expression
-    called_name: str   # The called name as extracted by tree-sitter
+
+    file: str  # Absolute path to the source file
+    position: Position  # Position of the call expression
+    called_name: str  # The called name as extracted by tree-sitter
 
 
 @dataclass
 class ResolvedRef:
     """A call site resolved to a concrete definition via LSP."""
+
     call_site: CallSite
-    target_file: str        # Absolute path to the definition file
-    target_line: int        # Zero-indexed line of the definition
-    target_character: int   # Zero-indexed character of the definition
-    target_name: str        # Resolved name of the target symbol
+    target_file: str  # Absolute path to the definition file
+    target_line: int  # Zero-indexed line of the definition
+    target_character: int  # Zero-indexed character of the definition
+    target_name: str  # Resolved name of the target symbol
     resolution: str = "lsp_resolved"
 
 
 @dataclass
 class DispatchEdge:
     """An interface/trait method resolved to a concrete implementation via LSP."""
-    interface_file: str     # Absolute path to file defining the interface/trait
-    interface_name: str     # Name of the interface/trait/abstract class
-    method_name: str        # Name of the method on the interface
-    impl_file: str          # Absolute path to file containing the implementation
-    impl_line: int          # Zero-indexed line of the concrete method
-    impl_name: str          # Name of the implementing type (e.g. "FileWriter")
+
+    interface_file: str  # Absolute path to file defining the interface/trait
+    interface_name: str  # Name of the interface/trait/abstract class
+    method_name: str  # Name of the method on the interface
+    impl_file: str  # Absolute path to file containing the implementation
+    impl_line: int  # Zero-indexed line of the concrete method
+    impl_name: str  # Name of the implementing type (e.g. "FileWriter")
     resolution: str = "lsp_dispatch"
 
 
@@ -108,6 +113,7 @@ _SERVER_COMMANDS: dict[str, list[str]] = {
 # ───────────────────────────────────────────────────────────────────
 # LSP JSON-RPC helpers
 # ───────────────────────────────────────────────────────────────────
+
 
 def _encode_message(obj: dict) -> bytes:
     """Encode a JSON-RPC message with Content-Length header."""
@@ -151,6 +157,7 @@ def _read_message(stream) -> Optional[dict]:
 # ───────────────────────────────────────────────────────────────────
 # LSP Server Manager (per-language singleton)
 # ───────────────────────────────────────────────────────────────────
+
 
 class LSPServer:
     """Manages the lifecycle of a single LSP server process."""
@@ -197,7 +204,8 @@ class LSPServer:
         except FileNotFoundError:
             logger.debug(
                 "LSP: server binary not found for %s (command: %s)",
-                self.language, self.command,
+                self.language,
+                self.command,
             )
             return False
         except Exception:
@@ -206,7 +214,9 @@ class LSPServer:
 
         self._shutdown = False
         self._reader_thread = threading.Thread(
-            target=self._read_loop, daemon=True, name=f"lsp-reader-{self.language}",
+            target=self._read_loop,
+            daemon=True,
+            name=f"lsp-reader-{self.language}",
         )
         self._reader_thread.start()
 
@@ -267,18 +277,14 @@ class LSPServer:
         with self._lock:
             return self._responses.pop(rid, None)
 
-    def _send_notification(self, method: str, params: Any) -> None:
+    def _send_notification(self, method: str, params: dict | None = None) -> None:
         """Send a JSON-RPC notification (no response expected)."""
         if not self.is_running:
             return
         msg = {"jsonrpc": "2.0", "method": method}
         if params is not None:
             msg["params"] = params
-        try:
-            self._process.stdin.write(_encode_message(msg))
-            self._process.stdin.flush()
-        except (BrokenPipeError, OSError):
-            pass
+        _encode_message(self._process.stdin, msg)
 
     def _read_loop(self) -> None:
         """Background thread reading LSP responses."""
@@ -328,23 +334,31 @@ class LSPServer:
     def open_file(self, file_path: str, content: str, language_id: str) -> None:
         """Notify the server that a file has been opened."""
         uri = Path(file_path).as_uri()
-        self._send_notification("textDocument/didOpen", {
-            "textDocument": {
-                "uri": uri,
-                "languageId": language_id,
-                "version": 1,
-                "text": content,
+        self._send_notification(
+            "textDocument/didOpen",
+            {
+                "textDocument": {
+                    "uri": uri,
+                    "languageId": language_id,
+                    "version": 1,
+                    "text": content,
+                },
             },
-        })
+        )
 
     def close_file(self, file_path: str) -> None:
         """Notify the server that a file has been closed."""
         uri = Path(file_path).as_uri()
-        self._send_notification("textDocument/didClose", {
-            "textDocument": {"uri": uri},
-        })
+        self._send_notification(
+            "textDocument/didClose",
+            {
+                "textDocument": {"uri": uri},
+            },
+        )
 
-    def goto_definition(self, file_path: str, line: int, character: int) -> Optional[list[dict]]:
+    def goto_definition(
+        self, file_path: str, line: int, character: int
+    ) -> Optional[list[dict]]:
         """Request textDocument/definition for a position.
 
         Args:
@@ -356,10 +370,13 @@ class LSPServer:
             List of location dicts with uri/range, or None on failure.
         """
         uri = Path(file_path).as_uri()
-        result = self._send_request("textDocument/definition", {
-            "textDocument": {"uri": uri},
-            "position": {"line": line, "character": character},
-        })
+        result = self._send_request(
+            "textDocument/definition",
+            {
+                "textDocument": {"uri": uri},
+                "position": {"line": line, "character": character},
+            },
+        )
         if result is None:
             return None
         # Normalize: result can be a single Location, a list of Locations, or a list of LocationLinks
@@ -369,7 +386,9 @@ class LSPServer:
             return None
         return result
 
-    def goto_implementation(self, file_path: str, line: int, character: int) -> Optional[list[dict]]:
+    def goto_implementation(
+        self, file_path: str, line: int, character: int
+    ) -> Optional[list[dict]]:
         """Request textDocument/implementation for a position.
 
         Returns list of Location dicts (each concrete implementation), or None.
@@ -384,10 +403,13 @@ class LSPServer:
             List of location dicts with uri/range, or None on failure.
         """
         uri = Path(file_path).as_uri()
-        result = self._send_request("textDocument/implementation", {
-            "textDocument": {"uri": uri},
-            "position": {"line": line, "character": character},
-        })
+        result = self._send_request(
+            "textDocument/implementation",
+            {
+                "textDocument": {"uri": uri},
+                "position": {"line": line, "character": character},
+            },
+        )
         if result is None:
             return None
         if isinstance(result, dict):
@@ -400,6 +422,7 @@ class LSPServer:
 # ───────────────────────────────────────────────────────────────────
 # Bridge: manages servers and resolves references
 # ───────────────────────────────────────────────────────────────────
+
 
 class LSPBridge:
     """Manages multiple LSP servers and resolves call sites to definitions.
@@ -514,7 +537,9 @@ class LSPBridge:
                 for site in sites:
                     try:
                         locations = server.goto_definition(
-                            site.file, site.position.line, site.position.character,
+                            site.file,
+                            site.position.line,
+                            site.position.character,
                         )
                         if not locations:
                             continue
@@ -532,18 +557,22 @@ class LSPBridge:
                             continue
 
                         start = target_range.get("start", {})
-                        resolved.append(ResolvedRef(
-                            call_site=site,
-                            target_file=target_file,
-                            target_line=start.get("line", 0),
-                            target_character=start.get("character", 0),
-                            target_name=site.called_name,
-                        ))
+                        resolved.append(
+                            ResolvedRef(
+                                call_site=site,
+                                target_file=target_file,
+                                target_line=start.get("line", 0),
+                                target_character=start.get("character", 0),
+                                target_name=site.called_name,
+                            )
+                        )
                     except Exception:
                         logger.debug(
                             "LSP: definition request failed for %s at %s:%d:%d",
-                            site.called_name, site.file,
-                            site.position.line, site.position.character,
+                            site.called_name,
+                            site.file,
+                            site.position.line,
+                            site.position.character,
                             exc_info=True,
                         )
         finally:
@@ -556,7 +585,8 @@ class LSPBridge:
 
         logger.info(
             "LSP bridge resolved %d/%d call sites",
-            len(resolved), len(call_sites),
+            len(resolved),
+            len(call_sites),
         )
         return resolved
 
@@ -616,7 +646,9 @@ class LSPBridge:
                 for im in methods:
                     try:
                         locations = server.goto_implementation(
-                            im["file"], im["line"], im["character"],
+                            im["file"],
+                            im["line"],
+                            im["character"],
                         )
                         if not locations:
                             continue
@@ -632,19 +664,24 @@ class LSPBridge:
                                 continue
 
                             start = target_range.get("start", {})
-                            dispatch_edges.append(DispatchEdge(
-                                interface_file=im["file"],
-                                interface_name=im["interface_name"],
-                                method_name=im["method_name"],
-                                impl_file=target_file,
-                                impl_line=start.get("line", 0),
-                                impl_name="",  # Resolved later from symbol index
-                            ))
+                            dispatch_edges.append(
+                                DispatchEdge(
+                                    interface_file=im["file"],
+                                    interface_name=im["interface_name"],
+                                    method_name=im["method_name"],
+                                    impl_file=target_file,
+                                    impl_line=start.get("line", 0),
+                                    impl_name="",  # Resolved later from symbol index
+                                )
+                            )
                     except Exception:
                         logger.debug(
                             "LSP: implementation request failed for %s.%s at %s:%d:%d",
-                            im["interface_name"], im["method_name"], im["file"],
-                            im["line"], im["character"],
+                            im["interface_name"],
+                            im["method_name"],
+                            im["file"],
+                            im["line"],
+                            im["character"],
                             exc_info=True,
                         )
         finally:
@@ -656,7 +693,8 @@ class LSPBridge:
 
         logger.info(
             "LSP dispatch resolution: %d implementations for %d interface methods",
-            len(dispatch_edges), len(interface_methods),
+            len(dispatch_edges),
+            len(interface_methods),
         )
         return dispatch_edges
 
@@ -674,6 +712,7 @@ class LSPBridge:
 # ───────────────────────────────────────────────────────────────────
 # Helpers
 # ───────────────────────────────────────────────────────────────────
+
 
 def _to_lsp_language_id(language: str) -> str:
     """Convert jcodemunch language name to LSP languageId."""
@@ -693,6 +732,7 @@ def _uri_to_path(uri: str) -> Optional[str]:
         return None
     # Handle file:///C:/... on Windows and file:///path on Unix
     from urllib.parse import unquote, urlparse
+
     parsed = urlparse(uri)
     path = unquote(parsed.path)
     # On Windows, urlparse gives /C:/... — strip the leading /
@@ -704,6 +744,7 @@ def _uri_to_path(uri: str) -> Optional[str]:
 def is_lsp_enabled(repo: Optional[str] = None) -> bool:
     """Check whether LSP enrichment is enabled in config."""
     from .. import config as _config
+
     enrichment = _config.get("enrichment", {}, repo=repo)
     if isinstance(enrichment, dict):
         return bool(enrichment.get("lsp_enabled", False))
@@ -713,13 +754,16 @@ def is_lsp_enabled(repo: Optional[str] = None) -> bool:
 def get_lsp_config(repo: Optional[str] = None) -> dict:
     """Get the full LSP enrichment config, with defaults applied."""
     from .. import config as _config
+
     enrichment = _config.get("enrichment", {}, repo=repo)
     if not isinstance(enrichment, dict):
         enrichment = {}
     return {
         "lsp_enabled": bool(enrichment.get("lsp_enabled", False)),
         "lsp_servers": enrichment.get("lsp_servers", dict(DEFAULT_LSP_SERVERS)),
-        "lsp_timeout_seconds": int(enrichment.get("lsp_timeout_seconds", DEFAULT_LSP_TIMEOUT)),
+        "lsp_timeout_seconds": int(
+            enrichment.get("lsp_timeout_seconds", DEFAULT_LSP_TIMEOUT)
+        ),
     }
 
 
@@ -774,10 +818,18 @@ def enrich_call_graph_with_lsp(
     # Collect call sites from symbols that tree-sitter extracted
     call_sites: list[CallSite] = []
     for sym in symbols:
-        sym_file = getattr(sym, "file", None) or (sym.get("file") if isinstance(sym, dict) else None)
-        sym_line = getattr(sym, "line", 0) or (sym.get("line", 0) if isinstance(sym, dict) else 0)
-        sym_name = getattr(sym, "name", "") or (sym.get("name", "") if isinstance(sym, dict) else "")
-        call_refs = getattr(sym, "call_references", []) or (sym.get("call_references", []) if isinstance(sym, dict) else [])
+        sym_file = getattr(sym, "file", None) or (
+            sym.get("file") if isinstance(sym, dict) else None
+        )
+        sym_line = getattr(sym, "line", 0) or (
+            sym.get("line", 0) if isinstance(sym, dict) else 0
+        )
+        sym_name = getattr(sym, "name", "") or (
+            sym.get("name", "") if isinstance(sym, dict) else ""
+        )
+        call_refs = getattr(sym, "call_references", []) or (
+            sym.get("call_references", []) if isinstance(sym, dict) else []
+        )
 
         if not sym_file or not call_refs:
             continue
@@ -806,17 +858,22 @@ def enrich_call_graph_with_lsp(
             # Search for the called name in the symbol's body to get a precise position
             pos = _find_call_position(lines, sym_start, called_name)
             if pos:
-                call_sites.append(CallSite(
-                    file=abs_file,
-                    position=pos,
-                    called_name=called_name,
-                ))
+                call_sites.append(
+                    CallSite(
+                        file=abs_file,
+                        position=pos,
+                        called_name=called_name,
+                    )
+                )
 
     if not call_sites:
         return []
 
-    logger.info("LSP bridge: %d call sites to resolve across %d languages",
-                len(call_sites), len({abs_languages.get(s.file) for s in call_sites}))
+    logger.info(
+        "LSP bridge: %d call sites to resolve across %d languages",
+        len(call_sites),
+        len({abs_languages.get(s.file) for s in call_sites}),
+    )
 
     bridge = LSPBridge(
         root_path=root_path,
@@ -836,25 +893,30 @@ def enrich_call_graph_with_lsp(
             target_rel = str(Path(ref.target_file).relative_to(root))
         except ValueError:
             continue  # Target outside the project
-        edges.append({
-            "caller_file": caller_rel.replace("\\", "/"),
-            "called_name": ref.call_site.called_name,
-            "target_file": target_rel.replace("\\", "/"),
-            "target_line": ref.target_line + 1,  # Convert back to 1-indexed
-            "resolution": "lsp_resolved",
-        })
+        edges.append(
+            {
+                "caller_file": caller_rel.replace("\\", "/"),
+                "called_name": ref.call_site.called_name,
+                "target_file": target_rel.replace("\\", "/"),
+                "target_line": ref.target_line + 1,  # Convert back to 1-indexed
+                "resolution": "lsp_resolved",
+            }
+        )
 
     return edges
 
 
 def _find_call_position(
-    lines: list[str], start_line: int, called_name: str,
+    lines: list[str],
+    start_line: int,
+    called_name: str,
 ) -> Optional[Position]:
     """Find the first occurrence of called_name in lines starting from start_line.
 
     Returns a Position (0-indexed) or None.
     """
     import re
+
     pattern = re.compile(r"\b" + re.escape(called_name) + r"\s*\(")
     for i in range(start_line, min(start_line + 200, len(lines))):
         m = pattern.search(lines[i])
@@ -907,9 +969,15 @@ def enrich_dispatch_edges(
     interface_syms: list = []
 
     for sym in symbols:
-        kw = getattr(sym, "keywords", None) or (sym.get("keywords", []) if isinstance(sym, dict) else [])
-        sym_id = getattr(sym, "id", None) or (sym.get("id", "") if isinstance(sym, dict) else "")
-        parent_id = getattr(sym, "parent", None) or (sym.get("parent") if isinstance(sym, dict) else None)
+        kw = getattr(sym, "keywords", None) or (
+            sym.get("keywords", []) if isinstance(sym, dict) else []
+        )
+        sym_id = getattr(sym, "id", None) or (
+            sym.get("id", "") if isinstance(sym, dict) else ""
+        )
+        parent_id = getattr(sym, "parent", None) or (
+            sym.get("parent") if isinstance(sym, dict) else None
+        )
 
         if parent_id:
             children_by_parent.setdefault(parent_id, []).append(sym)
@@ -942,9 +1010,15 @@ def enrich_dispatch_edges(
 
     # Step 2: For each interface, collect method positions
     for iface_sym in interface_syms:
-        iface_id = getattr(iface_sym, "id", None) or (iface_sym.get("id", "") if isinstance(iface_sym, dict) else "")
-        iface_name = getattr(iface_sym, "name", None) or (iface_sym.get("name", "") if isinstance(iface_sym, dict) else "")
-        iface_file = getattr(iface_sym, "file", None) or (iface_sym.get("file", "") if isinstance(iface_sym, dict) else "")
+        iface_id = getattr(iface_sym, "id", None) or (
+            iface_sym.get("id", "") if isinstance(iface_sym, dict) else ""
+        )
+        iface_name = getattr(iface_sym, "name", None) or (
+            iface_sym.get("name", "") if isinstance(iface_sym, dict) else ""
+        )
+        iface_file = getattr(iface_sym, "file", None) or (
+            iface_sym.get("file", "") if isinstance(iface_sym, dict) else ""
+        )
         if not iface_file:
             continue
 
@@ -958,54 +1032,72 @@ def enrich_dispatch_edges(
         if not children:
             # For Go interfaces, methods are declared inline (no separate child symbols).
             # Use the interface symbol position itself — gopls will resolve from there.
-            iface_line = getattr(iface_sym, "line", 0) or (iface_sym.get("line", 0) if isinstance(iface_sym, dict) else 0)
+            iface_line = getattr(iface_sym, "line", 0) or (
+                iface_sym.get("line", 0) if isinstance(iface_sym, dict) else 0
+            )
             if iface_line:
                 content = abs_contents.get(abs_file, "")
                 if content:
                     lines = content.splitlines()
                     # Scan the interface body for method names
-                    iface_end = getattr(iface_sym, "end_line", 0) or (iface_sym.get("end_line", 0) if isinstance(iface_sym, dict) else 0)
+                    iface_end = getattr(iface_sym, "end_line", 0) or (
+                        iface_sym.get("end_line", 0)
+                        if isinstance(iface_sym, dict)
+                        else 0
+                    )
                     import re
+
                     for li in range(max(0, iface_line - 1), min(iface_end, len(lines))):
                         line_text = lines[li].strip()
                         # Go interface methods: "MethodName(args) rettype"
-                        m = re.match(r'^([A-Z]\w*)\s*\(', line_text)
+                        m = re.match(r"^([A-Z]\w*)\s*\(", line_text)
                         if m:
-                            interface_methods.append({
-                                "file": abs_file,
-                                "line": li,
-                                "character": lines[li].index(m.group(1)),
-                                "interface_name": iface_name,
-                                "method_name": m.group(1),
-                                "language": lang,
-                            })
+                            interface_methods.append(
+                                {
+                                    "file": abs_file,
+                                    "line": li,
+                                    "character": lines[li].index(m.group(1)),
+                                    "interface_name": iface_name,
+                                    "method_name": m.group(1),
+                                    "language": lang,
+                                }
+                            )
             continue
 
         for child in children:
-            child_name = getattr(child, "name", None) or (child.get("name", "") if isinstance(child, dict) else "")
-            child_line = getattr(child, "line", 0) or (child.get("line", 0) if isinstance(child, dict) else 0)
-            child_kind = getattr(child, "kind", None) or (child.get("kind", "") if isinstance(child, dict) else "")
+            child_name = getattr(child, "name", None) or (
+                child.get("name", "") if isinstance(child, dict) else ""
+            )
+            child_line = getattr(child, "line", 0) or (
+                child.get("line", 0) if isinstance(child, dict) else 0
+            )
+            child_kind = getattr(child, "kind", None) or (
+                child.get("kind", "") if isinstance(child, dict) else ""
+            )
 
             if child_kind not in ("method", "function"):
                 continue
             if not child_name or not child_line:
                 continue
 
-            interface_methods.append({
-                "file": abs_file,
-                "line": child_line - 1,  # Convert to 0-indexed
-                "character": 0,
-                "interface_name": iface_name,
-                "method_name": child_name,
-                "language": lang,
-            })
+            interface_methods.append(
+                {
+                    "file": abs_file,
+                    "line": child_line - 1,  # Convert to 0-indexed
+                    "character": 0,
+                    "interface_name": iface_name,
+                    "method_name": child_name,
+                    "language": lang,
+                }
+            )
 
     if not interface_methods:
         return []
 
     logger.info(
         "LSP dispatch: %d interface methods to resolve across %d interfaces",
-        len(interface_methods), len(interface_syms),
+        len(interface_methods),
+        len(interface_syms),
     )
 
     # Step 3: Resolve via LSP
@@ -1016,7 +1108,9 @@ def enrich_dispatch_edges(
     )
     try:
         dispatch_edges = bridge.resolve_implementations(
-            interface_methods, abs_contents, abs_languages,
+            interface_methods,
+            abs_contents,
+            abs_languages,
         )
     finally:
         bridge.shutdown()
@@ -1029,14 +1123,16 @@ def enrich_dispatch_edges(
             impl_rel = str(Path(de.impl_file).relative_to(root))
         except ValueError:
             continue
-        edges.append({
-            "interface_file": iface_rel.replace("\\", "/"),
-            "interface_name": de.interface_name,
-            "method_name": de.method_name,
-            "impl_file": impl_rel.replace("\\", "/"),
-            "impl_line": de.impl_line + 1,  # Convert to 1-indexed
-            "impl_name": de.impl_name,
-            "resolution": "lsp_dispatch",
-        })
+        edges.append(
+            {
+                "interface_file": iface_rel.replace("\\", "/"),
+                "interface_name": de.interface_name,
+                "method_name": de.method_name,
+                "impl_file": impl_rel.replace("\\", "/"),
+                "impl_line": de.impl_line + 1,  # Convert to 1-indexed
+                "impl_name": de.impl_name,
+                "resolution": "lsp_dispatch",
+            }
+        )
 
     return edges

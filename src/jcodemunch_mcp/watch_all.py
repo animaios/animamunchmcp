@@ -14,6 +14,7 @@ Public surface:
         Long-running coroutine that watches every discovered repo, rediscovers
         on an interval, and shuts down cleanly on SIGINT/SIGTERM.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -55,18 +56,18 @@ def discover_local_repos(storage_path: Optional[str] = None) -> list[str]:
     return sorted(set(repos))
 
 
-def _install_signal_handlers(loop: asyncio.AbstractEventLoop, stop: asyncio.Event) -> None:
-    def _request_stop() -> None:
-        if not stop.is_set():
-            stop.set()
-
+def _install_signal_handlers(
+    loop: asyncio.AbstractEventLoop, stop: asyncio.Event
+) -> None:
     if sys.platform == "win32":
         # add_signal_handler is not supported on Windows ProactorEventLoop.
         # KeyboardInterrupt from Ctrl-C surfaces as CancelledError in asyncio.run().
         return
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
-            loop.add_signal_handler(sig, _request_stop)
+            loop.add_signal_handler(
+                sig, lambda: stop.set() if not stop.is_set() else None
+            )
         except (NotImplementedError, RuntimeError):
             logger.debug("Could not install handler for %s", sig, exc_info=True)
 
@@ -125,7 +126,9 @@ async def watch_all(
     for folder in initial:
         await manager.add_folder(folder)
 
-    rediscover_task = asyncio.create_task(_rediscover_loop(), name="watch-all:rediscover")
+    rediscover_task = asyncio.create_task(
+        _rediscover_loop(), name="watch-all:rediscover"
+    )
     run_task = asyncio.create_task(manager.run(), name="watch-all:manager")
 
     try:
@@ -144,14 +147,12 @@ async def watch_all(
             try:
                 await manager.remove_folder(folder)
             except Exception:
-                logger.debug("remove_folder failed on shutdown: %s", folder, exc_info=True)
+                logger.debug(
+                    "remove_folder failed on shutdown: %s", folder, exc_info=True
+                )
         for t in (rediscover_task, run_task):
             t.cancel()
             try:
                 await asyncio.wait_for(t, timeout=2.0)
             except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
                 pass
-
-
-def storage_path_default() -> str:
-    return os.environ.get("CODE_INDEX_PATH") or str(Path.home() / ".code-index")

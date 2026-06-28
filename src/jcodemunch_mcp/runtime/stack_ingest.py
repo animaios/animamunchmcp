@@ -30,9 +30,7 @@ import logging
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
-
-from typing import Iterable
+from typing import Any, Iterable, Optional
 
 from .redact import redact_trace_record
 from .resolve import resolve_to_symbol_id
@@ -129,7 +127,9 @@ def _ingest_stack_iter(
 
     for event in events:
         records += 1
-        severity = event.severity if event.severity in ("error", "warn", "info") else "info"
+        severity = (
+            event.severity if event.severity in ("error", "warn", "info") else "info"
+        )
         severity_counts[severity] += 1
 
         if redact_enabled and event.message:
@@ -143,10 +143,14 @@ def _ingest_stack_iter(
         for frame in event.frames:
             total_frames += 1
             if not frame.file_path and not frame.function_name:
-                unmapped_reasons["no_code_attrs"] = unmapped_reasons.get("no_code_attrs", 0) + 1
+                unmapped_reasons["no_code_attrs"] = (
+                    unmapped_reasons.get("no_code_attrs", 0) + 1
+                )
                 aggregator.unmapped_inc(frame)
                 continue
-            sid = _resolve_with_conn(db_path, frame.file_path or "", frame.line_no, frame.function_name)
+            sid = _resolve_with_conn(
+                db_path, frame.file_path or "", frame.line_no, frame.function_name
+            )
             if sid is None:
                 unmapped_reasons["no_match"] = unmapped_reasons.get("no_match", 0) + 1
                 aggregator.unmapped_inc(frame)
@@ -165,8 +169,8 @@ def _ingest_stack_iter(
     return {
         "records": records,
         "frames": total_frames,
-        "mapped": aggregator.mapped_total,
-        "unmapped": aggregator.unmapped_total,
+        "mapped": sum(aggregator._calls.values()),
+        "unmapped": sum(aggregator._unmapped.values()),
         "severity_counts": severity_counts,
         "redactions_fired": redactions_fired,
         "unmapped_reasons": unmapped_reasons,
@@ -198,14 +202,6 @@ class _BatchAggregator:
     def unmapped_inc(self, frame) -> None:
         key = (frame.file_path or "", frame.line_no, frame.function_name or "")
         self._unmapped[key] = self._unmapped.get(key, 0) + 1
-
-    @property
-    def mapped_total(self) -> int:
-        return sum(self._calls.values())
-
-    @property
-    def unmapped_total(self) -> int:
-        return sum(self._unmapped.values())
 
     def iter_calls(self) -> list[tuple[str, int]]:
         return list(self._calls.items())
@@ -271,10 +267,7 @@ def _persist(
                 count = count + excluded.count,
                 last_seen = excluded.last_seen
             """,
-            [
-                (sid, sev, n, now, now)
-                for sid, sev, n in aggregator.iter_stack_events()
-            ],
+            [(sid, sev, n, now, now) for sid, sev, n in aggregator.iter_stack_events()],
         )
 
         # runtime_unmapped — same shape as OTel's
@@ -286,10 +279,7 @@ def _persist(
                 count = count + excluded.count,
                 last_seen = excluded.last_seen
             """,
-            [
-                (f, l, n, count, now)
-                for f, l, n, count in aggregator.iter_unmapped()
-            ],
+            [(f, l, n, count, now) for f, l, n, count in aggregator.iter_unmapped()],
         )
 
         # Redaction-log accounting

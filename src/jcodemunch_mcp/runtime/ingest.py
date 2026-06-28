@@ -25,9 +25,7 @@ import logging
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
-
-from typing import Iterable
+from typing import Any, Iterable, Optional
 
 from .otel import OtelSpan, iter_otel_from_text, parse_otel_file
 from .redact import redact_trace_record
@@ -134,7 +132,9 @@ def _ingest_otel_iter(
                 redactions_fired[label] = redactions_fired.get(label, 0) + 1
             del redacted_extra
         if not span.file_path and not span.function_name:
-            unmapped_reasons["no_code_attrs"] = unmapped_reasons.get("no_code_attrs", 0) + 1
+            unmapped_reasons["no_code_attrs"] = (
+                unmapped_reasons.get("no_code_attrs", 0) + 1
+            )
             aggregator.unmapped_inc(span)
             continue
         symbol_id = _resolve_with_conn(
@@ -160,8 +160,8 @@ def _ingest_otel_iter(
 
     return {
         "records": records,
-        "mapped": aggregator.mapped_count,
-        "unmapped": aggregator.unmapped_count,
+        "mapped": sum(aggregator._counts.values()),
+        "unmapped": sum(aggregator._unmapped.values()),
         "redactions_fired": redactions_fired,
         "unmapped_reasons": unmapped_reasons,
         "evicted": evicted,
@@ -192,14 +192,6 @@ class _BatchAggregator:
     def unmapped_inc(self, span: OtelSpan) -> None:
         key = (span.file_path or "", span.line_no, span.function_name or "")
         self._unmapped[key] = self._unmapped.get(key, 0) + 1
-
-    @property
-    def mapped_count(self) -> int:
-        return sum(self._counts.values())
-
-    @property
-    def unmapped_count(self) -> int:
-        return sum(self._unmapped.values())
 
     def iter_calls(self) -> list[tuple[str, int, Optional[float], Optional[float]]]:
         """Yield (symbol_id, count, p50_ms, p95_ms) tuples."""

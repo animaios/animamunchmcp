@@ -83,29 +83,3 @@ def append(
                 fh.write(json.dumps(row) + "\n")
     except Exception:
         pass
-
-
-def read_all(base_path: Optional[str] = None, limit: Optional[int] = None) -> list[dict]:
-    """Read the replay log into a list of dicts. Returns [] when absent.
-
-    Skips corrupt lines. ``limit`` returns the most recent N rows when set.
-    """
-    path = _path(base_path)
-    if not path.exists():
-        return []
-    rows: list[dict] = []
-    try:
-        with path.open("r", encoding="utf-8") as fh:
-            for raw in fh:
-                line = raw.strip()
-                if not line:
-                    continue
-                try:
-                    rows.append(json.loads(line))
-                except Exception:
-                    continue
-    except OSError:
-        return []
-    if limit is not None and limit > 0 and len(rows) > limit:
-        rows = rows[-limit:]
-    return rows

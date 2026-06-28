@@ -14,7 +14,7 @@ from typing import Callable, Optional
 from .. import config as _config
 from ..parser.symbols import Symbol
 from ..path_map import parse_path_map, remap
-from .sqlite_store import SQLiteIndexStore, _VERIFIED_PATHS
+from .sqlite_store import _VERIFIED_PATHS, SQLiteIndexStore
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,9 @@ def _get_git_head(repo_path: Path) -> Optional[str]:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"],
             cwd=str(repo_path),
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
             stdin=subprocess.DEVNULL,
         )
         if result.returncode == 0:
@@ -136,7 +138,9 @@ def _get_git_branch(repo_path: Path) -> Optional[str]:
         result = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             cwd=str(repo_path),
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
             stdin=subprocess.DEVNULL,
         )
         if result.returncode == 0:
@@ -153,37 +157,62 @@ def _get_git_branch(repo_path: Path) -> Optional[str]:
 @dataclass
 class CodeIndex:
     """Index for a repository's source code."""
-    repo: str                    # "owner/repo"
+
+    repo: str  # "owner/repo"
     owner: str
     name: str
-    indexed_at: str              # ISO timestamp
-    source_files: list[str]      # All indexed file paths
-    languages: dict[str, int]    # Language -> file count
-    symbols: list[dict]          # Serialized Symbol dicts (without source content)
+    indexed_at: str  # ISO timestamp
+    source_files: list[str]  # All indexed file paths
+    languages: dict[str, int]  # Language -> file count
+    symbols: list[dict]  # Serialized Symbol dicts (without source content)
     index_version: int = INDEX_VERSION
     file_hashes: dict[str, str] = field(default_factory=dict)  # file_path -> sha256
-    git_head: str = ""           # HEAD commit hash at index time (for git repos)
+    git_head: str = ""  # HEAD commit hash at index time (for git repos)
     file_summaries: dict[str, str] = field(default_factory=dict)  # file_path -> summary
-    source_root: str = ""        # Absolute source root for local indexes, empty for remote
-    git_root: str = ""           # Absolute git working tree root when detected (v1.95+); anchor for v1.96 subdir merging
-    source_roots: list[str] = field(default_factory=list)  # v1.96+: git-root-relative subdir prefixes walked into this index ([""] = full git-root walk)
-    file_languages: dict[str, str] = field(default_factory=dict)  # file_path -> language
-    display_name: str = ""       # User-facing name (for local hashed repo IDs)
-    imports: Optional[dict[str, list[dict]]] = None  # file_path -> [{specifier, names}]; None = not indexed yet (pre-v1.3.0)
-    context_metadata: dict = field(default_factory=dict)  # Provider metadata (e.g., dbt_columns)
-    file_blob_shas: dict[str, str] = field(default_factory=dict)  # file_path -> GitHub blob SHA (remote repos only)
-    file_mtimes: dict[str, int] = field(default_factory=dict)  # file_path -> os.stat().st_mtime_ns
-    file_sizes: dict[str, int] = field(default_factory=dict)   # file_path -> size in bytes (UTF-8 encoded)
-    alias_map: dict[str, list[str]] = field(default_factory=dict)  # tsconfig/jsconfig path aliases; auto-loaded from source_root
-    psr4_map: dict[str, str] = field(default_factory=dict)  # PHP PSR-4 namespace map from composer.json; auto-loaded from source_root
-    package_names: list[str] = field(default_factory=list)    # Package names published by this repo (from manifest files)
-    branch: str = ""                 # Git branch name at index time (empty = base/default branch or non-git)
+    source_root: str = ""  # Absolute source root for local indexes, empty for remote
+    git_root: str = ""  # Absolute git working tree root when detected (v1.95+); anchor for v1.96 subdir merging
+    source_roots: list[str] = field(
+        default_factory=list
+    )  # v1.96+: git-root-relative subdir prefixes walked into this index ([""] = full git-root walk)
+    file_languages: dict[str, str] = field(
+        default_factory=dict
+    )  # file_path -> language
+    display_name: str = ""  # User-facing name (for local hashed repo IDs)
+    imports: Optional[dict[str, list[dict]]] = (
+        None  # file_path -> [{specifier, names}]; None = not indexed yet (pre-v1.3.0)
+    )
+    context_metadata: dict = field(
+        default_factory=dict
+    )  # Provider metadata (e.g., dbt_columns)
+    file_blob_shas: dict[str, str] = field(
+        default_factory=dict
+    )  # file_path -> GitHub blob SHA (remote repos only)
+    file_mtimes: dict[str, int] = field(
+        default_factory=dict
+    )  # file_path -> os.stat().st_mtime_ns
+    file_sizes: dict[str, int] = field(
+        default_factory=dict
+    )  # file_path -> size in bytes (UTF-8 encoded)
+    alias_map: dict[str, list[str]] = field(
+        default_factory=dict
+    )  # tsconfig/jsconfig path aliases; auto-loaded from source_root
+    psr4_map: dict[str, str] = field(
+        default_factory=dict
+    )  # PHP PSR-4 namespace map from composer.json; auto-loaded from source_root
+    package_names: list[str] = field(
+        default_factory=list
+    )  # Package names published by this repo (from manifest files)
+    branch: str = (
+        ""  # Git branch name at index time (empty = base/default branch or non-git)
+    )
 
     def __post_init__(self) -> None:
         if not self.display_name:
             self.display_name = self.name
         # Build O(1) lookup structures once at load time.
-        self._symbol_index: dict[str, dict] = {s["id"]: s for s in self.symbols if "id" in s}
+        self._symbol_index: dict[str, dict] = {
+            s["id"]: s for s in self.symbols if "id" in s
+        }
         self._source_file_set: set[str] = set(self.source_files)
         # Lazy BM25 cache — populated on first search, invalidated by new CodeIndex
         self._bm25_cache: dict = {}
@@ -195,6 +224,7 @@ class CodeIndex:
         if not self.alias_map and self.source_root:
             try:
                 from ..parser.imports import _load_tsconfig_aliases
+
                 self.alias_map = _load_tsconfig_aliases(self.source_root)
             except Exception:
                 pass
@@ -203,6 +233,7 @@ class CodeIndex:
             try:
                 if "php" in self.languages:
                     from ..parser.imports import build_psr4_map
+
                     self.psr4_map = build_psr4_map(self.source_root)
             except Exception:
                 pass
@@ -248,7 +279,13 @@ class CodeIndex:
         """Check whether a file is present in the index."""
         return file_path in self._source_file_set
 
-    def search(self, query: str, kind: Optional[str] = None, file_pattern: Optional[str] = None, limit: int = 0) -> list[dict]:
+    def search(
+        self,
+        query: str,
+        kind: Optional[str] = None,
+        file_pattern: Optional[str] = None,
+        limit: int = 0,
+    ) -> list[dict]:
         """Search symbols with weighted scoring.
 
         Args:
@@ -268,7 +305,9 @@ class CodeIndex:
             for sym in self.symbols:
                 if kind and sym.get("kind") != kind:
                     continue
-                if file_pattern and not self._match_pattern(sym.get("file", ""), file_pattern):
+                if file_pattern and not self._match_pattern(
+                    sym.get("file", ""), file_pattern
+                ):
                     continue
                 score = self._score_symbol(sym, query_lower, query_words)
                 if score > 0:
@@ -283,7 +322,9 @@ class CodeIndex:
             for sym in self.symbols:
                 if kind and sym.get("kind") != kind:
                     continue
-                if file_pattern and not self._match_pattern(sym.get("file", ""), file_pattern):
+                if file_pattern and not self._match_pattern(
+                    sym.get("file", ""), file_pattern
+                ):
                     continue
                 score = self._score_symbol(sym, query_lower, query_words)
                 if score > 0:
@@ -294,7 +335,10 @@ class CodeIndex:
     def _match_pattern(self, file_path: str, pattern: str) -> bool:
         """Match file path against glob pattern."""
         import fnmatch
-        return fnmatch.fnmatch(file_path, pattern) or fnmatch.fnmatch(file_path, f"*/{pattern}")
+
+        return fnmatch.fnmatch(file_path, pattern) or fnmatch.fnmatch(
+            file_path, f"*/{pattern}"
+        )
 
     def _score_symbol(self, sym: dict, query_lower: str, query_words: set) -> int:
         """Calculate search score for a symbol."""
@@ -422,67 +466,13 @@ class IndexStore:
         """Path to SHA-256 integrity checksum sidecar."""
         return index_path.with_suffix(".json.sha256")
 
-    def _write_checksum(self, index_path: Path, index_bytes: bytes) -> None:
-        """Write SHA-256 checksum sidecar for index integrity verification."""
-        sha = hashlib.sha256(index_bytes).hexdigest()
-        try:
-            self._checksum_path(index_path).write_text(sha, encoding="utf-8")
-        except Exception:
-            logger.debug("Failed to write checksum sidecar for %s", index_path, exc_info=True)
-
-    def _verify_checksum(self, index_path: Path) -> bool:
-        """Verify index file against its SHA-256 checksum sidecar.
-
-        Returns True if no sidecar exists (backwards-compatible) or checksum matches.
-        Logs a warning on mismatch but still returns True (non-blocking).
-        """
-        sha_path = self._checksum_path(index_path)
-        if not sha_path.exists():
-            return True  # No sidecar — old index, skip check
-        try:
-            expected = sha_path.read_text(encoding="utf-8").strip()
-            actual = hashlib.sha256(index_path.read_bytes()).hexdigest()
-            if actual != expected:
-                logger.warning(
-                    "Index integrity check failed for %s — expected %s, got %s. "
-                    "The index may have been modified externally. Re-index to fix.",
-                    index_path, expected[:12], actual[:12],
-                )
-            return True
-        except Exception:
-            logger.debug("Checksum verification error for %s", index_path, exc_info=True)
-            return True  # Err on the side of loading
-
-    def _write_meta_sidecar(self, index: "CodeIndex") -> None:
-        """Write a small metadata sidecar alongside the full index."""
-        meta = {
-            "repo": index.repo,
-            "indexed_at": index.indexed_at,
-            "symbol_count": len(index.symbols),
-            "file_count": len(index.source_files),
-            "languages": index.languages,
-            "index_version": index.index_version,
-            "git_head": index.git_head,
-            "display_name": index.display_name,
-            "source_root": index.source_root,
-        }
-        meta_path = self._meta_path(index.owner, index.name)
-        try:
-            fd, tmp_name = tempfile.mkstemp(dir=meta_path.parent, suffix=".meta.tmp")
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    json.dump(meta, f)
-                Path(tmp_name).replace(meta_path)
-            except Exception:
-                Path(tmp_name).unlink(missing_ok=True)
-        except Exception:
-            logger.debug("Failed to write meta sidecar", exc_info=True)
-
     def _content_dir(self, owner: str, name: str) -> Path:
         """Path to raw content directory."""
         return self.base_path / self._repo_slug(owner, name)
 
-    def _safe_content_path(self, content_dir: Path, relative_path: str) -> Optional[Path]:
+    def _safe_content_path(
+        self, content_dir: Path, relative_path: str
+    ) -> Optional[Path]:
         """Resolve a content path and ensure it stays within content_dir.
 
         Prevents path traversal when writing/reading cached raw files from
@@ -509,15 +499,6 @@ class IndexStore:
                 return f.read()
         except OSError:
             return None
-
-    def _repo_metadata_from_data(self, data: dict, owner: str, name: str) -> tuple[str, str, str]:
-        """Normalize repo/owner/name fields from stored JSON."""
-        repo_id = data.get("repo", f"{owner}/{name}")
-        if "/" in repo_id:
-            repo_owner, repo_name = repo_id.split("/", 1)
-        else:
-            repo_owner, repo_name = owner, name
-        return repo_id, data.get("owner", repo_owner), data.get("name", repo_name)
 
     def _file_languages_from_symbols(self, symbols: list[dict]) -> dict[str, str]:
         """Compute file -> language using symbol metadata."""
@@ -551,9 +532,15 @@ class IndexStore:
             if language:
                 file_languages[file_path] = language
 
-        return {file_path: file_languages[file_path] for file_path in paths if file_path in file_languages}
+        return {
+            file_path: file_languages[file_path]
+            for file_path in paths
+            if file_path in file_languages
+        }
 
-    def _languages_from_file_languages(self, file_languages: dict[str, str]) -> dict[str, int]:
+    def _languages_from_file_languages(
+        self, file_languages: dict[str, str]
+    ) -> dict[str, int]:
         """Compute language -> file count from stored file language metadata."""
         counts: dict[str, int] = {}
         for language in file_languages.values():
@@ -589,28 +576,41 @@ class IndexStore:
         if "/" in name or "\\" in name:
             raise ValueError(f"Path separator not allowed in name: {name!r}")
         # Preserve existing language computation logic
-        normalized_source_files = sorted(dict.fromkeys(source_files or list(raw_files.keys())))
+        normalized_source_files = sorted(
+            dict.fromkeys(source_files or list(raw_files.keys()))
+        )
         serialized_symbols = [self._symbol_to_dict(s) for s in symbols]
         merged_file_languages = self._file_languages_for_paths(
             normalized_source_files,
             serialized_symbols,
             existing=file_languages,
         )
-        resolved_languages = languages or self._languages_from_file_languages(merged_file_languages)
+        resolved_languages = languages or self._languages_from_file_languages(
+            merged_file_languages
+        )
 
         if file_hashes is None:
             file_hashes = {fp: _file_hash(content) for fp, content in raw_files.items()}
 
         result = self._sqlite.save_index(
-            owner=owner, name=name,
-            source_files=normalized_source_files, symbols=symbols,
-            raw_files=raw_files, languages=resolved_languages,
-            file_hashes=file_hashes, git_head=git_head,
-            file_summaries=file_summaries, source_root=source_root,
-            file_languages=merged_file_languages, display_name=display_name,
-            imports=imports, context_metadata=context_metadata,
-            file_blob_shas=file_blob_shas, file_mtimes=file_mtimes,
-            package_names=package_names, git_root=git_root,
+            owner=owner,
+            name=name,
+            source_files=normalized_source_files,
+            symbols=symbols,
+            raw_files=raw_files,
+            languages=resolved_languages,
+            file_hashes=file_hashes,
+            git_head=git_head,
+            file_summaries=file_summaries,
+            source_root=source_root,
+            file_languages=merged_file_languages,
+            display_name=display_name,
+            imports=imports,
+            context_metadata=context_metadata,
+            file_blob_shas=file_blob_shas,
+            file_mtimes=file_mtimes,
+            package_names=package_names,
+            git_root=git_root,
             source_roots=source_roots,
         )
 
@@ -629,7 +629,10 @@ class IndexStore:
 
     def has_index(self, owner: str, name: str) -> bool:
         """Return True if an index exists (SQLite or JSON)."""
-        return self._sqlite.has_index(owner, name) or self._index_path(owner, name).exists()
+        return (
+            self._sqlite.has_index(owner, name)
+            or self._index_path(owner, name).exists()
+        )
 
     def inspect_index(self, owner: str, name: str, branch: str = "") -> IndexLoadStatus:
         """Return index presence/loadability without changing load_index's contract."""
@@ -640,7 +643,9 @@ class IndexStore:
         if not branch:
             index_path = self._index_path(owner, name)
             if index_path.exists():
-                data = _load_index_json_cached(str(index_path), index_path.stat().st_mtime_ns)
+                data = _load_index_json_cached(
+                    str(index_path), index_path.stat().st_mtime_ns
+                )
                 if data:
                     return IndexLoadStatus(
                         repo=data.get("repo", f"{owner}/{name}"),
@@ -673,7 +678,9 @@ class IndexStore:
 
         return sqlite_status
 
-    def load_index(self, owner: str, name: str, branch: str = "") -> Optional[CodeIndex]:
+    def load_index(
+        self, owner: str, name: str, branch: str = ""
+    ) -> Optional[CodeIndex]:
         """Load index from storage. Prefers SQLite, auto-migrates from JSON.
 
         When branch is non-empty and a branch delta exists, the base index
@@ -696,7 +703,13 @@ class IndexStore:
 
         return None
 
-    def get_symbol_content(self, owner: str, name: str, symbol_id: str, _index: Optional["CodeIndex"] = None) -> Optional[str]:
+    def get_symbol_content(
+        self,
+        owner: str,
+        name: str,
+        symbol_id: str,
+        _index: Optional["CodeIndex"] = None,
+    ) -> Optional[str]:
         """Read symbol source using stored byte offsets.
 
         Delegates to the SQLite backend for a single-row lookup.
@@ -722,7 +735,9 @@ class IndexStore:
         current_files: dict[str, str],
     ) -> tuple[list[str], list[str], list[str]]:
         """Detect changed, new, and deleted files by comparing hashes."""
-        current_hashes = {fp: _file_hash(content) for fp, content in current_files.items()}
+        current_hashes = {
+            fp: _file_hash(content) for fp, content in current_files.items()
+        }
         return self.detect_changes_from_hashes(owner, name, current_hashes)
 
     def detect_changes_from_hashes(
@@ -758,7 +773,9 @@ class IndexStore:
             Tuple of (changed_files, new_files, deleted_files,
                       hashes_for_changed_and_new, updated_mtimes).
         """
-        return self._sqlite.detect_changes_with_mtimes(owner, name, current_mtimes, hash_fn)
+        return self._sqlite.detect_changes_with_mtimes(
+            owner, name, current_mtimes, hash_fn
+        )
 
     def incremental_save(
         self,
@@ -786,18 +803,27 @@ class IndexStore:
         new_symbol_dicts = [self._symbol_to_dict(s) for s in new_symbols]
         existing_fl = self._sqlite.get_file_languages(owner, name)
         merged_file_languages = self._file_languages_for_paths(
-            changed_or_new, new_symbol_dicts,
+            changed_or_new,
+            new_symbol_dicts,
             existing={**existing_fl, **(file_languages or {})},
         )
 
         return self._sqlite.incremental_save(
-            owner=owner, name=name,
-            changed_files=changed_files, new_files=new_files,
-            deleted_files=deleted_files, new_symbols=new_symbols,
-            raw_files=raw_files, languages=languages, git_head=git_head,
-            file_summaries=file_summaries, file_languages=merged_file_languages,
-            imports=imports, context_metadata=context_metadata,
-            file_blob_shas=file_blob_shas, file_hashes=file_hashes,
+            owner=owner,
+            name=name,
+            changed_files=changed_files,
+            new_files=new_files,
+            deleted_files=deleted_files,
+            new_symbols=new_symbols,
+            raw_files=raw_files,
+            languages=languages,
+            git_head=git_head,
+            file_summaries=file_summaries,
+            file_languages=merged_file_languages,
+            imports=imports,
+            context_metadata=context_metadata,
+            file_blob_shas=file_blob_shas,
+            file_hashes=file_hashes,
             file_mtimes=file_mtimes,
         )
 
@@ -812,10 +838,6 @@ class IndexStore:
     def delete_branch_delta(self, owner: str, name: str, branch: str) -> bool:
         """Delete a branch delta. Delegates to SQLite backend."""
         return self._sqlite.delete_branch_delta(owner, name, branch)
-
-    def _languages_from_symbols(self, symbols: list[dict]) -> dict[str, int]:
-        """Compute language->file_count from serialized symbols."""
-        return self._languages_from_file_languages(self._file_languages_from_symbols(symbols))
 
     def _repo_entry_from_data(self, data: dict, _pairs=None) -> Optional[dict]:
         """Build a repo listing entry from index or sidecar data."""
@@ -851,7 +873,10 @@ class IndexStore:
             if _config.get("redact_source_root", False):
                 repo_entry["source_root"] = data.get("display_name", "") or ""
             else:
-                repo_entry["source_root"] = remap(data["source_root"], _pairs if _pairs is not None else parse_path_map())
+                repo_entry["source_root"] = remap(
+                    data["source_root"],
+                    _pairs if _pairs is not None else parse_path_map(),
+                )
         return repo_entry
 
     def _try_json_fallback(
@@ -883,6 +908,7 @@ class IndexStore:
 
         # Pass 1: SQLite databases
         from .sqlite_store import _NON_REPO_DB_FILES
+
         for db_file in self.base_path.glob("*.db"):
             if db_file.name in _NON_REPO_DB_FILES:
                 continue
@@ -891,7 +917,9 @@ class IndexStore:
             try:
                 entry = self._sqlite._list_repo_from_db(db_file, _pairs)
                 if entry and entry.get("loadable") is False:
-                    if json_entry := self._try_json_fallback(slug, _pairs, json_files_to_migrate):
+                    if json_entry := self._try_json_fallback(
+                        slug, _pairs, json_files_to_migrate
+                    ):
                         repos.append(json_entry)
                         continue
                 if entry:
@@ -905,7 +933,9 @@ class IndexStore:
                     "repo": status.repo,
                     **status.as_fields(include_empty=True),
                 }
-                if json_entry := self._try_json_fallback(slug, _pairs, json_files_to_migrate):
+                if json_entry := self._try_json_fallback(
+                    slug, _pairs, json_files_to_migrate
+                ):
                     repos.append(json_entry)
                     continue
                 repos.append(entry)
@@ -969,7 +999,8 @@ class IndexStore:
             except Exception:
                 logger.warning(
                     "Failed to eager-migrate %s — will retry on next load_index",
-                    json_path, exc_info=True,
+                    json_path,
+                    exc_info=True,
                 )
 
         repos.sort(key=lambda repo: repo["repo"])
@@ -1012,7 +1043,8 @@ class IndexStore:
                 logger.warning(
                     "delete_index: preserving unmigrated JSON for %s/%s — "
                     "it will be replaced on the next index_folder run.",
-                    owner, name,
+                    owner,
+                    name,
                 )
                 deleted = True
 
@@ -1067,7 +1099,13 @@ class IndexStore:
             "file_languages": index.file_languages,
             "display_name": index.display_name,
             **({} if index.imports is None else {"imports": index.imports}),
-            **({"context_metadata": index.context_metadata} if index.context_metadata else {}),
-            **({"file_blob_shas": index.file_blob_shas} if index.file_blob_shas else {}),
+            **(
+                {"context_metadata": index.context_metadata}
+                if index.context_metadata
+                else {}
+            ),
+            **(
+                {"file_blob_shas": index.file_blob_shas} if index.file_blob_shas else {}
+            ),
             **({"file_mtimes": index.file_mtimes} if index.file_mtimes else {}),
         }

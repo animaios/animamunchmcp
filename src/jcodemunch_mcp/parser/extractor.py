@@ -3,18 +3,18 @@
 import bisect
 import re
 from typing import Any, Optional
+
 from tree_sitter_language_pack import get_parser
 
 from .astro_shared import mask_html_comments_keep_offsets, split_astro_frontmatter
-from .symbols import Symbol, make_symbol_id, compute_content_hash
-from .languages import LanguageSpec, LANGUAGE_REGISTRY, template_underlying_language
+from .complexity import compute_complexity
+from .languages import LANGUAGE_REGISTRY, LanguageSpec, template_underlying_language
+from .symbols import Symbol, compute_content_hash, make_symbol_id
 from .template_shared import (
-    TEMPLATE_ENGINES,
     TEMPLATE_ENGINE_LANGUAGES,
+    TEMPLATE_ENGINES,
     mask_template_keep_offsets,
 )
-from .complexity import compute_complexity
-
 
 # Node types that represent function/call expressions per language.
 # These are used to extract call_references from the AST.
@@ -26,7 +26,11 @@ _CALL_NODE_TYPES: dict[str, set[str]] = {
     "go": {"call_expression"},
     "rust": {"call_expression"},
     "java": {"method_invocation", "object_creation_expression"},
-    "php": {"function_call_expression", "method_call_expression", "scoped_call_expression"},
+    "php": {
+        "function_call_expression",
+        "method_call_expression",
+        "scoped_call_expression",
+    },
     "ruby": {"call", "method_call"},
     "csharp": {"invocation_expression"},
     "kotlin": {"call_expression"},
@@ -50,9 +54,17 @@ def _extract_call_name(node, source_bytes: bytes) -> Optional[str]:
         # Simple call: foo()
         return node.text.decode("utf-8", errors="replace")
 
-    if node_type in ("call_expression", "function_call_expression", "method_invocation",
-                      "invocation_expression", "call", "method_call", "function_expression_invocation",
-                      "new_expression", "object_creation_expression"):
+    if node_type in (
+        "call_expression",
+        "function_call_expression",
+        "method_invocation",
+        "invocation_expression",
+        "call",
+        "method_call",
+        "function_expression_invocation",
+        "new_expression",
+        "object_creation_expression",
+    ):
         # For call_expression, the function being called is the first child
         # For Python call: foo() -> the "foo" is the first child (an identifier)
         # For JS call_expression: the function is first child (could be identifier or member expression)
@@ -68,7 +80,12 @@ def _extract_call_name(node, source_bytes: bytes) -> Optional[str]:
         ft = first_child.type
         if ft in ("identifier", "type_identifier"):
             return first_child.text.decode("utf-8", errors="replace")
-        elif ft in ("member_expression", "attribute_expression", "attribute", "method_declaration"):
+        elif ft in (
+            "member_expression",
+            "attribute_expression",
+            "attribute",
+            "method_declaration",
+        ):
             # For JS/TS: member_expression contains property_identifier for the method name
             # For Python: attribute node contains two identifiers (object and method)
             # First check for property_identifier (JS/TS way)
@@ -204,7 +221,13 @@ def _extract_call_references(
     _attribute_calls_to_symbols(symbols, calls)
 
 
-def parse_file(content: str, filename: str, language: str, source_bytes: Optional[bytes] = None, repo: Optional[str] = None) -> list[Symbol]:
+def parse_file(
+    content: str,
+    filename: str,
+    language: str,
+    source_bytes: Optional[bytes] = None,
+    repo: Optional[str] = None,
+) -> list[Symbol]:
     """Parse source code and extract symbols using tree-sitter.
 
     Args:
@@ -227,6 +250,7 @@ def parse_file(content: str, filename: str, language: str, source_bytes: Optiona
     # Pass repo so that per-project .jcodemunch.jsonc overrides the global config.
     try:
         from ..config import is_language_enabled as _is_lang_enabled
+
         if not _is_lang_enabled(language, repo=repo):
             return []
     except ImportError:
@@ -372,8 +396,17 @@ def _parse_with_spec(
     # Collect call sites during the same walk as symbol extraction (single pass).
     ct = _CALL_NODE_TYPES.get(language)
     calls: list[tuple[int, str]] = [] if ct else []
-    _walk_tree(tree.root_node, spec, source_bytes, filename, language, symbols, None,
-               call_types=ct, calls=calls if ct else None)
+    _walk_tree(
+        tree.root_node,
+        spec,
+        source_bytes,
+        filename,
+        language,
+        symbols,
+        None,
+        call_types=ct,
+        calls=calls if ct else None,
+    )
 
     # Attribute collected call sites to enclosing symbols (cheap — no AST walk)
     if calls:
@@ -396,7 +429,9 @@ def _parse_cpp_symbols(source_bytes: bytes, filename: str) -> tuple[list[Symbol]
         tree = parser.parse(source_bytes)
         cpp_tree = tree
         cpp_error_nodes = _count_error_nodes(tree.root_node)
-        _walk_tree(tree.root_node, cpp_spec, source_bytes, filename, "cpp", cpp_symbols, None)
+        _walk_tree(
+            tree.root_node, cpp_spec, source_bytes, filename, "cpp", cpp_symbols, None
+        )
     except Exception:
         cpp_error_nodes = 10**9
 
@@ -417,7 +452,9 @@ def _parse_cpp_symbols(source_bytes: bytes, filename: str) -> tuple[list[Symbol]
         c_tree_obj = c_parser.parse(source_bytes)
         c_tree = c_tree_obj
         c_error_nodes = _count_error_nodes(c_tree_obj.root_node)
-        _walk_tree(c_tree_obj.root_node, c_spec, source_bytes, filename, "c", c_symbols, None)
+        _walk_tree(
+            c_tree_obj.root_node, c_spec, source_bytes, filename, "c", c_symbols, None
+        )
     except Exception:
         c_error_nodes = 10**9
 
@@ -467,7 +504,11 @@ def _walk_tree(
     (byte_offset, called_name) in a single pass — no second AST walk needed.
     """
     # Dart: function_signature inside method_signature is handled by method_signature
-    if node.type == "function_signature" and node.parent and node.parent.type == "method_signature":
+    if (
+        node.type == "function_signature"
+        and node.parent
+        and node.parent.type == "method_signature"
+    ):
         return
 
     is_cpp = language in ("cpp", "arduino")
@@ -489,7 +530,11 @@ def _walk_tree(
     # Check if this node is a symbol
     if node.type in spec.symbol_node_types:
         # C++ declarations include non-function declarations. Filter those out.
-        if not (is_cpp and node.type in {"declaration", "field_declaration"} and not _is_cpp_function_declaration(node)):
+        if not (
+            is_cpp
+            and node.type in {"declaration", "field_declaration"}
+            and not _is_cpp_function_declaration(node)
+        ):
             symbol = _extract_symbol(
                 node,
                 spec,
@@ -513,11 +558,17 @@ def _walk_tree(
                 # outlines expose the class contract, not just its name (#355).
                 if language == "python" and node.type == "class_definition":
                     symbols.extend(
-                        _extract_python_class_fields(node, symbol, source_bytes, filename, language)
+                        _extract_python_class_fields(
+                            node, symbol, source_bytes, filename, language
+                        )
                     )
 
     # Check for arrow/function-expression variable assignments in JS/TS
-    if node.type == "variable_declarator" and language in ("javascript", "typescript", "tsx"):
+    if node.type == "variable_declarator" and language in (
+        "javascript",
+        "typescript",
+        "tsx",
+    ):
         var_func = _extract_variable_function(
             node, spec, source_bytes, filename, language, parent_symbol
         )
@@ -569,7 +620,10 @@ def _detect_interface_keywords(node, language: str) -> list[str]:
         return ["trait"]
 
     # TypeScript / JavaScript: interface_declaration
-    if language in ("typescript", "javascript", "tsx") and ntype == "interface_declaration":
+    if (
+        language in ("typescript", "javascript", "tsx")
+        and ntype == "interface_declaration"
+    ):
         return ["interface"]
 
     # Java: interface_declaration, or class with "abstract" modifier
@@ -591,7 +645,11 @@ def _detect_interface_keywords(node, language: str) -> list[str]:
             return ["interface"]
         if ntype == "class_declaration":
             for child in node.children:
-                if child.type == "modifier" and child.text and child.text.decode("utf-8", errors="replace") == "abstract":
+                if (
+                    child.type == "modifier"
+                    and child.text
+                    and child.text.decode("utf-8", errors="replace") == "abstract"
+                ):
                     return ["abstract"]
             return []
         return []
@@ -619,16 +677,16 @@ def _extract_symbol(
 ) -> Optional[Symbol]:
     """Extract a Symbol from an AST node."""
     kind = spec.symbol_node_types[node.type]
-    
+
     # Skip nodes with errors
     if node.has_error:
         return None
-    
+
     # Extract name
     name = _extract_name(node, spec, source_bytes)
     if not name:
         return None
-    
+
     # Build qualified name
     if language in ("cpp", "arduino"):
         if parent_symbol:
@@ -672,7 +730,7 @@ def _extract_symbol(
             end_line_num = next_sib.end_point[0] + 1
 
     # Compute content hash
-    symbol_bytes = source_bytes[start_node.start_byte:end_byte]
+    symbol_bytes = source_bytes[start_node.start_byte : end_byte]
     c_hash = compute_content_hash(symbol_bytes)
 
     # Detect interface / trait / abstract keywords for dispatch resolution
@@ -709,14 +767,16 @@ def _extract_name(node, spec: LanguageSpec, source_bytes: bytes) -> Optional[str
             if child.type == "type_spec":
                 name_node = child.child_by_field_name("name")
                 if name_node:
-                    return source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+                    return source_bytes[
+                        name_node.start_byte : name_node.end_byte
+                    ].decode("utf-8")
         return None
 
     # Dart: mixin_declaration has identifier as direct child (no field name)
     if node.type == "mixin_declaration":
         for child in node.children:
             if child.type == "identifier":
-                return source_bytes[child.start_byte:child.end_byte].decode("utf-8")
+                return source_bytes[child.start_byte : child.end_byte].decode("utf-8")
         return None
 
     # Dart: method_signature wraps function_signature or getter_signature
@@ -725,7 +785,9 @@ def _extract_name(node, spec: LanguageSpec, source_bytes: bytes) -> Optional[str
             if child.type in ("function_signature", "getter_signature"):
                 name_node = child.child_by_field_name("name")
                 if name_node:
-                    return source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+                    return source_bytes[
+                        name_node.start_byte : name_node.end_byte
+                    ].decode("utf-8")
         return None
 
     # Python 3.12+ type alias: `type Name = ...`. The `left` field is a `type`
@@ -739,7 +801,7 @@ def _extract_name(node, spec: LanguageSpec, source_bytes: bytes) -> Optional[str
             while stack:
                 cur = stack.pop(0)
                 if cur.type == "identifier":
-                    return source_bytes[cur.start_byte:cur.end_byte].decode("utf-8")
+                    return source_bytes[cur.start_byte : cur.end_byte].decode("utf-8")
                 stack.extend(cur.children)
         return None
 
@@ -747,7 +809,7 @@ def _extract_name(node, spec: LanguageSpec, source_bytes: bytes) -> Optional[str
     if node.type == "type_alias" and spec.ts_language == "dart":
         for child in node.children:
             if child.type == "type_identifier":
-                return source_bytes[child.start_byte:child.end_byte].decode("utf-8")
+                return source_bytes[child.start_byte : child.end_byte].decode("utf-8")
         return None
 
     # Kotlin: no named fields; walk children by type to find name
@@ -755,12 +817,16 @@ def _extract_name(node, spec: LanguageSpec, source_bytes: bytes) -> Optional[str
         if node.type in ("class_declaration", "object_declaration", "type_alias"):
             for child in node.children:
                 if child.type == "type_identifier":
-                    return source_bytes[child.start_byte:child.end_byte].decode("utf-8")
+                    return source_bytes[child.start_byte : child.end_byte].decode(
+                        "utf-8"
+                    )
             return None
         if node.type == "function_declaration":
             for child in node.children:
                 if child.type == "simple_identifier":
-                    return source_bytes[child.start_byte:child.end_byte].decode("utf-8")
+                    return source_bytes[child.start_byte : child.end_byte].decode(
+                        "utf-8"
+                    )
             return None
 
     # Gleam: type_definition and type_alias names live inside a type_name child
@@ -769,11 +835,16 @@ def _extract_name(node, spec: LanguageSpec, source_bytes: bytes) -> Optional[str
             if child.type == "type_name":
                 name_node = child.child_by_field_name("name")
                 if name_node:
-                    return source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+                    return source_bytes[
+                        name_node.start_byte : name_node.end_byte
+                    ].decode("utf-8")
         return None
 
     # C#: field_declaration and event_field_declaration wrappers
-    if spec.ts_language == "csharp" and node.type in ("field_declaration", "event_field_declaration"):
+    if spec.ts_language == "csharp" and node.type in (
+        "field_declaration",
+        "event_field_declaration",
+    ):
         for child in node.children:
             if child.type == "variable_declaration":
                 # Find the first variable_declarator child
@@ -781,29 +852,35 @@ def _extract_name(node, spec: LanguageSpec, source_bytes: bytes) -> Optional[str
                     if vdecl.type == "variable_declarator":
                         name_node = vdecl.child_by_field_name("name")
                         if name_node:
-                            return source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+                            return source_bytes[
+                                name_node.start_byte : name_node.end_byte
+                            ].decode("utf-8")
         return None
 
     if node.type not in spec.name_fields:
         return None
-    
+
     field_name = spec.name_fields[node.type]
     name_node = node.child_by_field_name(field_name)
-    
+
     if name_node:
         if spec.ts_language in ("cpp", "arduino"):
             return _extract_cpp_name(name_node, source_bytes)
 
         # C function_definition: declarator is a function_declarator,
         # which wraps the actual identifier. Unwrap recursively.
-        while name_node.type in ("function_declarator", "pointer_declarator", "reference_declarator"):
+        while name_node.type in (
+            "function_declarator",
+            "pointer_declarator",
+            "reference_declarator",
+        ):
             inner = name_node.child_by_field_name("declarator")
             if inner:
                 name_node = inner
             else:
                 break
-        return source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
-    
+        return source_bytes[name_node.start_byte : name_node.end_byte].decode("utf-8")
+
     return None
 
 
@@ -830,7 +907,11 @@ def _extract_cpp_name(name_node, source_bytes: bytes) -> Optional[str]:
     if current.type in {"qualified_identifier", "scoped_identifier"}:
         name_node = current.child_by_field_name("name")
         if name_node:
-            text = source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8").strip()
+            text = (
+                source_bytes[name_node.start_byte : name_node.end_byte]
+                .decode("utf-8")
+                .strip()
+            )
             if text:
                 return text
 
@@ -838,15 +919,21 @@ def _extract_cpp_name(name_node, source_bytes: bytes) -> Optional[str]:
     if subtree_name:
         return subtree_name
 
-    text = source_bytes[current.start_byte:current.end_byte].decode("utf-8").strip()
+    text = source_bytes[current.start_byte : current.end_byte].decode("utf-8").strip()
     return text or None
 
 
 def _find_cpp_name_in_subtree(node, source_bytes: bytes) -> Optional[str]:
     """Best-effort extraction of a callable/type name from a declarator subtree."""
-    direct_types = {"identifier", "field_identifier", "operator_name", "destructor_name", "type_identifier"}
+    direct_types = {
+        "identifier",
+        "field_identifier",
+        "operator_name",
+        "destructor_name",
+        "type_identifier",
+    }
     if node.type in direct_types:
-        text = source_bytes[node.start_byte:node.end_byte].decode("utf-8").strip()
+        text = source_bytes[node.start_byte : node.end_byte].decode("utf-8").strip()
         return text or None
 
     if node.type in {"qualified_identifier", "scoped_identifier"}:
@@ -899,13 +986,13 @@ def _build_signature(node, spec: LanguageSpec, source_bytes: bytes) -> str:
             end_byte = body.start_byte
         else:
             end_byte = node.end_byte
-    
-    sig_bytes = source_bytes[node.start_byte:end_byte]
+
+    sig_bytes = source_bytes[node.start_byte : end_byte]
     sig_text = sig_bytes.decode("utf-8").strip()
-    
+
     # Clean up: remove trailing '{', ':', etc.
     sig_text = sig_text.rstrip("{: \n\t")
-    
+
     return sig_text
 
 
@@ -958,7 +1045,9 @@ def _extract_cpp_namespace_name(node, source_bytes: bytes) -> Optional[str]:
     if not name_node:
         return None
 
-    name = source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8").strip()
+    name = (
+        source_bytes[name_node.start_byte : name_node.end_byte].decode("utf-8").strip()
+    )
     return name or None
 
 
@@ -1007,26 +1096,28 @@ def _extract_python_docstring(node, source_bytes: bytes) -> str:
     body = node.child_by_field_name("body")
     if not body or body.child_count == 0:
         return ""
-    
+
     # Find first expression_statement in body (function docstrings)
     for child in body.children:
         if child.type == "expression_statement":
             # Check if it's a string
             expr = child.child_by_field_name("expression")
             if expr and expr.type == "string":
-                doc = source_bytes[expr.start_byte:expr.end_byte].decode("utf-8")
+                doc = source_bytes[expr.start_byte : expr.end_byte].decode("utf-8")
                 return _strip_quotes(doc)
             # Handle tree-sitter-python 0.21+ string format
             if child.child_count > 0:
                 first = child.children[0]
                 if first.type in ("string", "concatenated_string"):
-                    doc = source_bytes[first.start_byte:first.end_byte].decode("utf-8")
+                    doc = source_bytes[first.start_byte : first.end_byte].decode(
+                        "utf-8"
+                    )
                     return _strip_quotes(doc)
         # Class docstrings are directly string nodes in the block
         elif child.type == "string":
-            doc = source_bytes[child.start_byte:child.end_byte].decode("utf-8")
+            doc = source_bytes[child.start_byte : child.end_byte].decode("utf-8")
             return _strip_quotes(doc)
-    
+
     return ""
 
 
@@ -1052,14 +1143,20 @@ def _extract_preceding_comments(node, source_bytes: bytes) -> str:
     prev = node.prev_named_sibling
     while prev and prev.type in ("annotation", "marker_annotation"):
         prev = prev.prev_named_sibling
-    while prev and prev.type in ("comment", "line_comment", "block_comment", "documentation_comment", "pod"):
-        comment_text = source_bytes[prev.start_byte:prev.end_byte].decode("utf-8")
+    while prev and prev.type in (
+        "comment",
+        "line_comment",
+        "block_comment",
+        "documentation_comment",
+        "pod",
+    ):
+        comment_text = source_bytes[prev.start_byte : prev.end_byte].decode("utf-8")
         comments.insert(0, comment_text)
         prev = prev.prev_named_sibling
-    
+
     if not comments:
         return ""
-    
+
     docstring = "\n".join(comments)
     return _clean_comment_markers(docstring)
 
@@ -1116,13 +1213,17 @@ def _extract_decorators(node, spec: LanguageSpec, source_bytes: bytes) -> list[s
         # C#: attribute_list nodes are direct children of the declaration
         for child in node.children:
             if child.type == spec.decorator_node_type:
-                decorator_text = source_bytes[child.start_byte:child.end_byte].decode("utf-8")
+                decorator_text = source_bytes[child.start_byte : child.end_byte].decode(
+                    "utf-8"
+                )
                 decorators.append(decorator_text.strip())
     else:
         # Other languages: decorators are preceding siblings
         prev = node.prev_named_sibling
         while prev and prev.type == spec.decorator_node_type:
-            decorator_text = source_bytes[prev.start_byte:prev.end_byte].decode("utf-8")
+            decorator_text = source_bytes[prev.start_byte : prev.end_byte].decode(
+                "utf-8"
+            )
             decorators.insert(0, decorator_text.strip())
             prev = prev.prev_named_sibling
 
@@ -1131,14 +1232,24 @@ def _extract_decorators(node, spec: LanguageSpec, source_bytes: bytes) -> list[s
 
 # Decorators that mark a Python class as field-centric (its annotated class-body
 # assignments are data fields, not incidental class attributes).
-_FIELD_CENTRIC_DECORATOR_NAMES = frozenset({
-    "dataclass",                      # dataclasses / pydantic.dataclasses
-    "s", "attrs", "attrib", "define", "frozen", "mutable",  # attrs / attr
-})
+_FIELD_CENTRIC_DECORATOR_NAMES = frozenset(
+    {
+        "dataclass",  # dataclasses / pydantic.dataclasses
+        "s",
+        "attrs",
+        "attrib",
+        "define",
+        "frozen",
+        "mutable",  # attrs / attr
+    }
+)
 # Base-class names that mark a Python class as field-centric (Pydantic, etc.).
-_FIELD_CENTRIC_BASE_NAMES = frozenset({
-    "BaseModel", "BaseSettings",
-})
+_FIELD_CENTRIC_BASE_NAMES = frozenset(
+    {
+        "BaseModel",
+        "BaseSettings",
+    }
+)
 
 
 def _decorator_final_name(decorator_text: str) -> str:
@@ -1148,7 +1259,7 @@ def _decorator_final_name(decorator_text: str) -> str:
     ``@pydantic.dataclasses.dataclass`` -> ``dataclass``.
     """
     s = decorator_text.lstrip("@").strip()
-    s = s.split("(", 1)[0].strip()       # drop call args
+    s = s.split("(", 1)[0].strip()  # drop call args
     return s.rsplit(".", 1)[-1] if s else ""
 
 
@@ -1157,24 +1268,29 @@ def _node_final_name(node, source_bytes: bytes) -> str:
     cur = node
     # Subscript like Generic[T] / BaseModel[...] -> use the value.
     while cur is not None and cur.type == "subscript":
-        cur = cur.child_by_field_name("value") or (cur.children[0] if cur.children else None)
+        cur = cur.child_by_field_name("value") or (
+            cur.children[0] if cur.children else None
+        )
     if cur is None:
         return ""
-    text = source_bytes[cur.start_byte:cur.end_byte].decode("utf-8", errors="replace")
+    text = source_bytes[cur.start_byte : cur.end_byte].decode("utf-8", errors="replace")
     return text.rsplit(".", 1)[-1].strip()
 
 
 def _is_field_centric_class(class_node, class_symbol, source_bytes: bytes) -> bool:
     """True for dataclass / attrs / Pydantic-style classes."""
-    for dec in (class_symbol.decorators or []):
+    for dec in class_symbol.decorators or []:
         if _decorator_final_name(dec) in _FIELD_CENTRIC_DECORATOR_NAMES:
             return True
     # Base classes live in an argument_list child of the class_definition.
     for child in class_node.children:
         if child.type == "argument_list":
             for base in child.children:
-                if base.type in ("identifier", "attribute", "subscript") and \
-                        _node_final_name(base, source_bytes) in _FIELD_CENTRIC_BASE_NAMES:
+                if (
+                    base.type in ("identifier", "attribute", "subscript")
+                    and _node_final_name(base, source_bytes)
+                    in _FIELD_CENTRIC_BASE_NAMES
+                ):
                     return True
     return False
 
@@ -1190,7 +1306,9 @@ def _extract_python_class_fields(
     annotations are skipped (they are not data fields). Field name, annotation,
     and default all live in the signature; ``parent`` links to the class.
     """
-    if class_node.has_error or not _is_field_centric_class(class_node, class_symbol, source_bytes):
+    if class_node.has_error or not _is_field_centric_class(
+        class_node, class_symbol, source_bytes
+    ):
         return []
 
     block = None
@@ -1209,39 +1327,54 @@ def _extract_python_class_fields(
         annotation = stmt.child_by_field_name("type")
         if left is None or annotation is None or left.type != "identifier":
             continue  # bare/tuple/augmented assignment — not an annotated field
-        ann_text = source_bytes[annotation.start_byte:annotation.end_byte].decode("utf-8", errors="replace")
-        if _node_final_name(annotation.children[0] if annotation.children else annotation, source_bytes) == "ClassVar" \
-                or ann_text.lstrip().startswith("ClassVar"):
+        ann_text = source_bytes[annotation.start_byte : annotation.end_byte].decode(
+            "utf-8", errors="replace"
+        )
+        if _node_final_name(
+            annotation.children[0] if annotation.children else annotation, source_bytes
+        ) == "ClassVar" or ann_text.lstrip().startswith("ClassVar"):
             continue
-        fname = source_bytes[left.start_byte:left.end_byte].decode("utf-8", errors="replace")
+        fname = source_bytes[left.start_byte : left.end_byte].decode(
+            "utf-8", errors="replace"
+        )
         qualified_name = f"{class_symbol.name}.{fname}"
-        signature = source_bytes[stmt.start_byte:stmt.end_byte].decode("utf-8", errors="replace").strip()
-        fields.append(Symbol(
-            id=make_symbol_id(filename, qualified_name, "field"),
-            file=filename,
-            name=fname,
-            qualified_name=qualified_name,
-            kind="field",
-            language=language,
-            signature=signature,
-            docstring="",
-            decorators=[],
-            keywords=[],
-            parent=class_symbol.id,
-            line=stmt.start_point[0] + 1,
-            end_line=stmt.end_point[0] + 1,
-            byte_offset=stmt.start_byte,
-            byte_length=stmt.end_byte - stmt.start_byte,
-            content_hash=compute_content_hash(source_bytes[stmt.start_byte:stmt.end_byte]),
-        ))
+        signature = (
+            source_bytes[stmt.start_byte : stmt.end_byte]
+            .decode("utf-8", errors="replace")
+            .strip()
+        )
+        fields.append(
+            Symbol(
+                id=make_symbol_id(filename, qualified_name, "field"),
+                file=filename,
+                name=fname,
+                qualified_name=qualified_name,
+                kind="field",
+                language=language,
+                signature=signature,
+                docstring="",
+                decorators=[],
+                keywords=[],
+                parent=class_symbol.id,
+                line=stmt.start_point[0] + 1,
+                end_line=stmt.end_point[0] + 1,
+                byte_offset=stmt.start_byte,
+                byte_length=stmt.end_byte - stmt.start_byte,
+                content_hash=compute_content_hash(
+                    source_bytes[stmt.start_byte : stmt.end_byte]
+                ),
+            )
+        )
     return fields
 
 
-_VARIABLE_FUNCTION_TYPES = frozenset({
-    "arrow_function",
-    "function_expression",
-    "generator_function",
-})
+_VARIABLE_FUNCTION_TYPES = frozenset(
+    {
+        "arrow_function",
+        "function_expression",
+        "generator_function",
+    }
+)
 
 
 def _extract_variable_function(
@@ -1262,7 +1395,7 @@ def _extract_variable_function(
     if not value_node or value_node.type not in _VARIABLE_FUNCTION_TYPES:
         return None  # not a function assignment
 
-    name = source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+    name = source_bytes[name_node.start_byte : name_node.end_byte].decode("utf-8")
 
     kind = "function"
     if parent_symbol:
@@ -1273,9 +1406,17 @@ def _extract_variable_function(
 
     # Signature: use the full declaration statement (lexical_declaration parent)
     # to capture export/const keywords
-    sig_node = node.parent if node.parent and node.parent.type in (
-        "lexical_declaration", "export_statement", "variable_declaration",
-    ) else node
+    sig_node = (
+        node.parent
+        if node.parent
+        and node.parent.type
+        in (
+            "lexical_declaration",
+            "export_statement",
+            "variable_declaration",
+        )
+        else node
+    )
     # Walk up through export_statement wrapper if present
     if sig_node.parent and sig_node.parent.type == "export_statement":
         sig_node = sig_node.parent
@@ -1318,12 +1459,16 @@ def _extract_constant(
     if node.type == "assignment":
         left = node.child_by_field_name("left")
         if left and left.type == "identifier":
-            name = source_bytes[left.start_byte:left.end_byte].decode("utf-8")
+            name = source_bytes[left.start_byte : left.end_byte].decode("utf-8")
             # Check if UPPER_CASE (constant convention)
             if name.isupper() or (len(name) > 1 and name[0].isupper() and "_" in name):
                 # Get the full assignment text as signature
-                sig = source_bytes[node.start_byte:node.end_byte].decode("utf-8").strip()
-                const_bytes = source_bytes[node.start_byte:node.end_byte]
+                sig = (
+                    source_bytes[node.start_byte : node.end_byte]
+                    .decode("utf-8")
+                    .strip()
+                )
+                const_bytes = source_bytes[node.start_byte : node.end_byte]
                 c_hash = compute_content_hash(const_bytes)
 
                 return Symbol(
@@ -1345,10 +1490,16 @@ def _extract_constant(
     if node.type == "preproc_def":
         name_node = node.child_by_field_name("name")
         if name_node:
-            name = source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+            name = source_bytes[name_node.start_byte : name_node.end_byte].decode(
+                "utf-8"
+            )
             if name.isupper() or (len(name) > 1 and name[0].isupper() and "_" in name):
-                sig = source_bytes[node.start_byte:node.end_byte].decode("utf-8").strip()
-                const_bytes = source_bytes[node.start_byte:node.end_byte]
+                sig = (
+                    source_bytes[node.start_byte : node.end_byte]
+                    .decode("utf-8")
+                    .strip()
+                )
+                const_bytes = source_bytes[node.start_byte : node.end_byte]
                 c_hash = compute_content_hash(const_bytes)
 
                 return Symbol(
@@ -1370,9 +1521,11 @@ def _extract_constant(
     if node.type == "const_statement":
         name_node = node.child_by_field_name("name")
         if name_node:
-            name = source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
-            sig = source_bytes[node.start_byte:node.end_byte].decode("utf-8").strip()
-            const_bytes = source_bytes[node.start_byte:node.end_byte]
+            name = source_bytes[name_node.start_byte : name_node.end_byte].decode(
+                "utf-8"
+            )
+            sig = source_bytes[node.start_byte : node.end_byte].decode("utf-8").strip()
+            const_bytes = source_bytes[node.start_byte : node.end_byte]
             c_hash = compute_content_hash(const_bytes)
             return Symbol(
                 id=make_symbol_id(filename, name, "constant"),
@@ -1393,16 +1546,26 @@ def _extract_constant(
     if node.type == "use_statement":
         children = list(node.children)
         if len(children) >= 3 and children[1].type == "package":
-            pkg_name = source_bytes[children[1].start_byte:children[1].end_byte].decode("utf-8")
+            pkg_name = source_bytes[
+                children[1].start_byte : children[1].end_byte
+            ].decode("utf-8")
             if pkg_name == "constant":
                 for child in children:
                     if child.type == "list_expression" and child.child_count >= 1:
                         name_node = child.children[0]
                         if name_node.type == "autoquoted_bareword":
-                            name = source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+                            name = source_bytes[
+                                name_node.start_byte : name_node.end_byte
+                            ].decode("utf-8")
                             if name.isupper() or (len(name) > 1 and name[0].isupper()):
-                                sig = source_bytes[node.start_byte:node.end_byte].decode("utf-8").strip()
-                                const_bytes = source_bytes[node.start_byte:node.end_byte]
+                                sig = (
+                                    source_bytes[node.start_byte : node.end_byte]
+                                    .decode("utf-8")
+                                    .strip()
+                                )
+                                const_bytes = source_bytes[
+                                    node.start_byte : node.end_byte
+                                ]
                                 c_hash = compute_content_hash(const_bytes)
                                 return Symbol(
                                     id=make_symbol_id(filename, name, "constant"),
@@ -1444,11 +1607,13 @@ def _extract_constant(
                     break
         if not name_node:
             return None
-        name = source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
-        if not (name.isupper() or (len(name) > 1 and name[0].isupper() and "_" in name)):
+        name = source_bytes[name_node.start_byte : name_node.end_byte].decode("utf-8")
+        if not (
+            name.isupper() or (len(name) > 1 and name[0].isupper() and "_" in name)
+        ):
             return None
-        sig = source_bytes[node.start_byte:node.end_byte].decode("utf-8").strip()
-        const_bytes = source_bytes[node.start_byte:node.end_byte]
+        sig = source_bytes[node.start_byte : node.end_byte].decode("utf-8").strip()
+        const_bytes = source_bytes[node.start_byte : node.end_byte]
         c_hash = compute_content_hash(const_bytes)
         return Symbol(
             id=make_symbol_id(filename, name, "constant"),
@@ -1478,7 +1643,9 @@ def _extract_constant(
             name_node = child.child_by_field_name("name")
             if not name_node or name_node.type != "identifier":
                 continue
-            name = source_bytes[name_node.start_byte:name_node.end_byte].decode("utf-8")
+            name = source_bytes[name_node.start_byte : name_node.end_byte].decode(
+                "utf-8"
+            )
             # Arrow functions and function expressions are handled by _extract_variable_function
             value_node = child.child_by_field_name("value")
             if value_node and value_node.type in (
@@ -1487,8 +1654,8 @@ def _extract_constant(
                 "generator_function",
             ):
                 continue
-            sig = source_bytes[node.start_byte:node.end_byte].decode("utf-8").strip()
-            const_bytes = source_bytes[node.start_byte:node.end_byte]
+            sig = source_bytes[node.start_byte : node.end_byte].decode("utf-8").strip()
+            const_bytes = source_bytes[node.start_byte : node.end_byte]
             c_hash = compute_content_hash(const_bytes)
             return Symbol(
                 id=make_symbol_id(filename, name, "constant"),
@@ -1512,6 +1679,7 @@ def _extract_constant(
 # Elixir custom extractor
 # ===========================================================================
 
+
 def _get_elixir_args(node) -> Optional[object]:
     """Return the `arguments` named child of an Elixir AST node.
 
@@ -1527,14 +1695,16 @@ def _get_elixir_args(node) -> Optional[object]:
 
 # --- Elixir keyword sets ---
 _ELIXIR_MODULE_KW = frozenset({"defmodule", "defprotocol", "defimpl"})
-_ELIXIR_FUNCTION_KW = frozenset({"def", "defp", "defmacro", "defmacrop", "defguard", "defguardp"})
+_ELIXIR_FUNCTION_KW = frozenset(
+    {"def", "defp", "defmacro", "defmacrop", "defguard", "defguardp"}
+)
 _ELIXIR_TYPE_ATTRS = frozenset({"type", "typep", "opaque"})
 _ELIXIR_SKIP_ATTRS = frozenset({"spec", "impl"})
 
 
 def _node_text(node, source_bytes: bytes) -> str:
     """Return the decoded text of a tree-sitter node."""
-    return source_bytes[node.start_byte:node.end_byte].decode("utf-8").strip()
+    return source_bytes[node.start_byte : node.end_byte].decode("utf-8").strip()
 
 
 def _first_named_child(node):
@@ -1553,11 +1723,18 @@ def _get_elixir_attr_name(node, source_bytes: bytes) -> Optional[str]:
 
 
 def _make_elixir_symbol(
-    node, source_bytes: bytes, filename: str, name: str, qualified_name: str,
-    kind: str, parent_symbol: Optional[Symbol], signature: str, docstring: str = ""
+    node,
+    source_bytes: bytes,
+    filename: str,
+    name: str,
+    qualified_name: str,
+    kind: str,
+    parent_symbol: Optional[Symbol],
+    signature: str,
+    docstring: str = "",
 ) -> Symbol:
     """Construct a Symbol for an Elixir node."""
-    symbol_bytes = source_bytes[node.start_byte:node.end_byte]
+    symbol_bytes = source_bytes[node.start_byte : node.end_byte]
     return Symbol(
         id=make_symbol_id(filename, qualified_name, kind),
         file=filename,
@@ -1590,7 +1767,13 @@ def _parse_elixir_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     return symbols
 
 
-def _walk_elixir(node, source_bytes: bytes, filename: str, symbols: list, parent_symbol: Optional[Symbol]):
+def _walk_elixir(
+    node,
+    source_bytes: bytes,
+    filename: str,
+    symbols: list,
+    parent_symbol: Optional[Symbol],
+):
     """Recursively walk Elixir AST and extract symbols."""
     if node.type == "call":
         target = node.child_by_field_name("target")
@@ -1601,17 +1784,23 @@ def _walk_elixir(node, source_bytes: bytes, filename: str, symbols: list, parent
         keyword = _node_text(target, source_bytes)
 
         if keyword in _ELIXIR_MODULE_KW:
-            sym = _extract_elixir_module(node, keyword, source_bytes, filename, parent_symbol)
+            sym = _extract_elixir_module(
+                node, keyword, source_bytes, filename, parent_symbol
+            )
             if sym:
                 symbols.append(sym)
                 # Recurse into do_block with this module as parent
                 do_block = _find_elixir_do_block(node)
                 if do_block:
-                    _walk_elixir_children(do_block, source_bytes, filename, symbols, sym)
+                    _walk_elixir_children(
+                        do_block, source_bytes, filename, symbols, sym
+                    )
                 return
 
         if keyword in _ELIXIR_FUNCTION_KW:
-            sym = _extract_elixir_function(node, keyword, source_bytes, filename, parent_symbol)
+            sym = _extract_elixir_function(
+                node, keyword, source_bytes, filename, parent_symbol
+            )
             if sym:
                 symbols.append(sym)
             return
@@ -1623,7 +1812,14 @@ def _walk_elixir(node, source_bytes: bytes, filename: str, symbols: list, parent
             if inner_target:
                 attr_name = _node_text(inner_target, source_bytes)
                 if attr_name in _ELIXIR_TYPE_ATTRS or attr_name == "callback":
-                    sym = _extract_elixir_type_attribute(node, attr_name, inner_call, source_bytes, filename, parent_symbol)
+                    sym = _extract_elixir_type_attribute(
+                        node,
+                        attr_name,
+                        inner_call,
+                        source_bytes,
+                        filename,
+                        parent_symbol,
+                    )
                     if sym:
                         symbols.append(sym)
                     return
@@ -1631,7 +1827,13 @@ def _walk_elixir(node, source_bytes: bytes, filename: str, symbols: list, parent
     _walk_elixir_children(node, source_bytes, filename, symbols, parent_symbol)
 
 
-def _walk_elixir_children(node, source_bytes: bytes, filename: str, symbols: list, parent_symbol: Optional[Symbol]):
+def _walk_elixir_children(
+    node,
+    source_bytes: bytes,
+    filename: str,
+    symbols: list,
+    parent_symbol: Optional[Symbol],
+):
     for child in node.children:
         _walk_elixir(child, source_bytes, filename, symbols, parent_symbol)
 
@@ -1644,7 +1846,13 @@ def _find_elixir_do_block(call_node) -> Optional[object]:
     return None
 
 
-def _extract_elixir_module(node, keyword: str, source_bytes: bytes, filename: str, parent_symbol: Optional[Symbol]) -> Optional[Symbol]:
+def _extract_elixir_module(
+    node,
+    keyword: str,
+    source_bytes: bytes,
+    filename: str,
+    parent_symbol: Optional[Symbol],
+) -> Optional[Symbol]:
     """Extract a defmodule/defprotocol/defimpl symbol."""
     arguments = _get_elixir_args(node)
     if arguments is None:
@@ -1673,21 +1881,37 @@ def _extract_elixir_module(node, keyword: str, source_bytes: bytes, filename: st
     do_block = _find_elixir_do_block(node)
     docstring = _extract_elixir_moduledoc(do_block, source_bytes) if do_block else ""
 
-    return _make_elixir_symbol(node, source_bytes, filename, name, qualified_name, kind, parent_symbol, signature, docstring)
+    return _make_elixir_symbol(
+        node,
+        source_bytes,
+        filename,
+        name,
+        qualified_name,
+        kind,
+        parent_symbol,
+        signature,
+        docstring,
+    )
 
 
 def _extract_elixir_alias_name(arguments, source_bytes: bytes) -> Optional[str]:
     """Extract module name from an `alias` node in arguments."""
     for child in arguments.children:
         if child.type == "alias":
-            return source_bytes[child.start_byte:child.end_byte].decode("utf-8").strip()
+            return (
+                source_bytes[child.start_byte : child.end_byte].decode("utf-8").strip()
+            )
         # Sometimes the module name is an `atom` (rare) or `identifier`
         if child.type in ("identifier", "atom"):
-            return source_bytes[child.start_byte:child.end_byte].decode("utf-8").strip()
+            return (
+                source_bytes[child.start_byte : child.end_byte].decode("utf-8").strip()
+            )
     return None
 
 
-def _extract_elixir_defimpl_name(arguments, source_bytes: bytes, parent_symbol: Optional[Symbol]) -> Optional[str]:
+def _extract_elixir_defimpl_name(
+    arguments, source_bytes: bytes, parent_symbol: Optional[Symbol]
+) -> Optional[str]:
     """Build a name for defimpl: '<Protocol>.<ForModule>' or just the protocol name."""
     # First child is usually the protocol alias
     proto_name = None
@@ -1695,7 +1919,9 @@ def _extract_elixir_defimpl_name(arguments, source_bytes: bytes, parent_symbol: 
 
     for child in arguments.children:
         if child.type == "alias" and proto_name is None:
-            proto_name = source_bytes[child.start_byte:child.end_byte].decode("utf-8").strip()
+            proto_name = (
+                source_bytes[child.start_byte : child.end_byte].decode("utf-8").strip()
+            )
         # `for:` keyword argument: keywords > pair > (atom "for") + alias
         if child.type == "keywords":
             for pair in child.children:
@@ -1703,9 +1929,17 @@ def _extract_elixir_defimpl_name(arguments, source_bytes: bytes, parent_symbol: 
                     key_node = pair.child_by_field_name("key")
                     val_node = pair.child_by_field_name("value")
                     if key_node and val_node:
-                        key_text = source_bytes[key_node.start_byte:key_node.end_byte].decode("utf-8").strip()
+                        key_text = (
+                            source_bytes[key_node.start_byte : key_node.end_byte]
+                            .decode("utf-8")
+                            .strip()
+                        )
                         if key_text in ("for", "for:"):
-                            for_name = source_bytes[val_node.start_byte:val_node.end_byte].decode("utf-8").strip()
+                            for_name = (
+                                source_bytes[val_node.start_byte : val_node.end_byte]
+                                .decode("utf-8")
+                                .strip()
+                            )
 
     if proto_name and for_name:
         # e.g. Printable.Integer
@@ -1713,7 +1947,13 @@ def _extract_elixir_defimpl_name(arguments, source_bytes: bytes, parent_symbol: 
     return proto_name
 
 
-def _extract_elixir_function(node, keyword: str, source_bytes: bytes, filename: str, parent_symbol: Optional[Symbol]) -> Optional[Symbol]:
+def _extract_elixir_function(
+    node,
+    keyword: str,
+    source_bytes: bytes,
+    filename: str,
+    parent_symbol: Optional[Symbol],
+) -> Optional[Symbol]:
     """Extract a def/defp/defmacro/defmacrop/defguard/defguardp symbol."""
     arguments = _get_elixir_args(node)
     if arguments is None:
@@ -1749,7 +1989,17 @@ def _extract_elixir_function(node, keyword: str, source_bytes: bytes, filename: 
     signature = _build_elixir_signature(node, source_bytes)
     docstring = _extract_elixir_doc(node, source_bytes)
 
-    return _make_elixir_symbol(node, source_bytes, filename, name, qualified_name, kind, parent_symbol, signature, docstring)
+    return _make_elixir_symbol(
+        node,
+        source_bytes,
+        filename,
+        name,
+        qualified_name,
+        kind,
+        parent_symbol,
+        signature,
+        docstring,
+    )
 
 
 def _extract_elixir_call_name(call_node, source_bytes: bytes) -> Optional[str]:
@@ -1757,9 +2007,17 @@ def _extract_elixir_call_name(call_node, source_bytes: bytes) -> Optional[str]:
     if call_node.type == "call":
         target = call_node.child_by_field_name("target")
         if target:
-            return source_bytes[target.start_byte:target.end_byte].decode("utf-8").strip()
+            return (
+                source_bytes[target.start_byte : target.end_byte]
+                .decode("utf-8")
+                .strip()
+            )
     if call_node.type == "identifier":
-        return source_bytes[call_node.start_byte:call_node.end_byte].decode("utf-8").strip()
+        return (
+            source_bytes[call_node.start_byte : call_node.end_byte]
+            .decode("utf-8")
+            .strip()
+        )
     return None
 
 
@@ -1767,9 +2025,9 @@ def _build_elixir_signature(node, source_bytes: bytes) -> str:
     """Build function/module signature: text up to the do_block."""
     do_block = _find_elixir_do_block(node)
     if do_block:
-        sig_bytes = source_bytes[node.start_byte:do_block.start_byte]
+        sig_bytes = source_bytes[node.start_byte : do_block.start_byte]
     else:
-        sig_bytes = source_bytes[node.start_byte:node.end_byte]
+        sig_bytes = source_bytes[node.start_byte : node.end_byte]
     return sig_bytes.decode("utf-8").strip().rstrip(",").strip()
 
 
@@ -1816,13 +2074,20 @@ def _extract_elixir_string_arg(call_node, source_bytes: bytes) -> str:
 
     for child in arguments.children:
         if child.type == "string":
-            text = source_bytes[child.start_byte:child.end_byte].decode("utf-8")
+            text = source_bytes[child.start_byte : child.end_byte].decode("utf-8")
             return _strip_quotes(text)
         # @doc false → boolean node, not a string
     return ""
 
 
-def _extract_elixir_type_attribute(node, attr_name: str, inner_call, source_bytes: bytes, filename: str, parent_symbol: Optional[Symbol]) -> Optional[Symbol]:
+def _extract_elixir_type_attribute(
+    node,
+    attr_name: str,
+    inner_call,
+    source_bytes: bytes,
+    filename: str,
+    parent_symbol: Optional[Symbol],
+) -> Optional[Symbol]:
     """Extract @type/@typep/@opaque as type symbols."""
     # inner_call is the `call` inside `@type name :: expr`
     arguments = _get_elixir_args(inner_call)
@@ -1844,7 +2109,16 @@ def _extract_elixir_type_attribute(node, attr_name: str, inner_call, source_byte
                 qualified_name = name
 
             sig = _node_text(node, source_bytes)
-            return _make_elixir_symbol(node, source_bytes, filename, name, qualified_name, kind, parent_symbol, sig)
+            return _make_elixir_symbol(
+                node,
+                source_bytes,
+                filename,
+                name,
+                qualified_name,
+                kind,
+                parent_symbol,
+                sig,
+            )
     return None
 
 
@@ -1859,10 +2133,18 @@ def _extract_elixir_type_name(type_expr_node, source_bytes: bytes) -> Optional[s
     if type_expr_node.type == "call":
         target = type_expr_node.child_by_field_name("target")
         if target:
-            return source_bytes[target.start_byte:target.end_byte].decode("utf-8").strip()
+            return (
+                source_bytes[target.start_byte : target.end_byte]
+                .decode("utf-8")
+                .strip()
+            )
     # Plain identifier
     if type_expr_node.type in ("identifier", "atom"):
-        return source_bytes[type_expr_node.start_byte:type_expr_node.end_byte].decode("utf-8").strip()
+        return (
+            source_bytes[type_expr_node.start_byte : type_expr_node.end_byte]
+            .decode("utf-8")
+            .strip()
+        )
     return None
 
 
@@ -1915,6 +2197,7 @@ def _disambiguate_and_compute_complexity(
     ordinals: dict[str, int] = {}
     if has_duplicates:
         from collections import Counter
+
         id_counts = Counter(s.id for s in symbols)
         duplicated = {sid for sid, count in id_counts.items() if count > 1}
 
@@ -1924,8 +2207,12 @@ def _disambiguate_and_compute_complexity(
             ordinals[sym.id] = ordinals.get(sym.id, 0) + 1
             sym.id = f"{sym.id}~{ordinals[sym.id]}"
         if sym.kind in _CALLABLE_KINDS and sym.byte_length > 0:
-            body = source_bytes[sym.byte_offset:sym.byte_offset + sym.byte_length].decode("utf-8", errors="replace")
-            sym.cyclomatic, sym.max_nesting, sym.param_count = compute_complexity(body, sym.signature)
+            body = source_bytes[
+                sym.byte_offset : sym.byte_offset + sym.byte_length
+            ].decode("utf-8", errors="replace")
+            sym.cyclomatic, sym.max_nesting, sym.param_count = compute_complexity(
+                body, sym.signature
+            )
         result.append(sym)
 
     return result if has_duplicates else symbols
@@ -1936,15 +2223,19 @@ def _disambiguate_and_compute_complexity(
 # ---------------------------------------------------------------------------
 
 _BLADE_SYMBOL_PATTERNS: list[tuple[str, str, str]] = [
-    ("type",     r"@extends\s*\(\s*['\"](?P<name>[^'\"]+)['\"]", "name"),
-    ("method",   r"@section\s*\(\s*['\"](?P<name>[^'\"]+)['\"]", "name"),
-    ("class",    r"@component\s*\(\s*['\"](?P<name>[^'\"]+)['\"]", "name"),
-    ("function", r"@include(?:If|When|Unless|First)?\s*\(\s*['\"](?P<name>[^'\"]+)['\"]", "name"),
+    ("type", r"@extends\s*\(\s*['\"](?P<name>[^'\"]+)['\"]", "name"),
+    ("method", r"@section\s*\(\s*['\"](?P<name>[^'\"]+)['\"]", "name"),
+    ("class", r"@component\s*\(\s*['\"](?P<name>[^'\"]+)['\"]", "name"),
+    (
+        "function",
+        r"@include(?:If|When|Unless|First)?\s*\(\s*['\"](?P<name>[^'\"]+)['\"]",
+        "name",
+    ),
     ("constant", r"@push\s*\(\s*['\"](?P<name>[^'\"]+)['\"]", "name"),
     ("constant", r"@stack\s*\(\s*['\"](?P<name>[^'\"]+)['\"]", "name"),
-    ("method",   r"@slot\s*\(\s*['\"](?P<name>[^'\"]+)['\"]", "name"),
-    ("method",   r"@yield\s*\(\s*['\"](?P<name>[^'\"]+)['\"]", "name"),
-    ("class",    r"@livewire\s*\(\s*['\"](?P<name>[^'\"]+)['\"]", "name"),
+    ("method", r"@slot\s*\(\s*['\"](?P<name>[^'\"]+)['\"]", "name"),
+    ("method", r"@yield\s*\(\s*['\"](?P<name>[^'\"]+)['\"]", "name"),
+    ("class", r"@livewire\s*\(\s*['\"](?P<name>[^'\"]+)['\"]", "name"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -2004,21 +2295,21 @@ _BLADE_SYMBOL_PATTERNS: list[tuple[str, str, str]] = [
 # (smart quotes), which affects ~60% of all extracted symbols.
 
 # Shared regex fragment for Verse specifiers like <public>, <native><override>
-_VERSE_SPECS = r'(?:<[a-z_]+>)*'
+_VERSE_SPECS = r"(?:<[a-z_]+>)*"
 
 # --- Pass 1 regex: Container definitions ---
 # Matches: name<specs> := kind<specs>(parents):
 # Also:    (/Fortnite.com:)name<specs> := module:
 _VERSE_DEF_RE = re.compile(
-    r'^([ \t]*)'                                   # (1) indentation — [ \t] only, NOT \s (which captures \n in MULTILINE)
-    r'(?:\([^)]*:\))?'                             # optional path prefix e.g. (/Fortnite.com:)
-    r'([\w]+)'                                     # (2) name
-    r'(' + _VERSE_SPECS + r')'                     # (3) specifiers e.g. <public><native>
-    r'\s*:=\s*'                                    # := assignment operator
-    r'(module|class|interface|struct|enum|trait)'   # (4) kind keyword
-    r'(' + _VERSE_SPECS + r')'                     # (5) kind specifiers e.g. <concrete>
-    r'(?:\(([^)]*)\))?'                            # (6) optional parent types e.g. (base_class)
-    r'\s*:',                                       # trailing colon (starts indented block)
+    r"^([ \t]*)"  # (1) indentation — [ \t] only, NOT \s (which captures \n in MULTILINE)
+    r"(?:\([^)]*:\))?"  # optional path prefix e.g. (/Fortnite.com:)
+    r"([\w]+)"  # (2) name
+    r"(" + _VERSE_SPECS + r")"  # (3) specifiers e.g. <public><native>
+    r"\s*:=\s*"  # := assignment operator
+    r"(module|class|interface|struct|enum|trait)"  # (4) kind keyword
+    r"(" + _VERSE_SPECS + r")"  # (5) kind specifiers e.g. <concrete>
+    r"(?:\(([^)]*)\))?"  # (6) optional parent types e.g. (base_class)
+    r"\s*:",  # trailing colon (starts indented block)
     re.MULTILINE,
 )
 
@@ -2026,41 +2317,41 @@ _VERSE_DEF_RE = re.compile(
 # Matches: Name<specs>(params)<effects>:return_type
 # Also:    (/Path:)Name<specs>(...)
 _VERSE_METHOD_RE = re.compile(
-    r'^([ \t]+)'                                   # (1) indentation — must be indented (inside a container)
-    r'(?:\([^)]*:\))?'                             # optional path prefix
-    r'([\w]+)'                                     # (2) name
-    r'(' + _VERSE_SPECS + r')'                     # (3) specifiers
-    r'\(([^)]*)\)'                                 # (4) parameters
-    r'(' + _VERSE_SPECS + r')'                     # (5) effect specifiers e.g. <decides><transacts>
-    r'(?::(\S+))?'                                 # (6) optional return type
-    r'.*$',                                        # rest of line (may contain = external {})
+    r"^([ \t]+)"  # (1) indentation — must be indented (inside a container)
+    r"(?:\([^)]*:\))?"  # optional path prefix
+    r"([\w]+)"  # (2) name
+    r"(" + _VERSE_SPECS + r")"  # (3) specifiers
+    r"\(([^)]*)\)"  # (4) parameters
+    r"(" + _VERSE_SPECS + r")"  # (5) effect specifiers e.g. <decides><transacts>
+    r"(?::(\S+))?"  # (6) optional return type
+    r".*$",  # rest of line (may contain = external {})
     re.MULTILINE,
 )
 
 # --- Pass 2 regex: Extension methods ---
 # Matches: (Param:type).Name<specs>(params)<effects>:return_type
 _VERSE_EXT_METHOD_RE = re.compile(
-    r'^([ \t]*)'                                   # (1) indentation
-    r'\(([^)]+)\)'                                 # (2) receiver e.g. (InCharacter:fort_character)
-    r'\.([\w]+)'                                   # (3) method name after dot
-    r'(' + _VERSE_SPECS + r')'                     # (4) specifiers
-    r'\(([^)]*)\)'                                 # (5) parameters
-    r'(' + _VERSE_SPECS + r')'                     # (6) effect specifiers
-    r'(?::(\S+))?'                                 # (7) optional return type
-    r'.*$',
+    r"^([ \t]*)"  # (1) indentation
+    r"\(([^)]+)\)"  # (2) receiver e.g. (InCharacter:fort_character)
+    r"\.([\w]+)"  # (3) method name after dot
+    r"(" + _VERSE_SPECS + r")"  # (4) specifiers
+    r"\(([^)]*)\)"  # (5) parameters
+    r"(" + _VERSE_SPECS + r")"  # (6) effect specifiers
+    r"(?::(\S+))?"  # (7) optional return type
+    r".*$",
     re.MULTILINE,
 )
 
 # --- Pass 4 regex: Variable declarations ---
 # Matches: var Name<specs>:type  or  var<private> Name:type
 _VERSE_VAR_RE = re.compile(
-    r'^([ \t]+)'                                   # (1) indentation (must be inside container)
-    r'var(?:<[a-z_]+>)?'                           # var keyword with optional specifier
-    r'\s+'
-    r'([\w]+)'                                     # (2) name
-    r'(' + _VERSE_SPECS + r')'                     # (3) specifiers
-    r':([^\s=]+)'                                  # (4) type (up to whitespace or =)
-    r'.*$',
+    r"^([ \t]+)"  # (1) indentation (must be inside container)
+    r"var(?:<[a-z_]+>)?"  # var keyword with optional specifier
+    r"\s+"
+    r"([\w]+)"  # (2) name
+    r"(" + _VERSE_SPECS + r")"  # (3) specifiers
+    r":([^\s=]+)"  # (4) type (up to whitespace or =)
+    r".*$",
     re.MULTILINE,
 )
 
@@ -2068,32 +2359,32 @@ _VERSE_VAR_RE = re.compile(
 # Matches: Name<specs>:type = ...
 # Also:    (/Path:)Name<specs>:type = external {}
 _VERSE_CONST_RE = re.compile(
-    r'^([ \t]+)'                                   # (1) indentation (must be inside container)
-    r'(?:\([^)]*:\))?'                             # optional path prefix
-    r'([\w]+)'                                     # (2) name
-    r'(' + _VERSE_SPECS + r')'                     # (3) specifiers
-    r':(\S+)'                                      # (4) type
-    r'\s*=\s*'                                     # = assignment
-    r'.*$',
+    r"^([ \t]+)"  # (1) indentation (must be inside container)
+    r"(?:\([^)]*:\))?"  # optional path prefix
+    r"([\w]+)"  # (2) name
+    r"(" + _VERSE_SPECS + r")"  # (3) specifiers
+    r":(\S+)"  # (4) type
+    r"\s*=\s*"  # = assignment
+    r".*$",
     re.MULTILINE,
 )
 
 # Enum value (simple identifier on its own line — currently unused, reserved for future)
 _VERSE_ENUM_VAL_RE = re.compile(
-    r'^(\s+)'                                      # (1) indentation
-    r'([\w]+)'                                     # (2) name
-    r'\s*$',
+    r"^(\s+)"  # (1) indentation
+    r"([\w]+)"  # (2) name
+    r"\s*$",
     re.MULTILINE,
 )
 
 # Module import path comment: # Module import path: /Something/Path
 _VERSE_MODULE_PATH_RE = re.compile(
-    r'#\s*Module import path:\s*(\S+)',
+    r"#\s*Module import path:\s*(\S+)",
 )
 
 # Decorator line: @editable, @available {MinUploadedAtFNVersion := 3800}
 _VERSE_DECORATOR_RE = re.compile(
-    r'^(\s*)@(\w+)\s*(.*?)$',
+    r"^(\s*)@(\w+)\s*(.*?)$",
     re.MULTILINE,
 )
 
@@ -2153,7 +2444,7 @@ def _parse_verse_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     for line in lines:
         char_line_starts.append(char_off)
         byte_line_starts.append(byte_off)
-        char_off += len(line) + 1              # +1 for \n (char count)
+        char_off += len(line) + 1  # +1 for \n (char count)
         byte_off += len(line.encode("utf-8")) + 1  # +1 for \n (byte count)
 
     def char_to_line(char_pos: int) -> int:
@@ -2368,27 +2659,35 @@ def _parse_verse_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             # block_byte_end = end of the last indented member line.
             block_byte_start = char_pos_to_byte_pos(m.start())
             if end_line_idx < len(byte_line_starts):
-                block_byte_end = byte_line_starts[end_line_idx] + len(lines[end_line_idx].encode("utf-8"))
+                block_byte_end = byte_line_starts[end_line_idx] + len(
+                    lines[end_line_idx].encode("utf-8")
+                )
             else:
                 block_byte_end = block_byte_start + len(match_bytes)
 
-            symbols.append(Symbol(
-                id=sym_id,
-                file=filename,
-                name=name,
-                qualified_name=qualified,
-                kind=kind,
-                language="verse",
-                signature=signature,
-                docstring=docstring,
-                decorators=decorators,
-                parent=make_symbol_id(filename, parent_name, "class") if parent_name else None,
-                line=line_idx + 1,
-                end_line=end_line_idx + 1,
-                byte_offset=block_byte_start,
-                byte_length=block_byte_end - block_byte_start,
-                content_hash=compute_content_hash(source_bytes[block_byte_start:block_byte_end]),
-            ))
+            symbols.append(
+                Symbol(
+                    id=sym_id,
+                    file=filename,
+                    name=name,
+                    qualified_name=qualified,
+                    kind=kind,
+                    language="verse",
+                    signature=signature,
+                    docstring=docstring,
+                    decorators=decorators,
+                    parent=make_symbol_id(filename, parent_name, "class")
+                    if parent_name
+                    else None,
+                    line=line_idx + 1,
+                    end_line=end_line_idx + 1,
+                    byte_offset=block_byte_start,
+                    byte_length=block_byte_end - block_byte_start,
+                    content_hash=compute_content_hash(
+                        source_bytes[block_byte_start:block_byte_end]
+                    ),
+                )
+            )
 
         # Register container for parent lookups in passes 2-5
         containers.append((indent, qualified, kind_raw, line_idx + 1, end_line_idx + 1))
@@ -2433,23 +2732,27 @@ def _parse_verse_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             decorators = _get_decorators(line_idx)
             match_bytes = m.group(0).encode("utf-8")
 
-            symbols.append(Symbol(
-                id=sym_id,
-                file=filename,
-                name=name,
-                qualified_name=qualified,
-                kind="method",
-                language="verse",
-                signature=sig,
-                docstring=docstring,
-                decorators=decorators,
-                parent=make_symbol_id(filename, parent_name, "class") if parent_name else None,
-                line=line_idx + 1,
-                end_line=line_idx + 1,
-                byte_offset=char_pos_to_byte_pos(m.start()),
-                byte_length=len(match_bytes),
-                content_hash=compute_content_hash(match_bytes),
-            ))
+            symbols.append(
+                Symbol(
+                    id=sym_id,
+                    file=filename,
+                    name=name,
+                    qualified_name=qualified,
+                    kind="method",
+                    language="verse",
+                    signature=sig,
+                    docstring=docstring,
+                    decorators=decorators,
+                    parent=make_symbol_id(filename, parent_name, "class")
+                    if parent_name
+                    else None,
+                    line=line_idx + 1,
+                    end_line=line_idx + 1,
+                    byte_offset=char_pos_to_byte_pos(m.start()),
+                    byte_length=len(match_bytes),
+                    content_hash=compute_content_hash(match_bytes),
+                )
+            )
 
     # ── Pass 3: Regular methods inside containers ───────────────────────
     #
@@ -2495,23 +2798,27 @@ def _parse_verse_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             decorators = _get_decorators(line_idx)
             match_bytes = m.group(0).encode("utf-8")
 
-            symbols.append(Symbol(
-                id=sym_id,
-                file=filename,
-                name=name,
-                qualified_name=qualified,
-                kind=kind,
-                language="verse",
-                signature=sig,
-                docstring=docstring,
-                decorators=decorators,
-                parent=make_symbol_id(filename, parent_name, "class") if parent_name else None,
-                line=line_idx + 1,
-                end_line=line_idx + 1,
-                byte_offset=char_pos_to_byte_pos(m.start()),
-                byte_length=len(match_bytes),
-                content_hash=compute_content_hash(match_bytes),
-            ))
+            symbols.append(
+                Symbol(
+                    id=sym_id,
+                    file=filename,
+                    name=name,
+                    qualified_name=qualified,
+                    kind=kind,
+                    language="verse",
+                    signature=sig,
+                    docstring=docstring,
+                    decorators=decorators,
+                    parent=make_symbol_id(filename, parent_name, "class")
+                    if parent_name
+                    else None,
+                    line=line_idx + 1,
+                    end_line=line_idx + 1,
+                    byte_offset=char_pos_to_byte_pos(m.start()),
+                    byte_length=len(match_bytes),
+                    content_hash=compute_content_hash(match_bytes),
+                )
+            )
 
     # ── Pass 4: Variable declarations ───────────────────────────────────
     #
@@ -2538,22 +2845,26 @@ def _parse_verse_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             docstring = _get_preceding_comment(line_idx)
             match_bytes = m.group(0).encode("utf-8")
 
-            symbols.append(Symbol(
-                id=sym_id,
-                file=filename,
-                name=name,
-                qualified_name=qualified,
-                kind="constant",
-                language="verse",
-                signature=sig,
-                docstring=docstring,
-                parent=make_symbol_id(filename, parent_name, "class") if parent_name else None,
-                line=line_idx + 1,
-                end_line=line_idx + 1,
-                byte_offset=char_pos_to_byte_pos(m.start()),
-                byte_length=len(match_bytes),
-                content_hash=compute_content_hash(match_bytes),
-            ))
+            symbols.append(
+                Symbol(
+                    id=sym_id,
+                    file=filename,
+                    name=name,
+                    qualified_name=qualified,
+                    kind="constant",
+                    language="verse",
+                    signature=sig,
+                    docstring=docstring,
+                    parent=make_symbol_id(filename, parent_name, "class")
+                    if parent_name
+                    else None,
+                    line=line_idx + 1,
+                    end_line=line_idx + 1,
+                    byte_offset=char_pos_to_byte_pos(m.start()),
+                    byte_length=len(match_bytes),
+                    content_hash=compute_content_hash(match_bytes),
+                )
+            )
 
     # ── Pass 5: Constants and value declarations ────────────────────────
     #
@@ -2589,22 +2900,26 @@ def _parse_verse_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             docstring = _get_preceding_comment(line_idx)
             match_bytes = m.group(0).encode("utf-8")
 
-            symbols.append(Symbol(
-                id=sym_id,
-                file=filename,
-                name=name,
-                qualified_name=qualified,
-                kind="constant",
-                language="verse",
-                signature=sig,
-                docstring=docstring,
-                parent=make_symbol_id(filename, parent_name, "class") if parent_name else None,
-                line=line_idx + 1,
-                end_line=line_idx + 1,
-                byte_offset=char_pos_to_byte_pos(m.start()),
-                byte_length=len(match_bytes),
-                content_hash=compute_content_hash(match_bytes),
-            ))
+            symbols.append(
+                Symbol(
+                    id=sym_id,
+                    file=filename,
+                    name=name,
+                    qualified_name=qualified,
+                    kind="constant",
+                    language="verse",
+                    signature=sig,
+                    docstring=docstring,
+                    parent=make_symbol_id(filename, parent_name, "class")
+                    if parent_name
+                    else None,
+                    line=line_idx + 1,
+                    end_line=line_idx + 1,
+                    byte_offset=char_pos_to_byte_pos(m.start()),
+                    byte_length=len(match_bytes),
+                    content_hash=compute_content_hash(match_bytes),
+                )
+            )
 
     symbols.sort(key=lambda s: s.line)
     return symbols
@@ -2656,22 +2971,24 @@ def _parse_blade_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             line_no = byte_to_line(m.start())
             directive_text = m.group(0)
             sym_bytes = directive_text.encode("utf-8")
-            symbols.append(Symbol(
-                id=make_symbol_id(filename, name, kind),
-                file=filename,
-                name=name,
-                qualified_name=name,
-                kind=kind,
-                language="blade",
-                signature=directive_text,
-                docstring="",
-                parent=None,
-                line=line_no,
-                end_line=line_no,
-                byte_offset=m.start(),
-                byte_length=len(sym_bytes),
-                content_hash=compute_content_hash(sym_bytes),
-            ))
+            symbols.append(
+                Symbol(
+                    id=make_symbol_id(filename, name, kind),
+                    file=filename,
+                    name=name,
+                    qualified_name=name,
+                    kind=kind,
+                    language="blade",
+                    signature=directive_text,
+                    docstring="",
+                    parent=None,
+                    line=line_no,
+                    end_line=line_no,
+                    byte_offset=m.start(),
+                    byte_length=len(sym_bytes),
+                    content_hash=compute_content_hash(sym_bytes),
+                )
+            )
 
     symbols.sort(key=lambda s: s.line)
     return symbols
@@ -2807,7 +3124,9 @@ def _parse_al_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         return lo + 1
 
     # Pass 1: find top-level objects and their byte ranges
-    objects: list[tuple[str, str, int, int, str]] = []  # (name, kind, start, end, objtype)
+    objects: list[
+        tuple[str, str, int, int, str]
+    ] = []  # (name, kind, start, end, objtype)
     obj_matches = list(_AL_OBJECT_RE.finditer(content))
     for i, m in enumerate(obj_matches):
         objtype = m.group("objtype").lower()
@@ -2829,22 +3148,24 @@ def _parse_al_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             sig_end = len(content)
         signature = content[start:sig_end].strip()
         sym_bytes = signature.encode("utf-8")
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, name, kind),
-            file=filename,
-            name=name,
-            qualified_name=name,
-            kind=kind,
-            language="al",
-            signature=signature,
-            docstring="",
-            parent=None,
-            line=line_no,
-            end_line=line_no,
-            byte_offset=start,
-            byte_length=len(sym_bytes),
-            content_hash=compute_content_hash(sym_bytes),
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, name, kind),
+                file=filename,
+                name=name,
+                qualified_name=name,
+                kind=kind,
+                language="al",
+                signature=signature,
+                docstring="",
+                parent=None,
+                line=line_no,
+                end_line=line_no,
+                byte_offset=start,
+                byte_length=len(sym_bytes),
+                content_hash=compute_content_hash(sym_bytes),
+            )
+        )
 
     def _find_parent(pos: int) -> Optional[tuple[str, str, str]]:
         """Find the parent object for a given byte position.
@@ -2938,23 +3259,25 @@ def _parse_al_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
 
         line_no = byte_to_line(m.start())
         sym_bytes = signature.encode("utf-8")
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, qualified_name, "method"),
-            file=filename,
-            name=name,
-            qualified_name=qualified_name,
-            kind="method",
-            language="al",
-            signature=signature,
-            docstring=docstring,
-            decorators=decorators,
-            parent=parent_id,
-            line=line_no,
-            end_line=line_no,
-            byte_offset=m.start(),
-            byte_length=len(sym_bytes),
-            content_hash=compute_content_hash(sym_bytes),
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, qualified_name, "method"),
+                file=filename,
+                name=name,
+                qualified_name=qualified_name,
+                kind="method",
+                language="al",
+                signature=signature,
+                docstring=docstring,
+                decorators=decorators,
+                parent=parent_id,
+                line=line_no,
+                end_line=line_no,
+                byte_offset=m.start(),
+                byte_length=len(sym_bytes),
+                content_hash=compute_content_hash(sym_bytes),
+            )
+        )
 
     # Pass 3: find triggers
     for m in _AL_TRIGGER_RE.finditer(content):
@@ -2967,22 +3290,24 @@ def _parse_al_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         signature = f"trigger {name}()"
         line_no = byte_to_line(m.start())
         sym_bytes = signature.encode("utf-8")
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, qualified_name, "method"),
-            file=filename,
-            name=name,
-            qualified_name=qualified_name,
-            kind="method",
-            language="al",
-            signature=signature,
-            docstring="",
-            parent=parent_id,
-            line=line_no,
-            end_line=line_no,
-            byte_offset=m.start(),
-            byte_length=len(sym_bytes),
-            content_hash=compute_content_hash(sym_bytes),
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, qualified_name, "method"),
+                file=filename,
+                name=name,
+                qualified_name=qualified_name,
+                kind="method",
+                language="al",
+                signature=signature,
+                docstring="",
+                parent=parent_id,
+                line=line_no,
+                end_line=line_no,
+                byte_offset=m.start(),
+                byte_length=len(sym_bytes),
+                content_hash=compute_content_hash(sym_bytes),
+            )
+        )
 
     # Pass 4: find fields (only in table/tableextension objects)
     for m in _AL_FIELD_RE.finditer(content):
@@ -3002,22 +3327,24 @@ def _parse_al_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         signature = f"field({m.group('id')}; {name}; {field_type})"
         line_no = byte_to_line(m.start())
         sym_bytes = signature.encode("utf-8")
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, qualified_name, "constant"),
-            file=filename,
-            name=name,
-            qualified_name=qualified_name,
-            kind="constant",
-            language="al",
-            signature=signature,
-            docstring="",
-            parent=parent_id,
-            line=line_no,
-            end_line=line_no,
-            byte_offset=m.start(),
-            byte_length=len(sym_bytes),
-            content_hash=compute_content_hash(sym_bytes),
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, qualified_name, "constant"),
+                file=filename,
+                name=name,
+                qualified_name=qualified_name,
+                kind="constant",
+                language="al",
+                signature=signature,
+                docstring="",
+                parent=parent_id,
+                line=line_no,
+                end_line=line_no,
+                byte_offset=m.start(),
+                byte_length=len(sym_bytes),
+                content_hash=compute_content_hash(sym_bytes),
+            )
+        )
 
     # Pass 5: find enum values (only in enum/enumextension objects)
     for m in _AL_ENUM_VALUE_RE.finditer(content):
@@ -3034,22 +3361,24 @@ def _parse_al_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         signature = f"value({m.group('id')}; {name})"
         line_no = byte_to_line(m.start())
         sym_bytes = signature.encode("utf-8")
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, qualified_name, "constant"),
-            file=filename,
-            name=name,
-            qualified_name=qualified_name,
-            kind="constant",
-            language="al",
-            signature=signature,
-            docstring="",
-            parent=parent_id,
-            line=line_no,
-            end_line=line_no,
-            byte_offset=m.start(),
-            byte_length=len(sym_bytes),
-            content_hash=compute_content_hash(sym_bytes),
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, qualified_name, "constant"),
+                file=filename,
+                name=name,
+                qualified_name=qualified_name,
+                kind="constant",
+                language="al",
+                signature=signature,
+                docstring="",
+                parent=parent_id,
+                line=line_no,
+                end_line=line_no,
+                byte_offset=m.start(),
+                byte_length=len(sym_bytes),
+                content_hash=compute_content_hash(sym_bytes),
+            )
+        )
 
     # Pass 6: find page actions (only in page/pageextension objects)
     for m in _AL_ACTION_RE.finditer(content):
@@ -3066,22 +3395,24 @@ def _parse_al_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         signature = f"action({name})"
         line_no = byte_to_line(m.start())
         sym_bytes = signature.encode("utf-8")
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, qualified_name, "function"),
-            file=filename,
-            name=name,
-            qualified_name=qualified_name,
-            kind="function",
-            language="al",
-            signature=signature,
-            docstring="",
-            parent=parent_id,
-            line=line_no,
-            end_line=line_no,
-            byte_offset=m.start(),
-            byte_length=len(sym_bytes),
-            content_hash=compute_content_hash(sym_bytes),
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, qualified_name, "function"),
+                file=filename,
+                name=name,
+                qualified_name=qualified_name,
+                kind="function",
+                language="al",
+                signature=signature,
+                docstring="",
+                parent=parent_id,
+                line=line_no,
+                end_line=line_no,
+                byte_offset=m.start(),
+                byte_length=len(sym_bytes),
+                content_hash=compute_content_hash(sym_bytes),
+            )
+        )
 
     # Pass 7: find keys (only in table/tableextension objects)
     for m in _AL_KEY_RE.finditer(content):
@@ -3099,22 +3430,24 @@ def _parse_al_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         signature = f"key({name}; {columns})"
         line_no = byte_to_line(m.start())
         sym_bytes = signature.encode("utf-8")
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, qualified_name, "constant"),
-            file=filename,
-            name=name,
-            qualified_name=qualified_name,
-            kind="constant",
-            language="al",
-            signature=signature,
-            docstring="",
-            parent=parent_id,
-            line=line_no,
-            end_line=line_no,
-            byte_offset=m.start(),
-            byte_length=len(sym_bytes),
-            content_hash=compute_content_hash(sym_bytes),
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, qualified_name, "constant"),
+                file=filename,
+                name=name,
+                qualified_name=qualified_name,
+                kind="constant",
+                language="al",
+                signature=signature,
+                docstring="",
+                parent=parent_id,
+                line=line_no,
+                end_line=line_no,
+                byte_offset=m.start(),
+                byte_length=len(sym_bytes),
+                content_hash=compute_content_hash(sym_bytes),
+            )
+        )
 
     # Pass 8: find report/query columns (only in report/query/reportextension)
     for m in _AL_COLUMN_RE.finditer(content):
@@ -3132,22 +3465,24 @@ def _parse_al_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         signature = f"column({name}; {source})"
         line_no = byte_to_line(m.start())
         sym_bytes = signature.encode("utf-8")
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, qualified_name, "constant"),
-            file=filename,
-            name=name,
-            qualified_name=qualified_name,
-            kind="constant",
-            language="al",
-            signature=signature,
-            docstring="",
-            parent=parent_id,
-            line=line_no,
-            end_line=line_no,
-            byte_offset=m.start(),
-            byte_length=len(sym_bytes),
-            content_hash=compute_content_hash(sym_bytes),
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, qualified_name, "constant"),
+                file=filename,
+                name=name,
+                qualified_name=qualified_name,
+                kind="constant",
+                language="al",
+                signature=signature,
+                docstring="",
+                parent=parent_id,
+                line=line_no,
+                end_line=line_no,
+                byte_offset=m.start(),
+                byte_length=len(sym_bytes),
+                content_hash=compute_content_hash(sym_bytes),
+            )
+        )
 
     # Pass 9: find fieldgroups (only in table/tableextension objects)
     for m in _AL_FIELDGROUP_RE.finditer(content):
@@ -3165,22 +3500,24 @@ def _parse_al_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         signature = f"fieldgroup({name}; {fields})"
         line_no = byte_to_line(m.start())
         sym_bytes = signature.encode("utf-8")
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, qualified_name, "constant"),
-            file=filename,
-            name=name,
-            qualified_name=qualified_name,
-            kind="constant",
-            language="al",
-            signature=signature,
-            docstring="",
-            parent=parent_id,
-            line=line_no,
-            end_line=line_no,
-            byte_offset=m.start(),
-            byte_length=len(sym_bytes),
-            content_hash=compute_content_hash(sym_bytes),
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, qualified_name, "constant"),
+                file=filename,
+                name=name,
+                qualified_name=qualified_name,
+                kind="constant",
+                language="al",
+                signature=signature,
+                docstring="",
+                parent=parent_id,
+                line=line_no,
+                end_line=line_no,
+                byte_offset=m.start(),
+                byte_length=len(sym_bytes),
+                content_hash=compute_content_hash(sym_bytes),
+            )
+        )
 
     # Pass 10: find dataitems (only in report/query/reportextension)
     for m in _AL_DATAITEM_RE.finditer(content):
@@ -3198,22 +3535,24 @@ def _parse_al_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         signature = f"dataitem({name}; {source})"
         line_no = byte_to_line(m.start())
         sym_bytes = signature.encode("utf-8")
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, qualified_name, "type"),
-            file=filename,
-            name=name,
-            qualified_name=qualified_name,
-            kind="type",
-            language="al",
-            signature=signature,
-            docstring="",
-            parent=parent_id,
-            line=line_no,
-            end_line=line_no,
-            byte_offset=m.start(),
-            byte_length=len(sym_bytes),
-            content_hash=compute_content_hash(sym_bytes),
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, qualified_name, "type"),
+                file=filename,
+                name=name,
+                qualified_name=qualified_name,
+                kind="type",
+                language="al",
+                signature=signature,
+                docstring="",
+                parent=parent_id,
+                line=line_no,
+                end_line=line_no,
+                byte_offset=m.start(),
+                byte_length=len(sym_bytes),
+                content_hash=compute_content_hash(sym_bytes),
+            )
+        )
 
     # Pass 11: find xmlport elements (only in xmlport objects)
     for m in _AL_XMLPORT_ELEMENT_RE.finditer(content):
@@ -3235,22 +3574,24 @@ def _parse_al_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             signature = f"{elemtype}({name})"
         line_no = byte_to_line(m.start())
         sym_bytes = signature.encode("utf-8")
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, qualified_name, "type"),
-            file=filename,
-            name=name,
-            qualified_name=qualified_name,
-            kind="type",
-            language="al",
-            signature=signature,
-            docstring="",
-            parent=parent_id,
-            line=line_no,
-            end_line=line_no,
-            byte_offset=m.start(),
-            byte_length=len(sym_bytes),
-            content_hash=compute_content_hash(sym_bytes),
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, qualified_name, "type"),
+                file=filename,
+                name=name,
+                qualified_name=qualified_name,
+                kind="type",
+                language="al",
+                signature=signature,
+                docstring="",
+                parent=parent_id,
+                line=line_no,
+                end_line=line_no,
+                byte_offset=m.start(),
+                byte_length=len(sym_bytes),
+                content_hash=compute_content_hash(sym_bytes),
+            )
+        )
 
     # Pass 12: find controladdin events (only in controladdin objects)
     for m in _AL_EVENT_RE.finditer(content):
@@ -3268,22 +3609,24 @@ def _parse_al_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         signature = f"event {name}({params})"
         line_no = byte_to_line(m.start())
         sym_bytes = signature.encode("utf-8")
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, qualified_name, "method"),
-            file=filename,
-            name=name,
-            qualified_name=qualified_name,
-            kind="method",
-            language="al",
-            signature=signature,
-            docstring="",
-            parent=parent_id,
-            line=line_no,
-            end_line=line_no,
-            byte_offset=m.start(),
-            byte_length=len(sym_bytes),
-            content_hash=compute_content_hash(sym_bytes),
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, qualified_name, "method"),
+                file=filename,
+                name=name,
+                qualified_name=qualified_name,
+                kind="method",
+                language="al",
+                signature=signature,
+                docstring="",
+                parent=parent_id,
+                line=line_no,
+                end_line=line_no,
+                byte_offset=m.start(),
+                byte_length=len(sym_bytes),
+                content_hash=compute_content_hash(sym_bytes),
+            )
+        )
 
     # Pass 13: find page layout fields (only in page/pageextension)
     # These use field(Name; Source) without a numeric ID, unlike table fields
@@ -3298,7 +3641,11 @@ def _parse_al_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         if parent_objtype not in _AL_PAGE_FIELD_PARENTS:
             continue
         # Skip if this position was already matched by the table field regex (has numeric ID)
-        line_text = lines[byte_to_line(m.start()) - 1] if byte_to_line(m.start()) <= len(lines) else ""
+        line_text = (
+            lines[byte_to_line(m.start()) - 1]
+            if byte_to_line(m.start()) <= len(lines)
+            else ""
+        )
         if _AL_FIELD_RE.search(line_text):
             continue
         source = m.group("source").strip()
@@ -3306,22 +3653,24 @@ def _parse_al_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         signature = f"field({name}; {source})"
         line_no = byte_to_line(m.start())
         sym_bytes = signature.encode("utf-8")
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, qualified_name, "constant"),
-            file=filename,
-            name=name,
-            qualified_name=qualified_name,
-            kind="constant",
-            language="al",
-            signature=signature,
-            docstring="",
-            parent=parent_id,
-            line=line_no,
-            end_line=line_no,
-            byte_offset=m.start(),
-            byte_length=len(sym_bytes),
-            content_hash=compute_content_hash(sym_bytes),
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, qualified_name, "constant"),
+                file=filename,
+                name=name,
+                qualified_name=qualified_name,
+                kind="constant",
+                language="al",
+                signature=signature,
+                docstring="",
+                parent=parent_id,
+                line=line_no,
+                end_line=line_no,
+                byte_offset=m.start(),
+                byte_length=len(sym_bytes),
+                content_hash=compute_content_hash(sym_bytes),
+            )
+        )
 
     # Pass 14: find variable declarations (inside var sections)
     _in_var = False
@@ -3331,7 +3680,9 @@ def _parse_al_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             _in_var = True
             continue
         if _in_var:
-            if stripped.lower().startswith(("begin", "procedure ", "trigger ", "local ", "internal ", "protected ")):
+            if stripped.lower().startswith(
+                ("begin", "procedure ", "trigger ", "local ", "internal ", "protected ")
+            ):
                 _in_var = False
                 continue
             if not stripped or stripped.startswith("//") or stripped.startswith("{"):
@@ -3348,22 +3699,24 @@ def _parse_al_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                 qualified_name = f"{parent_name}.{vname}" if parent_name else vname
                 signature = f"{vname}: {vtype}"
                 sym_bytes = signature.encode("utf-8")
-                symbols.append(Symbol(
-                    id=make_symbol_id(filename, qualified_name, "constant"),
-                    file=filename,
-                    name=vname,
-                    qualified_name=qualified_name,
-                    kind="constant",
-                    language="al",
-                    signature=signature,
-                    docstring="",
-                    parent=parent_id,
-                    line=i + 1,
-                    end_line=i + 1,
-                    byte_offset=line_byte,
-                    byte_length=len(sym_bytes),
-                    content_hash=compute_content_hash(sym_bytes),
-                ))
+                symbols.append(
+                    Symbol(
+                        id=make_symbol_id(filename, qualified_name, "constant"),
+                        file=filename,
+                        name=vname,
+                        qualified_name=qualified_name,
+                        kind="constant",
+                        language="al",
+                        signature=signature,
+                        docstring="",
+                        parent=parent_id,
+                        line=i + 1,
+                        end_line=i + 1,
+                        byte_offset=line_byte,
+                        byte_length=len(sym_bytes),
+                        content_hash=compute_content_hash(sym_bytes),
+                    )
+                )
 
     symbols.sort(key=lambda s: s.line)
     return symbols
@@ -3371,6 +3724,7 @@ def _parse_al_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
 
 # Nix custom symbol extractor
 # ---------------------------------------------------------------------------
+
 
 def _parse_nix_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     """Extract symbols from Nix expression files.
@@ -3383,6 +3737,7 @@ def _parse_nix_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     all others are classified as constants.
     """
     from tree_sitter_language_pack import get_parser as _get_parser
+
     parser = _get_parser("nix")
     tree = parser.parse(source_bytes)
 
@@ -3392,7 +3747,9 @@ def _parse_nix_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     return symbols
 
 
-def _walk_nix_bindings(node, source_bytes: bytes, filename: str, symbols: list, depth: int) -> None:
+def _walk_nix_bindings(
+    node, source_bytes: bytes, filename: str, symbols: list, depth: int
+) -> None:
     """Recursively walk Nix AST, extracting bindings as symbols."""
     MAX_DEPTH = 4
     if depth > MAX_DEPTH:
@@ -3401,11 +3758,18 @@ def _walk_nix_bindings(node, source_bytes: bytes, filename: str, symbols: list, 
     for child in node.children:
         if child.type == "binding":
             _extract_nix_binding(child, source_bytes, filename, symbols)
-        elif child.type in ("binding_set", "let_expression", "attrset_expression", "source_code"):
+        elif child.type in (
+            "binding_set",
+            "let_expression",
+            "attrset_expression",
+            "source_code",
+        ):
             _walk_nix_bindings(child, source_bytes, filename, symbols, depth + 1)
 
 
-def _extract_nix_binding(node, source_bytes: bytes, filename: str, symbols: list) -> None:
+def _extract_nix_binding(
+    node, source_bytes: bytes, filename: str, symbols: list
+) -> None:
     """Extract a single Nix binding as a Symbol if it has a simple (non-dotted) name."""
     attrpath_node = node.child_by_field_name("attrpath")
     expr_node = node.child_by_field_name("expression")
@@ -3417,14 +3781,27 @@ def _extract_nix_binding(node, source_bytes: bytes, filename: str, symbols: list
     if len(name_children) != 1 or name_children[0].type != "identifier":
         return
 
-    name = source_bytes[name_children[0].start_byte:name_children[0].end_byte].decode("utf-8")
+    name = source_bytes[name_children[0].start_byte : name_children[0].end_byte].decode(
+        "utf-8"
+    )
 
     kind = "function" if expr_node.type == "function_expression" else "constant"
 
     # Signature: binding up to (not including) the expression, + first line of RHS
     eq_end = expr_node.start_byte
-    lhs = source_bytes[node.start_byte:eq_end].decode("utf-8").strip().rstrip("=").strip()
-    rhs_first = source_bytes[expr_node.start_byte:expr_node.end_byte].decode("utf-8").splitlines()[0].strip()
+    lhs = (
+        source_bytes[node.start_byte : eq_end]
+        .decode("utf-8")
+        .strip()
+        .rstrip("=")
+        .strip()
+    )
+    rhs_first = (
+        source_bytes[expr_node.start_byte : expr_node.end_byte]
+        .decode("utf-8")
+        .splitlines()[0]
+        .strip()
+    )
     if len(rhs_first) > 60:
         rhs_first = rhs_first[:60] + "..."
     signature = f"{lhs} = {rhs_first}"
@@ -3437,41 +3814,48 @@ def _extract_nix_binding(node, source_bytes: bytes, filename: str, symbols: list
     comment_lines = []
     prev = node.prev_named_sibling
     while prev and prev.type == "comment":
-        comment_lines.insert(0, source_bytes[prev.start_byte:prev.end_byte].decode("utf-8"))
+        comment_lines.insert(
+            0, source_bytes[prev.start_byte : prev.end_byte].decode("utf-8")
+        )
         prev = prev.prev_named_sibling
     if not comment_lines and node.prev_named_sibling is None and node.parent:
         prev = node.parent.prev_named_sibling
         while prev and prev.type == "comment":
-            comment_lines.insert(0, source_bytes[prev.start_byte:prev.end_byte].decode("utf-8"))
+            comment_lines.insert(
+                0, source_bytes[prev.start_byte : prev.end_byte].decode("utf-8")
+            )
             prev = prev.prev_named_sibling
     if comment_lines:
         docstring = _clean_comment_markers("\n".join(comment_lines))
 
-    sym_bytes = source_bytes[node.start_byte:node.end_byte]
+    sym_bytes = source_bytes[node.start_byte : node.end_byte]
     row, _ = node.start_point
     end_row, _ = node.end_point
 
-    symbols.append(Symbol(
-        id=make_symbol_id(filename, name, kind),
-        file=filename,
-        name=name,
-        qualified_name=name,
-        kind=kind,
-        language="nix",
-        signature=signature,
-        docstring=docstring,
-        parent=None,
-        line=row + 1,
-        end_line=end_row + 1,
-        byte_offset=node.start_byte,
-        byte_length=len(sym_bytes),
-        content_hash=compute_content_hash(sym_bytes),
-    ))
+    symbols.append(
+        Symbol(
+            id=make_symbol_id(filename, name, kind),
+            file=filename,
+            name=name,
+            qualified_name=name,
+            kind=kind,
+            language="nix",
+            signature=signature,
+            docstring=docstring,
+            parent=None,
+            line=row + 1,
+            end_line=end_row + 1,
+            byte_offset=node.start_byte,
+            byte_length=len(sym_bytes),
+            content_hash=compute_content_hash(sym_bytes),
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
 # Vue SFC custom symbol extractor
 # ---------------------------------------------------------------------------
+
 
 def _parse_vue_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     """Extract symbols from Vue Single-File Components (.vue).
@@ -3495,6 +3879,7 @@ def _parse_vue_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     Line numbers are offset to match positions in the original .vue file.
     """
     from pathlib import Path as _Path
+
     from tree_sitter_language_pack import get_parser as _get_parser
 
     vue_parser = _get_parser("vue")
@@ -3509,7 +3894,9 @@ def _parse_vue_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             # Detect <script setup>
             start_tag = next((c for c in child.children if c.type == "start_tag"), None)
             if start_tag:
-                tag_text = source_bytes[start_tag.start_byte:start_tag.end_byte].decode("utf-8", errors="replace")
+                tag_text = source_bytes[
+                    start_tag.start_byte : start_tag.end_byte
+                ].decode("utf-8", errors="replace")
                 is_setup = "setup" in tag_text
             break
 
@@ -3522,7 +3909,9 @@ def _parse_vue_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     if start_tag:
         for attr in start_tag.children:
             if attr.type == "attribute":
-                attr_text = source_bytes[attr.start_byte:attr.end_byte].decode("utf-8", errors="replace")
+                attr_text = source_bytes[attr.start_byte : attr.end_byte].decode(
+                    "utf-8", errors="replace"
+                )
                 if 'lang="ts"' in attr_text or "lang='ts'" in attr_text:
                     lang = "typescript"
                     break
@@ -3535,7 +3924,7 @@ def _parse_vue_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     if raw_node is None:
         return []
 
-    script_bytes = source_bytes[raw_node.start_byte:raw_node.end_byte]
+    script_bytes = source_bytes[raw_node.start_byte : raw_node.end_byte]
     line_offset = raw_node.start_point[0]  # rows are 0-based
 
     # Component name from filename (Vue convention: filename = component name)
@@ -3563,15 +3952,30 @@ def _parse_vue_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     sub_tree = sub_parser.parse(script_bytes)
 
     # Vue Composition API reactive primitives and macros
-    _VUE_REACTIVE = frozenset({
-        "ref", "reactive", "computed", "watch", "watchEffect",
-        "readonly", "shallowRef", "shallowReactive", "toRef", "toRefs",
-        "defineProps", "defineEmits", "defineExpose", "defineModel",
-        "useRoute", "useRouter", "useStore",
-    })
+    _VUE_REACTIVE = frozenset(
+        {
+            "ref",
+            "reactive",
+            "computed",
+            "watch",
+            "watchEffect",
+            "readonly",
+            "shallowRef",
+            "shallowReactive",
+            "toRef",
+            "toRefs",
+            "defineProps",
+            "defineEmits",
+            "defineExpose",
+            "defineModel",
+            "useRoute",
+            "useRouter",
+            "useStore",
+        }
+    )
 
     def _node_text(n) -> str:
-        return script_bytes[n.start_byte:n.end_byte].decode("utf-8", errors="replace")
+        return script_bytes[n.start_byte : n.end_byte].decode("utf-8", errors="replace")
 
     def _preceding_comment(n) -> str:
         """Return preceding // or /* */ comment text as docstring."""
@@ -3602,7 +4006,9 @@ def _parse_vue_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         """Return True if node is a call_expression to a Vue reactive function."""
         if node.type not in ("call_expression", "await_expression"):
             return False
-        func = node.child_by_field_name("function") or (node.children[0] if node.children else None)
+        func = node.child_by_field_name("function") or (
+            node.children[0] if node.children else None
+        )
         if func is None:
             return False
         name = _node_text(func).split("(")[0].split("<")[0]
@@ -3656,7 +4062,11 @@ def _parse_vue_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                 )
                 symbols.append(sym)
 
-        elif node.type in ("interface_declaration", "type_alias_declaration", "enum_declaration"):
+        elif node.type in (
+            "interface_declaration",
+            "type_alias_declaration",
+            "enum_declaration",
+        ):
             # TypeScript type-level declarations
             name_node = node.child_by_field_name("name")
             if name_node:
@@ -3710,7 +4120,11 @@ def _parse_vue_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                     symbols.append(sym)
 
         # Recurse (but not into function bodies to avoid inner helpers)
-        skip_recurse = node.type in ("function_declaration", "arrow_function", "function")
+        skip_recurse = node.type in (
+            "function_declaration",
+            "arrow_function",
+            "function",
+        )
         if not skip_recurse:
             for child in node.children:
                 _walk_composition(child, parent_id)
@@ -3740,7 +4154,9 @@ def _parse_vue_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             if key in ("methods", "computed") and val_node.type == "object":
                 for method_pair in val_node.children:
                     if method_pair.type in ("pair", "method_definition"):
-                        mkey = method_pair.child_by_field_name("key") or method_pair.child_by_field_name("name")
+                        mkey = method_pair.child_by_field_name(
+                            "key"
+                        ) or method_pair.child_by_field_name("name")
                         if mkey:
                             mname = _node_text(mkey).strip("\"'")
                             sym = Symbol(
@@ -3852,27 +4268,30 @@ def _parse_ejs_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         return lo + 1
 
     import os as _os
+
     template_name = _os.path.splitext(_os.path.basename(filename))[0]
     symbols: list[Symbol] = []
 
     # Synthetic template symbol — ensures the file is stored for text search
     sym_bytes = source_bytes
-    symbols.append(Symbol(
-        id=make_symbol_id(filename, template_name, "template"),
-        file=filename,
-        name=template_name,
-        qualified_name=template_name,
-        kind="template",
-        language="ejs",
-        signature=f"template {template_name}",
-        docstring="",
-        parent=None,
-        line=1,
-        end_line=len(lines),
-        byte_offset=0,
-        byte_length=len(sym_bytes),
-        content_hash=compute_content_hash(sym_bytes),
-    ))
+    symbols.append(
+        Symbol(
+            id=make_symbol_id(filename, template_name, "template"),
+            file=filename,
+            name=template_name,
+            qualified_name=template_name,
+            kind="template",
+            language="ejs",
+            signature=f"template {template_name}",
+            docstring="",
+            parent=None,
+            line=1,
+            end_line=len(lines),
+            byte_offset=0,
+            byte_length=len(sym_bytes),
+            content_hash=compute_content_hash(sym_bytes),
+        )
+    )
 
     # Extract JS functions from scriptlet blocks
     for scriptlet_match in _EJS_SCRIPTLET_RE.finditer(content):
@@ -3885,22 +4304,24 @@ def _parse_ejs_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             line_no = offset_to_line(byte_pos)
             sig = f"function {name}({params})"
             chunk = sig.encode("utf-8")
-            symbols.append(Symbol(
-                id=make_symbol_id(filename, name, "function"),
-                file=filename,
-                name=name,
-                qualified_name=name,
-                kind="function",
-                language="ejs",
-                signature=sig,
-                docstring="",
-                parent=None,
-                line=line_no,
-                end_line=line_no,
-                byte_offset=byte_pos,
-                byte_length=len(chunk),
-                content_hash=compute_content_hash(chunk),
-            ))
+            symbols.append(
+                Symbol(
+                    id=make_symbol_id(filename, name, "function"),
+                    file=filename,
+                    name=name,
+                    qualified_name=name,
+                    kind="function",
+                    language="ejs",
+                    signature=sig,
+                    docstring="",
+                    parent=None,
+                    line=line_no,
+                    end_line=line_no,
+                    byte_offset=byte_pos,
+                    byte_length=len(chunk),
+                    content_hash=compute_content_hash(chunk),
+                )
+            )
 
     # Extract include references as import symbols
     seen_includes: set[str] = set()
@@ -3912,22 +4333,24 @@ def _parse_ejs_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         line_no = offset_to_line(inc_match.start())
         sig = f"include('{partial}')"
         chunk = sig.encode("utf-8")
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, partial, "import"),
-            file=filename,
-            name=partial,
-            qualified_name=partial,
-            kind="import",
-            language="ejs",
-            signature=sig,
-            docstring="",
-            parent=None,
-            line=line_no,
-            end_line=line_no,
-            byte_offset=inc_match.start(),
-            byte_length=len(chunk),
-            content_hash=compute_content_hash(chunk),
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, partial, "import"),
+                file=filename,
+                name=partial,
+                qualified_name=partial,
+                kind="import",
+                language="ejs",
+                signature=sig,
+                docstring="",
+                parent=None,
+                line=line_no,
+                end_line=line_no,
+                byte_offset=inc_match.start(),
+                byte_length=len(chunk),
+                content_hash=compute_content_hash(chunk),
+            )
+        )
 
     return symbols
 
@@ -3936,23 +4359,35 @@ def _parse_ejs_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
 # Razor (.cshtml / .razor) custom symbol extractor
 # ---------------------------------------------------------------------------
 
-_RAZOR_SCRIPT_RE = re.compile(r"<script\b([^>]*)>(.*?)</script>", re.IGNORECASE | re.DOTALL)
-_RAZOR_STYLE_RE = re.compile(r"<style\b([^>]*)>(.*?)</style>", re.IGNORECASE | re.DOTALL)
+_RAZOR_SCRIPT_RE = re.compile(
+    r"<script\b([^>]*)>(.*?)</script>", re.IGNORECASE | re.DOTALL
+)
+_RAZOR_STYLE_RE = re.compile(
+    r"<style\b([^>]*)>(.*?)</style>", re.IGNORECASE | re.DOTALL
+)
 _RAZOR_ID_RE = re.compile(r"""\bid\s*=\s*["']([^"'<>]+)["']""", re.IGNORECASE)
 _RAZOR_SCRIPT_SRC_RE = re.compile(r"""\bsrc\s*=\s*["']([^"'<>]+)["']""", re.IGNORECASE)
 _RAZOR_CODE_BLOCK_RE = re.compile(r"@(?:functions|code)\s*\{", re.IGNORECASE)
 # Blazor-specific directives (@page route, @inject Type Name)
 _RAZOR_PAGE_RE = re.compile(r'^@page\s+"([^"]+)"', re.MULTILINE)
-_RAZOR_INJECT_RE = re.compile(r'^@inject\s+(\S+)\s+(\w+)', re.MULTILINE)
+_RAZOR_INJECT_RE = re.compile(r"^@inject\s+(\S+)\s+(\w+)", re.MULTILINE)
 
 # Astro (.astro) — mixed-language components: TypeScript frontmatter + HTML template
 # + optional <script> (client JS) and <style> blocks.
 # Grammar reference: https://github.com/virchau13/tree-sitter-astro
-_ASTRO_SCRIPT_RE = re.compile(r"<script\b([^>]*)>(.*?)</script>", re.IGNORECASE | re.DOTALL)
-_ASTRO_STYLE_RE = re.compile(r"<style\b([^>]*)>(.*?)</style>", re.IGNORECASE | re.DOTALL)
+_ASTRO_SCRIPT_RE = re.compile(
+    r"<script\b([^>]*)>(.*?)</script>", re.IGNORECASE | re.DOTALL
+)
+_ASTRO_STYLE_RE = re.compile(
+    r"<style\b([^>]*)>(.*?)</style>", re.IGNORECASE | re.DOTALL
+)
 _ASTRO_SCRIPT_SRC_RE = re.compile(r"""\bsrc\s*=\s*["']([^"'<>]+)["']""", re.IGNORECASE)
-_ASTRO_SCRIPT_LANG_RE = re.compile(r"""\blang\s*=\s*["']([^"'<>]+)["']""", re.IGNORECASE)
-_ASTRO_SCRIPT_TYPE_RE = re.compile(r"""\btype\s*=\s*["']([^"'<>]+)["']""", re.IGNORECASE)
+_ASTRO_SCRIPT_LANG_RE = re.compile(
+    r"""\blang\s*=\s*["']([^"'<>]+)["']""", re.IGNORECASE
+)
+_ASTRO_SCRIPT_TYPE_RE = re.compile(
+    r"""\btype\s*=\s*["']([^"'<>]+)["']""", re.IGNORECASE
+)
 _ASTRO_ID_RE = re.compile(r"""\bid\s*=\s*["']([^"'<>]+)["']""", re.IGNORECASE)
 
 
@@ -4029,10 +4464,10 @@ def _parse_razor_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         qualified_name = sym.qualified_name
         if qualified_prefix:
             if qualified_name.startswith("__RazorShim__."):
-                qualified_name = qualified_name[len("__RazorShim__."):]
+                qualified_name = qualified_name[len("__RazorShim__.") :]
             qualified_name = f"{qualified_prefix}.{qualified_name}"
         elif qualified_name.startswith("__RazorShim__."):
-            qualified_name = qualified_name[len("__RazorShim__."):]
+            qualified_name = qualified_name[len("__RazorShim__.") :]
 
         return Symbol(
             id=make_symbol_id(filename, qualified_name, sym.kind),
@@ -4064,21 +4499,23 @@ def _parse_razor_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         seen_ids.add(elem_id)
         line_no = _line_for_offset(match.start())
         snippet = match.group(0).encode("utf-8")
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, f"{view_name}.{elem_id}", "constant"),
-            file=filename,
-            name=elem_id,
-            qualified_name=f"{view_name}.{elem_id}",
-            kind="constant",
-            language="razor",
-            signature=match.group(0),
-            parent=view_symbol.id,
-            line=line_no,
-            end_line=line_no,
-            byte_offset=match.start(),
-            byte_length=len(snippet),
-            content_hash=compute_content_hash(snippet),
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, f"{view_name}.{elem_id}", "constant"),
+                file=filename,
+                name=elem_id,
+                qualified_name=f"{view_name}.{elem_id}",
+                kind="constant",
+                language="razor",
+                signature=match.group(0),
+                parent=view_symbol.id,
+                line=line_no,
+                end_line=line_no,
+                byte_offset=match.start(),
+                byte_length=len(snippet),
+                content_hash=compute_content_hash(snippet),
+            )
+        )
 
     seen_script_src: set[str] = set()
     script_index = 0
@@ -4095,26 +4532,30 @@ def _parse_razor_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                 seen_script_src.add(src)
                 name = src.rsplit("/", 1)[-1] if "/" in src else src
                 snippet = src_match.group(0).encode("utf-8")
-                symbols.append(Symbol(
-                    id=make_symbol_id(filename, f"{view_name}.{src}", "function"),
-                    file=filename,
-                    name=name,
-                    qualified_name=f"{view_name}.{src}",
-                    kind="function",
-                    language="razor",
-                    signature=f'<script src="{src}">',
-                    parent=view_symbol.id,
-                    line=line_no,
-                    end_line=line_no,
-                    byte_offset=script_match.start() + src_match.start(),
-                    byte_length=len(snippet),
-                    content_hash=compute_content_hash(snippet),
-                ))
+                symbols.append(
+                    Symbol(
+                        id=make_symbol_id(filename, f"{view_name}.{src}", "function"),
+                        file=filename,
+                        name=name,
+                        qualified_name=f"{view_name}.{src}",
+                        kind="function",
+                        language="razor",
+                        signature=f'<script src="{src}">',
+                        parent=view_symbol.id,
+                        line=line_no,
+                        end_line=line_no,
+                        byte_offset=script_match.start() + src_match.start(),
+                        byte_length=len(snippet),
+                        content_hash=compute_content_hash(snippet),
+                    )
+                )
 
         if body.strip():
             body_start = script_match.start(2)
             body_line_offset = _line_for_offset(body_start) - 1
-            js_symbols = parse_file(body, f"{filename}#script{script_index}.js", "javascript")
+            js_symbols = parse_file(
+                body, f"{filename}#script{script_index}.js", "javascript"
+            )
             for js_sym in js_symbols:
                 symbols.append(
                     _rewrap_symbol(
@@ -4135,21 +4576,23 @@ def _parse_razor_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         if attrs:
             tag_sig = f"<style{attrs}>"
         snippet = style_match.group(0).encode("utf-8")
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, f"{view_name}.{style_name}", "constant"),
-            file=filename,
-            name=style_name,
-            qualified_name=f"{view_name}.{style_name}",
-            kind="constant",
-            language="razor",
-            signature=tag_sig,
-            parent=view_symbol.id,
-            line=line_no,
-            end_line=_line_for_offset(style_match.end()),
-            byte_offset=style_match.start(),
-            byte_length=len(snippet),
-            content_hash=compute_content_hash(snippet),
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, f"{view_name}.{style_name}", "constant"),
+                file=filename,
+                name=style_name,
+                qualified_name=f"{view_name}.{style_name}",
+                kind="constant",
+                language="razor",
+                signature=tag_sig,
+                parent=view_symbol.id,
+                line=line_no,
+                end_line=_line_for_offset(style_match.end()),
+                byte_offset=style_match.start(),
+                byte_length=len(snippet),
+                content_hash=compute_content_hash(snippet),
+            )
+        )
 
     for code_match in _RAZOR_CODE_BLOCK_RE.finditer(content):
         block = _extract_razor_brace_block(content, code_match.end() - 1)
@@ -4187,21 +4630,23 @@ def _parse_razor_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         route = page_match.group(1)
         line_no = _line_for_offset(page_match.start())
         snippet = page_match.group(0).encode("utf-8")
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, f"{view_name}.@page:{route}", "constant"),
-            file=filename,
-            name=route,
-            qualified_name=f"{view_name}.@page:{route}",
-            kind="constant",
-            language="razor",
-            signature=f'@page "{route}"',
-            parent=view_symbol.id,
-            line=line_no,
-            end_line=line_no,
-            byte_offset=page_match.start(),
-            byte_length=len(snippet),
-            content_hash=compute_content_hash(snippet),
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, f"{view_name}.@page:{route}", "constant"),
+                file=filename,
+                name=route,
+                qualified_name=f"{view_name}.@page:{route}",
+                kind="constant",
+                language="razor",
+                signature=f'@page "{route}"',
+                parent=view_symbol.id,
+                line=line_no,
+                end_line=line_no,
+                byte_offset=page_match.start(),
+                byte_length=len(snippet),
+                content_hash=compute_content_hash(snippet),
+            )
+        )
 
     # Extract @inject directives (Blazor components)
     for inject_match in _RAZOR_INJECT_RE.finditer(content):
@@ -4209,21 +4654,23 @@ def _parse_razor_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         prop_name = inject_match.group(2)
         line_no = _line_for_offset(inject_match.start())
         snippet = inject_match.group(0).encode("utf-8")
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, f"{view_name}.{prop_name}", "constant"),
-            file=filename,
-            name=prop_name,
-            qualified_name=f"{view_name}.{prop_name}",
-            kind="constant",
-            language="razor",
-            signature=f"@inject {service_type} {prop_name}",
-            parent=view_symbol.id,
-            line=line_no,
-            end_line=line_no,
-            byte_offset=inject_match.start(),
-            byte_length=len(snippet),
-            content_hash=compute_content_hash(snippet),
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, f"{view_name}.{prop_name}", "constant"),
+                file=filename,
+                name=prop_name,
+                qualified_name=f"{view_name}.{prop_name}",
+                kind="constant",
+                language="razor",
+                signature=f"@inject {service_type} {prop_name}",
+                parent=view_symbol.id,
+                line=line_no,
+                end_line=line_no,
+                byte_offset=inject_match.start(),
+                byte_length=len(snippet),
+                content_hash=compute_content_hash(snippet),
+            )
+        )
 
     symbols.sort(key=lambda s: (s.line, s.byte_offset, s.name))
     return symbols
@@ -4296,7 +4743,9 @@ def _parse_astro_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     from pathlib import Path as _Path
 
     raw_content = source_bytes.decode("utf-8", errors="replace")
-    frontmatter, template_body, fm_start_line, template_start_line = split_astro_frontmatter(raw_content)
+    frontmatter, template_body, fm_start_line, template_start_line = (
+        split_astro_frontmatter(raw_content)
+    )
     content = raw_content[1:] if raw_content.startswith("\ufeff") else raw_content
     component_name = _Path(filename).stem
     total_lines = content.count("\n") + 1
@@ -4372,14 +4821,16 @@ def _parse_astro_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         fm_bytes = frontmatter.encode("utf-8")
         ts_symbols = parse_file(frontmatter, f"{filename}#frontmatter.ts", "typescript")
         for sym in ts_symbols:
-            symbols.append(_rewrap_symbol(
-                sym,
-                block_offset=fm_start_offset,
-                line_offset_zero_based=fm_line_off,
-                block_length=len(fm_bytes),
-                parent=component_symbol,
-                qualified_prefix=component_name,
-            ))
+            symbols.append(
+                _rewrap_symbol(
+                    sym,
+                    block_offset=fm_start_offset,
+                    line_offset_zero_based=fm_line_off,
+                    block_length=len(fm_bytes),
+                    parent=component_symbol,
+                    qualified_prefix=component_name,
+                )
+            )
 
     # ── 2. Template IDs (comments stripped, offsets preserved)
     template_offset = _line_start_offset(template_start_line)
@@ -4393,24 +4844,28 @@ def _parse_astro_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         absolute_offset = template_offset + id_match.start()
         line_no = _line_for_offset(absolute_offset)
         snippet = id_match.group(0).encode("utf-8")
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, f"{component_name}.{elem_id}", "constant"),
-            file=filename,
-            name=elem_id,
-            qualified_name=f"{component_name}.{elem_id}",
-            kind="constant",
-            language="astro",
-            signature=id_match.group(0),
-            parent=component_symbol.id,
-            line=line_no,
-            end_line=line_no,
-            byte_offset=absolute_offset,
-            byte_length=len(snippet),
-            content_hash=compute_content_hash(snippet),
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, f"{component_name}.{elem_id}", "constant"),
+                file=filename,
+                name=elem_id,
+                qualified_name=f"{component_name}.{elem_id}",
+                kind="constant",
+                language="astro",
+                signature=id_match.group(0),
+                parent=component_symbol.id,
+                line=line_no,
+                end_line=line_no,
+                byte_offset=absolute_offset,
+                byte_length=len(snippet),
+                content_hash=compute_content_hash(snippet),
+            )
+        )
 
     # ── 3. <script> blocks (client-side JS/TS)
-    for script_idx, script_match in enumerate(_ASTRO_SCRIPT_RE.finditer(content), start=1):
+    for script_idx, script_match in enumerate(
+        _ASTRO_SCRIPT_RE.finditer(content), start=1
+    ):
         attrs = script_match.group(1)
         body = script_match.group(2)
 
@@ -4419,21 +4874,23 @@ def _parse_astro_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         if src_m:
             src_name = src_m.group(1)
             snippet = script_match.group(0).encode("utf-8")
-            symbols.append(Symbol(
-                id=make_symbol_id(filename, f"script:{src_name}", "function"),
-                file=filename,
-                name=src_name,
-                qualified_name=f"{component_name}.script:{src_name}",
-                kind="function",
-                language="astro",
-                signature=f'<script src="{src_name}">',
-                line=_line_for_offset(script_match.start()),
-                end_line=_line_for_offset(script_match.end()),
-                byte_offset=script_match.start(),
-                byte_length=len(snippet),
-                content_hash=compute_content_hash(snippet),
-                parent=component_symbol.id,
-            ))
+            symbols.append(
+                Symbol(
+                    id=make_symbol_id(filename, f"script:{src_name}", "function"),
+                    file=filename,
+                    name=src_name,
+                    qualified_name=f"{component_name}.script:{src_name}",
+                    kind="function",
+                    language="astro",
+                    signature=f'<script src="{src_name}">',
+                    line=_line_for_offset(script_match.start()),
+                    end_line=_line_for_offset(script_match.end()),
+                    byte_offset=script_match.start(),
+                    byte_length=len(snippet),
+                    content_hash=compute_content_hash(snippet),
+                    parent=component_symbol.id,
+                )
+            )
             continue
 
         # JSON/JSON-LD payloads are data, not executable code symbols.
@@ -4445,37 +4902,45 @@ def _parse_astro_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         body_bytes = body.encode("utf-8")
         line_off = _line_for_offset(body_start) - 1
         script_language = _astro_script_language(attrs)
-        script_symbols = parse_file(body, f"{filename}#script{script_idx}.{script_language}", script_language)
+        script_symbols = parse_file(
+            body, f"{filename}#script{script_idx}.{script_language}", script_language
+        )
         for sym in script_symbols:
-            symbols.append(_rewrap_symbol(
-                sym,
-                block_offset=body_start,
-                line_offset_zero_based=line_off,
-                block_length=len(body_bytes),
-                parent=component_symbol,
-                qualified_prefix=f"{component_name}.script{script_idx}",
-            ))
+            symbols.append(
+                _rewrap_symbol(
+                    sym,
+                    block_offset=body_start,
+                    line_offset_zero_based=line_off,
+                    block_length=len(body_bytes),
+                    parent=component_symbol,
+                    qualified_prefix=f"{component_name}.script{script_idx}",
+                )
+            )
 
     # ── 4. <style> blocks → constant symbol (like Razor)
     for style_match in _ASTRO_STYLE_RE.finditer(content):
         line_no = _line_for_offset(style_match.start())
         style_name = f"style:{line_no}"
         snippet = style_match.group(0).encode("utf-8")
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, f"{component_name}.{style_name}", "constant"),
-            file=filename,
-            name=style_name,
-            qualified_name=f"{component_name}.{style_name}",
-            kind="constant",
-            language="astro",
-            signature=f"<style> at line {line_no}",
-            line=line_no,
-            end_line=_line_for_offset(style_match.end()),
-            byte_offset=style_match.start(),
-            byte_length=len(snippet),
-            content_hash=compute_content_hash(snippet),
-            parent=component_symbol.id,
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(
+                    filename, f"{component_name}.{style_name}", "constant"
+                ),
+                file=filename,
+                name=style_name,
+                qualified_name=f"{component_name}.{style_name}",
+                kind="constant",
+                language="astro",
+                signature=f"<style> at line {line_no}",
+                line=line_no,
+                end_line=_line_for_offset(style_match.end()),
+                byte_offset=style_match.start(),
+                byte_length=len(snippet),
+                content_hash=compute_content_hash(snippet),
+                parent=component_symbol.id,
+            )
+        )
 
     # Dedup while preserving insertion order for stable sort.
     deduped: list[Symbol] = []
@@ -4491,7 +4956,9 @@ def _parse_astro_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     return deduped
 
 
-def _extract_razor_brace_block(content: str, brace_pos: int) -> Optional[tuple[int, int]]:
+def _extract_razor_brace_block(
+    content: str, brace_pos: int
+) -> Optional[tuple[int, int]]:
     """Return the [start, end) slice inside a Razor @code/@functions block."""
     if brace_pos < 0 or brace_pos >= len(content) or content[brace_pos] != "{":
         return None
@@ -4587,13 +5054,16 @@ def _parse_lua_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     Preceding ``--`` line-comments are collected as docstrings.
     """
     from tree_sitter_language_pack import get_parser as _get_parser
+
     parser = _get_parser("lua")
     tree = parser.parse(source_bytes)
 
     symbols: list[Symbol] = []
 
     def _node_text(node) -> str:
-        return source_bytes[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
+        return source_bytes[node.start_byte : node.end_byte].decode(
+            "utf-8", errors="replace"
+        )
 
     def _resolve_name(name_node) -> tuple[str, str, Optional[str]]:
         """Return (name, qualified_name, parent) for a function name node."""
@@ -4642,7 +5112,11 @@ def _parse_lua_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         for child in node.children:
             if child.type == "local":
                 is_local = True
-            elif child.type in ("identifier", "dot_index_expression", "method_index_expression"):
+            elif child.type in (
+                "identifier",
+                "dot_index_expression",
+                "method_index_expression",
+            ):
                 name_node = child
             elif child.type == "parameters":
                 params_node = child
@@ -4654,7 +5128,11 @@ def _parse_lua_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         if not name:
             return
 
-        kind = "method" if name_node.type in ("dot_index_expression", "method_index_expression") else "function"
+        kind = (
+            "method"
+            if name_node.type in ("dot_index_expression", "method_index_expression")
+            else "function"
+        )
         params_text = _node_text(params_node) if params_node else "()"
         prefix = "local function" if is_local else "function"
         signature = f"{prefix} {qualified_name}{params_text}"
@@ -4662,24 +5140,26 @@ def _parse_lua_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
 
         row, _ = node.start_point
         end_row, _ = node.end_point
-        sym_bytes = source_bytes[node.start_byte:node.end_byte]
+        sym_bytes = source_bytes[node.start_byte : node.end_byte]
 
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, qualified_name, kind),
-            file=filename,
-            name=name,
-            qualified_name=qualified_name,
-            kind=kind,
-            language="lua",
-            signature=signature,
-            docstring=docstring,
-            parent=parent,
-            line=row + 1,
-            end_line=end_row + 1,
-            byte_offset=node.start_byte,
-            byte_length=len(sym_bytes),
-            content_hash=compute_content_hash(sym_bytes),
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, qualified_name, kind),
+                file=filename,
+                name=name,
+                qualified_name=qualified_name,
+                kind=kind,
+                language="lua",
+                signature=signature,
+                docstring=docstring,
+                parent=parent,
+                line=row + 1,
+                end_line=end_row + 1,
+                byte_offset=node.start_byte,
+                byte_length=len(sym_bytes),
+                content_hash=compute_content_hash(sym_bytes),
+            )
+        )
 
     _walk(tree.root_node)
     symbols.sort(key=lambda s: s.line)
@@ -4705,13 +5185,16 @@ def _parse_luau_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     Preceding ``--`` line-comments are collected as docstrings.
     """
     from tree_sitter_language_pack import get_parser as _get_parser
+
     parser = _get_parser("luau")
     tree = parser.parse(source_bytes)
 
     symbols: list[Symbol] = []
 
     def _node_text(node) -> str:
-        return source_bytes[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
+        return source_bytes[node.start_byte : node.end_byte].decode(
+            "utf-8", errors="replace"
+        )
 
     def _resolve_name(name_node) -> tuple[str, str, Optional[str]]:
         """Return (name, qualified_name, parent) for a function name node."""
@@ -4762,7 +5245,11 @@ def _parse_luau_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         for child in node.children:
             if child.type == "local":
                 is_local = True
-            elif child.type in ("identifier", "dot_index_expression", "method_index_expression") and name_node is None:
+            elif (
+                child.type
+                in ("identifier", "dot_index_expression", "method_index_expression")
+                and name_node is None
+            ):
                 name_node = child
             elif child.type == "parameters":
                 params_node = child
@@ -4774,7 +5261,11 @@ def _parse_luau_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         if not name:
             return
 
-        kind = "method" if name_node.type in ("dot_index_expression", "method_index_expression") else "function"
+        kind = (
+            "method"
+            if name_node.type in ("dot_index_expression", "method_index_expression")
+            else "function"
+        )
         params_text = _node_text(params_node) if params_node else "()"
         prefix = "local function" if is_local else "function"
 
@@ -4806,24 +5297,26 @@ def _parse_luau_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
 
         row, _ = node.start_point
         end_row, _ = node.end_point
-        sym_bytes = source_bytes[node.start_byte:node.end_byte]
+        sym_bytes = source_bytes[node.start_byte : node.end_byte]
 
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, qualified_name, kind),
-            file=filename,
-            name=name,
-            qualified_name=qualified_name,
-            kind=kind,
-            language="luau",
-            signature=signature,
-            docstring=docstring,
-            parent=parent,
-            line=row + 1,
-            end_line=end_row + 1,
-            byte_offset=node.start_byte,
-            byte_length=len(sym_bytes),
-            content_hash=compute_content_hash(sym_bytes),
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, qualified_name, kind),
+                file=filename,
+                name=name,
+                qualified_name=qualified_name,
+                kind=kind,
+                language="luau",
+                signature=signature,
+                docstring=docstring,
+                parent=parent,
+                line=row + 1,
+                end_line=end_row + 1,
+                byte_offset=node.start_byte,
+                byte_length=len(sym_bytes),
+                content_hash=compute_content_hash(sym_bytes),
+            )
+        )
 
     def _extract_luau_type(node) -> None:
         """Extract ``type Foo = ...`` and ``export type Foo = ...`` definitions."""
@@ -4847,24 +5340,26 @@ def _parse_luau_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
 
         row, _ = node.start_point
         end_row, _ = node.end_point
-        sym_bytes = source_bytes[node.start_byte:node.end_byte]
+        sym_bytes = source_bytes[node.start_byte : node.end_byte]
 
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, name, "type"),
-            file=filename,
-            name=name,
-            qualified_name=name,
-            kind="type",
-            language="luau",
-            signature=signature,
-            docstring=docstring,
-            parent=None,
-            line=row + 1,
-            end_line=end_row + 1,
-            byte_offset=node.start_byte,
-            byte_length=len(sym_bytes),
-            content_hash=compute_content_hash(sym_bytes),
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, name, "type"),
+                file=filename,
+                name=name,
+                qualified_name=name,
+                kind="type",
+                language="luau",
+                signature=signature,
+                docstring=docstring,
+                parent=None,
+                line=row + 1,
+                end_line=end_row + 1,
+                byte_offset=node.start_byte,
+                byte_length=len(sym_bytes),
+                content_hash=compute_content_hash(sym_bytes),
+            )
+        )
 
     _walk(tree.root_node)
     symbols.sort(key=lambda s: s.line)
@@ -4902,7 +5397,9 @@ def _parse_erlang_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     seen_funs: dict[tuple[str, int], int] = {}
 
     def _node_text(node) -> str:
-        return source_bytes[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
+        return source_bytes[node.start_byte : node.end_byte].decode(
+            "utf-8", errors="replace"
+        )
 
     def _collect_docstring(node) -> str:
         """Collect preceding %% comment siblings as a docstring."""
@@ -4971,26 +5468,28 @@ def _parse_erlang_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         docstring = _collect_docstring(node)
         row, _ = node.start_point
         end_row, _ = node.end_point
-        sym_bytes = source_bytes[node.start_byte:node.end_byte]
+        sym_bytes = source_bytes[node.start_byte : node.end_byte]
 
         idx = len(symbols)
         seen_funs[key] = idx
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, f"{name}/{arity}", "function"),
-            file=filename,
-            name=name,
-            qualified_name=f"{name}/{arity}",
-            kind="function",
-            language="erlang",
-            signature=signature,
-            docstring=docstring,
-            parent=None,
-            line=row + 1,
-            end_line=end_row + 1,
-            byte_offset=node.start_byte,
-            byte_length=len(sym_bytes),
-            content_hash=compute_content_hash(sym_bytes),
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, f"{name}/{arity}", "function"),
+                file=filename,
+                name=name,
+                qualified_name=f"{name}/{arity}",
+                kind="function",
+                language="erlang",
+                signature=signature,
+                docstring=docstring,
+                parent=None,
+                line=row + 1,
+                end_line=end_row + 1,
+                byte_offset=node.start_byte,
+                byte_length=len(sym_bytes),
+                content_hash=compute_content_hash(sym_bytes),
+            )
+        )
 
     def _extract_type(node) -> None:
         """Handle type_alias and opaque nodes."""
@@ -5015,24 +5514,26 @@ def _parse_erlang_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         docstring = _collect_docstring(node)
         row, _ = node.start_point
         end_row, _ = node.end_point
-        sym_bytes = source_bytes[node.start_byte:node.end_byte]
+        sym_bytes = source_bytes[node.start_byte : node.end_byte]
 
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, name, "type"),
-            file=filename,
-            name=name,
-            qualified_name=name,
-            kind="type",
-            language="erlang",
-            signature=f"-type {type_sig}",
-            docstring=docstring,
-            parent=None,
-            line=row + 1,
-            end_line=end_row + 1,
-            byte_offset=node.start_byte,
-            byte_length=len(sym_bytes),
-            content_hash=compute_content_hash(sym_bytes),
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, name, "type"),
+                file=filename,
+                name=name,
+                qualified_name=name,
+                kind="type",
+                language="erlang",
+                signature=f"-type {type_sig}",
+                docstring=docstring,
+                parent=None,
+                line=row + 1,
+                end_line=end_row + 1,
+                byte_offset=node.start_byte,
+                byte_length=len(sym_bytes),
+                content_hash=compute_content_hash(sym_bytes),
+            )
+        )
 
     def _extract_record(node) -> None:
         """Handle record_decl nodes (struct-like)."""
@@ -5048,24 +5549,26 @@ def _parse_erlang_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         docstring = _collect_docstring(node)
         row, _ = node.start_point
         end_row, _ = node.end_point
-        sym_bytes = source_bytes[node.start_byte:node.end_byte]
+        sym_bytes = source_bytes[node.start_byte : node.end_byte]
 
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, name, "type"),
-            file=filename,
-            name=name,
-            qualified_name=name,
-            kind="type",
-            language="erlang",
-            signature=f"-record({name}, ...)",
-            docstring=docstring,
-            parent=None,
-            line=row + 1,
-            end_line=end_row + 1,
-            byte_offset=node.start_byte,
-            byte_length=len(sym_bytes),
-            content_hash=compute_content_hash(sym_bytes),
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, name, "type"),
+                file=filename,
+                name=name,
+                qualified_name=name,
+                kind="type",
+                language="erlang",
+                signature=f"-record({name}, ...)",
+                docstring=docstring,
+                parent=None,
+                line=row + 1,
+                end_line=end_row + 1,
+                byte_offset=node.start_byte,
+                byte_length=len(sym_bytes),
+                content_hash=compute_content_hash(sym_bytes),
+            )
+        )
 
     def _extract_define(node) -> None:
         """Handle pp_define (macro constant) nodes."""
@@ -5093,24 +5596,26 @@ def _parse_erlang_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         docstring = _collect_docstring(node)
         row, _ = node.start_point
         end_row, _ = node.end_point
-        sym_bytes = source_bytes[node.start_byte:node.end_byte]
+        sym_bytes = source_bytes[node.start_byte : node.end_byte]
 
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, name, "constant"),
-            file=filename,
-            name=name,
-            qualified_name=name,
-            kind="constant",
-            language="erlang",
-            signature=signature,
-            docstring=docstring,
-            parent=None,
-            line=row + 1,
-            end_line=end_row + 1,
-            byte_offset=node.start_byte,
-            byte_length=len(sym_bytes),
-            content_hash=compute_content_hash(sym_bytes),
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, name, "constant"),
+                file=filename,
+                name=name,
+                qualified_name=name,
+                kind="constant",
+                language="erlang",
+                signature=signature,
+                docstring=docstring,
+                parent=None,
+                line=row + 1,
+                end_line=end_row + 1,
+                byte_offset=node.start_byte,
+                byte_length=len(sym_bytes),
+                content_hash=compute_content_hash(sym_bytes),
+            )
+        )
 
     for node in tree.root_node.named_children:
         if node.type == "fun_decl":
@@ -5153,7 +5658,9 @@ def _parse_fortran_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     symbols: list[Symbol] = []
 
     def _node_text(node) -> str:
-        return source_bytes[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
+        return source_bytes[node.start_byte : node.end_byte].decode(
+            "utf-8", errors="replace"
+        )
 
     def _collect_docstring(node) -> str:
         """Collect preceding ! comment siblings as a docstring."""
@@ -5176,27 +5683,31 @@ def _parse_fortran_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     ) -> None:
         row, _ = node.start_point
         end_row, _ = node.end_point
-        sym_bytes = source_bytes[node.start_byte:node.end_byte]
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, qualified_name, kind),
-            file=filename,
-            name=name,
-            qualified_name=qualified_name,
-            kind=kind,
-            language="fortran",
-            signature=signature,
-            docstring=docstring,
-            parent=parent,
-            line=row + 1,
-            end_line=end_row + 1,
-            byte_offset=node.start_byte,
-            byte_length=len(sym_bytes),
-            content_hash=compute_content_hash(sym_bytes),
-        ))
+        sym_bytes = source_bytes[node.start_byte : node.end_byte]
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, qualified_name, kind),
+                file=filename,
+                name=name,
+                qualified_name=qualified_name,
+                kind=kind,
+                language="fortran",
+                signature=signature,
+                docstring=docstring,
+                parent=parent,
+                line=row + 1,
+                end_line=end_row + 1,
+                byte_offset=node.start_byte,
+                byte_length=len(sym_bytes),
+                content_hash=compute_content_hash(sym_bytes),
+            )
+        )
 
     def _extract_procedure(node, parent_name: Optional[str] = None) -> None:
         """Extract a function or subroutine node."""
-        stmt_type = "function_statement" if node.type == "function" else "subroutine_statement"
+        stmt_type = (
+            "function_statement" if node.type == "function" else "subroutine_statement"
+        )
         stmt = next((c for c in node.named_children if c.type == stmt_type), None)
         if stmt is None:
             return
@@ -5218,7 +5729,9 @@ def _parse_fortran_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
 
     def _extract_derived_type(node, parent_name: Optional[str] = None) -> None:
         """Extract a derived_type_definition node."""
-        stmt = next((c for c in node.named_children if c.type == "derived_type_statement"), None)
+        stmt = next(
+            (c for c in node.named_children if c.type == "derived_type_statement"), None
+        )
         if stmt is None:
             return
 
@@ -5261,7 +5774,15 @@ def _parse_fortran_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                 qualified_name = f"{parent_name}::{name}" if parent_name else name
                 signature = _node_text(node).strip()
                 docstring = _collect_docstring(node)
-                _make_sym(node, name, qualified_name, "constant", signature, docstring, parent_name)
+                _make_sym(
+                    node,
+                    name,
+                    qualified_name,
+                    "constant",
+                    signature,
+                    docstring,
+                    parent_name,
+                )
 
     def _walk_scope(nodes, parent_name: Optional[str] = None) -> None:
         """Walk a sequence of nodes extracting symbols with an optional parent."""
@@ -5340,7 +5861,8 @@ def _parse_sql_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     before stripping.
     """
     from tree_sitter_language_pack import get_parser as _get_parser
-    from .sql_preprocessor import strip_jinja, is_jinja_sql, extract_dbt_directives
+
+    from .sql_preprocessor import extract_dbt_directives, is_jinja_sql, strip_jinja
 
     # Extract dbt directives before stripping Jinja (macro, test, snapshot, etc.)
     dbt_symbols: list[Symbol] = []
@@ -5361,24 +5883,26 @@ def _parse_sql_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                 sig = f"{{% {d.directive} {d.name} %}}"
 
             c_hash = compute_content_hash(
-                source_bytes[d.byte_offset:d.byte_offset + d.byte_length]
+                source_bytes[d.byte_offset : d.byte_offset + d.byte_length]
             )
 
-            dbt_symbols.append(Symbol(
-                id=make_symbol_id(filename, d.name, kind),
-                file=filename,
-                name=d.name,
-                qualified_name=d.name,
-                kind=kind,
-                language="sql",
-                signature=sig,
-                docstring=d.docstring,
-                line=d.line,
-                end_line=d.end_line,
-                byte_offset=d.byte_offset,
-                byte_length=d.byte_length,
-                content_hash=c_hash,
-            ))
+            dbt_symbols.append(
+                Symbol(
+                    id=make_symbol_id(filename, d.name, kind),
+                    file=filename,
+                    name=d.name,
+                    qualified_name=d.name,
+                    kind=kind,
+                    language="sql",
+                    signature=sig,
+                    docstring=d.docstring,
+                    line=d.line,
+                    end_line=d.end_line,
+                    byte_offset=d.byte_offset,
+                    byte_length=d.byte_length,
+                    content_hash=c_hash,
+                )
+            )
 
         source_bytes = strip_jinja(source_bytes)
 
@@ -5401,7 +5925,9 @@ def _parse_sql_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     }
 
     def _node_text(node) -> str:
-        return source_bytes[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
+        return source_bytes[node.start_byte : node.end_byte].decode(
+            "utf-8", errors="replace"
+        )
 
     def _extract_name(node) -> str | None:
         """Extract the name from a SQL DDL node."""
@@ -5449,8 +5975,11 @@ def _parse_sql_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             # Include column list summary
             for child in node.children:
                 if child.type == "column_definitions":
-                    cols = [_node_text(c).split()[0] for c in child.children
-                            if c.type == "column_definition"]
+                    cols = [
+                        _node_text(c).split()[0]
+                        for c in child.children
+                        if c.type == "column_definition"
+                    ]
                     if cols:
                         return f"CREATE TABLE {name} ({', '.join(cols)})"
             return f"CREATE TABLE {name}"
@@ -5504,7 +6033,7 @@ def _parse_sql_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                 docstring = _collect_docstring(doc_node)
 
                 c_hash = compute_content_hash(
-                    source_bytes[node.start_byte:node.end_byte]
+                    source_bytes[node.start_byte : node.end_byte]
                 )
 
                 sym = Symbol(
@@ -5558,7 +6087,7 @@ def _parse_objc_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         """First identifier child is the class name in ObjC @interface/@implementation."""
         for child in node.children:
             if child.type == "identifier":
-                return source[child.start_byte:child.end_byte]
+                return source[child.start_byte : child.end_byte]
         return None
 
     def _get_selector(node) -> Optional[str]:
@@ -5572,7 +6101,7 @@ def _parse_objc_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         has_params = False
         for child in node.children:
             if child.type == "identifier":
-                identifiers.append(source[child.start_byte:child.end_byte])
+                identifiers.append(source[child.start_byte : child.end_byte])
             elif child.type == "method_parameter":
                 has_params = True
         if not identifiers:
@@ -5602,18 +6131,26 @@ def _parse_objc_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                     end_line=node.end_point[0] + 1,
                     byte_offset=node.start_byte,
                     byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
+                    content_hash=compute_content_hash(
+                        source_bytes[node.start_byte : node.end_byte]
+                    ),
                 )
                 symbols.append(sym)
                 for child in node.children:
                     _walk(child)
                 current_class[0] = prev_class
                 return
-        elif node.type in ("method_declaration", "method_definition") and current_class[0]:
+        elif (
+            node.type in ("method_declaration", "method_definition")
+            and current_class[0]
+        ):
             selector = _get_selector(node)
             if selector:
                 qualified = f"{current_class[0]}.{selector}"
-                raw_sig = source[node.start_byte:node.start_byte + min(120, node.end_byte - node.start_byte)]
+                raw_sig = source[
+                    node.start_byte : node.start_byte
+                    + min(120, node.end_byte - node.start_byte)
+                ]
                 sym = Symbol(
                     id=make_symbol_id(filename, qualified, "method"),
                     file=filename,
@@ -5627,7 +6164,9 @@ def _parse_objc_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                     end_line=node.end_point[0] + 1,
                     byte_offset=node.start_byte,
                     byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
+                    content_hash=compute_content_hash(
+                        source_bytes[node.start_byte : node.end_byte]
+                    ),
                 )
                 symbols.append(sym)
                 return
@@ -5637,10 +6176,13 @@ def _parse_objc_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                 if child.type == "function_declarator":
                     for sub in child.children:
                         if sub.type == "identifier":
-                            name = source[sub.start_byte:sub.end_byte]
+                            name = source[sub.start_byte : sub.end_byte]
                             break
             if name:
-                raw_sig = source[node.start_byte:node.start_byte + min(120, node.end_byte - node.start_byte)]
+                raw_sig = source[
+                    node.start_byte : node.start_byte
+                    + min(120, node.end_byte - node.start_byte)
+                ]
                 sym = Symbol(
                     id=make_symbol_id(filename, name, "function"),
                     file=filename,
@@ -5654,7 +6196,9 @@ def _parse_objc_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                     end_line=node.end_point[0] + 1,
                     byte_offset=node.start_byte,
                     byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
+                    content_hash=compute_content_hash(
+                        source_bytes[node.start_byte : node.end_byte]
+                    ),
                 )
                 symbols.append(sym)
         for child in node.children:
@@ -5691,7 +6235,7 @@ def _parse_proto_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         """
         for child in node.children:
             if child.type == name_child_type:
-                return source[child.start_byte:child.end_byte].strip()
+                return source[child.start_byte : child.end_byte].strip()
         return None
 
     def _walk(node, scope: str = "") -> None:
@@ -5713,7 +6257,9 @@ def _parse_proto_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                     end_line=node.end_point[0] + 1,
                     byte_offset=node.start_byte,
                     byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
+                    content_hash=compute_content_hash(
+                        source_bytes[node.start_byte : node.end_byte]
+                    ),
                 )
                 symbols.append(sym)
                 new_scope = qualified if node.type in ("message", "service") else scope
@@ -5763,9 +6309,9 @@ def _parse_hcl_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         """
         for child in node.children:
             if child.type == "template_literal":
-                return source[child.start_byte:child.end_byte].strip()
+                return source[child.start_byte : child.end_byte].strip()
         # fallback: strip surrounding quotes from raw text
-        return source[node.start_byte:node.end_byte].strip().strip('"')
+        return source[node.start_byte : node.end_byte].strip().strip('"')
 
     def _walk(node) -> None:
         if node.type == "block":
@@ -5773,7 +6319,7 @@ def _parse_hcl_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             labels: list[str] = []
             for child in node.children:
                 if child.type == "identifier" and block_type is None:
-                    block_type = source[child.start_byte:child.end_byte].strip()
+                    block_type = source[child.start_byte : child.end_byte].strip()
                 elif child.type == "string_lit" and block_type is not None:
                     label = _string_lit_text(child)
                     if label:
@@ -5806,7 +6352,9 @@ def _parse_hcl_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                     end_line=node.end_point[0] + 1,
                     byte_offset=node.start_byte,
                     byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
+                    content_hash=compute_content_hash(
+                        source_bytes[node.start_byte : node.end_byte]
+                    ),
                 )
                 symbols.append(sym)
 
@@ -5847,9 +6395,9 @@ def _parse_graphql_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     def _get_name(node) -> Optional[str]:
         for child in node.children:
             if child.type == "name":
-                return source[child.start_byte:child.end_byte].strip()
+                return source[child.start_byte : child.end_byte].strip()
             if child.type == "fragment_name":
-                return source[child.start_byte:child.end_byte].strip() or None
+                return source[child.start_byte : child.end_byte].strip() or None
         return None
 
     def _walk(node) -> None:
@@ -5859,13 +6407,17 @@ def _parse_graphql_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             if not name and node.type == "operation_definition":
                 for child in node.children:
                     if child.type == "operation_type":
-                        name = source[child.start_byte:child.end_byte].strip()
+                        name = source[child.start_byte : child.end_byte].strip()
                         break
                 name = name or "anonymous"
             if not name and node.type == "schema_definition":
                 name = "schema"
             if name:
-                short = node.type.replace("_definition", "").replace("_extension", "").replace("_type", "")
+                short = (
+                    node.type.replace("_definition", "")
+                    .replace("_extension", "")
+                    .replace("_type", "")
+                )
                 sym = Symbol(
                     id=make_symbol_id(filename, name, kind),
                     file=filename,
@@ -5879,7 +6431,9 @@ def _parse_graphql_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                     end_line=node.end_point[0] + 1,
                     byte_offset=node.start_byte,
                     byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
+                    content_hash=compute_content_hash(
+                        source_bytes[node.start_byte : node.end_byte]
+                    ),
                 )
                 symbols.append(sym)
             return  # don't recurse into definitions
@@ -5908,7 +6462,9 @@ def _parse_css_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     symbols: list[Symbol] = []
 
     def _text(node) -> str:
-        return source_bytes[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
+        return source_bytes[node.start_byte : node.end_byte].decode(
+            "utf-8", errors="replace"
+        )
 
     def _selector_name(selectors_node) -> str:
         """Return a concise, stable selector string (≤80 chars)."""
@@ -5930,12 +6486,16 @@ def _parse_css_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             end_line=node.end_point[0] + 1,
             byte_offset=node.start_byte,
             byte_length=node.end_byte - node.start_byte,
-            content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
+            content_hash=compute_content_hash(
+                source_bytes[node.start_byte : node.end_byte]
+            ),
         )
 
     for node in tree.root_node.children:
         if node.type == "rule_set":
-            selectors_node = next((c for c in node.children if c.type == "selectors"), None)
+            selectors_node = next(
+                (c for c in node.children if c.type == "selectors"), None
+            )
             if selectors_node is None:
                 continue
             name = _selector_name(selectors_node)
@@ -5944,7 +6504,9 @@ def _parse_css_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             symbols.append(_make(name, "class", node, name))
 
         elif node.type == "keyframes_statement":
-            name_node = next((c for c in node.children if c.type == "keyframes_name"), None)
+            name_node = next(
+                (c for c in node.children if c.type == "keyframes_name"), None
+            )
             if name_node is None:
                 continue
             kf_name = _text(name_node).strip()
@@ -5996,33 +6558,45 @@ def _parse_json_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         key_node = next((c for c in pair.children if c.type == "string"), None)
         if key_node is None:
             continue
-        content_node = next((c for c in key_node.children if c.type == "string_content"), None)
+        content_node = next(
+            (c for c in key_node.children if c.type == "string_content"), None
+        )
         key_text = (
-            source_bytes[content_node.start_byte:content_node.end_byte].decode("utf-8", errors="replace")
+            source_bytes[content_node.start_byte : content_node.end_byte].decode(
+                "utf-8", errors="replace"
+            )
             if content_node is not None
-            else source_bytes[key_node.start_byte:key_node.end_byte].decode("utf-8", errors="replace").strip('"')
+            else source_bytes[key_node.start_byte : key_node.end_byte]
+            .decode("utf-8", errors="replace")
+            .strip('"')
         )
         if not key_text:
             continue
         # Build a brief signature: "key": <first-line-of-value>
-        val_src = source_bytes[pair.start_byte:pair.end_byte].decode("utf-8", errors="replace")
+        val_src = source_bytes[pair.start_byte : pair.end_byte].decode(
+            "utf-8", errors="replace"
+        )
         sig = " ".join(val_src.split())
         if len(sig) > 100:
             sig = sig[:97] + "..."
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, key_text, "constant"),
-            file=filename,
-            name=key_text,
-            qualified_name=key_text,
-            kind="constant",
-            language="json",
-            signature=sig,
-            line=pair.start_point[0] + 1,
-            end_line=pair.end_point[0] + 1,
-            byte_offset=pair.start_byte,
-            byte_length=pair.end_byte - pair.start_byte,
-            content_hash=compute_content_hash(source_bytes[pair.start_byte:pair.end_byte]),
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, key_text, "constant"),
+                file=filename,
+                name=key_text,
+                qualified_name=key_text,
+                kind="constant",
+                language="json",
+                signature=sig,
+                line=pair.start_point[0] + 1,
+                end_line=pair.end_point[0] + 1,
+                byte_offset=pair.start_byte,
+                byte_length=pair.end_byte - pair.start_byte,
+                content_hash=compute_content_hash(
+                    source_bytes[pair.start_byte : pair.end_byte]
+                ),
+            )
+        )
 
     return symbols
 
@@ -6046,7 +6620,9 @@ def _parse_scss_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     symbols: list[Symbol] = []
 
     def _text(node) -> str:
-        return source_bytes[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
+        return source_bytes[node.start_byte : node.end_byte].decode(
+            "utf-8", errors="replace"
+        )
 
     def _make(name: str, kind: str, node, signature: str) -> Symbol:
         return Symbol(
@@ -6061,7 +6637,9 @@ def _parse_scss_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             end_line=node.end_point[0] + 1,
             byte_offset=node.start_byte,
             byte_length=node.end_byte - node.start_byte,
-            content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
+            content_hash=compute_content_hash(
+                source_bytes[node.start_byte : node.end_byte]
+            ),
         )
 
     def _selector_name(selectors_node) -> str:
@@ -6085,7 +6663,9 @@ def _parse_scss_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             name_node = next((c for c in node.children if c.type == "identifier"), None)
             if name_node is not None:
                 mixin_name = _text(name_node)
-                params_node = next((c for c in node.children if c.type == "parameters"), None)
+                params_node = next(
+                    (c for c in node.children if c.type == "parameters"), None
+                )
                 sig = f"@mixin {mixin_name}"
                 if params_node is not None:
                     sig += _text(params_node)
@@ -6095,14 +6675,18 @@ def _parse_scss_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             name_node = next((c for c in node.children if c.type == "identifier"), None)
             if name_node is not None:
                 func_name = _text(name_node)
-                params_node = next((c for c in node.children if c.type == "parameters"), None)
+                params_node = next(
+                    (c for c in node.children if c.type == "parameters"), None
+                )
                 sig = f"@function {func_name}"
                 if params_node is not None:
                     sig += _text(params_node)
                 symbols.append(_make(f"@function {func_name}", "function", node, sig))
 
         elif node.type == "rule_set":
-            selectors_node = next((c for c in node.children if c.type == "selectors"), None)
+            selectors_node = next(
+                (c for c in node.children if c.type == "selectors"), None
+            )
             if selectors_node is not None:
                 name = _selector_name(selectors_node)
                 if name:
@@ -6147,9 +6731,9 @@ def _parse_julia_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                     if sub.type == "call_expression":
                         for inner in sub.children:
                             if inner.type == "identifier":
-                                return source[inner.start_byte:inner.end_byte]
+                                return source[inner.start_byte : inner.end_byte]
                     elif sub.type == "identifier":
-                        return source[sub.start_byte:sub.end_byte]
+                        return source[sub.start_byte : sub.end_byte]
         return None
 
     def _struct_name(node) -> Optional[str]:
@@ -6158,16 +6742,16 @@ def _parse_julia_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             if child.type == "type_head":
                 for sub in child.children:
                     if sub.type == "identifier":
-                        return source[sub.start_byte:sub.end_byte]
+                        return source[sub.start_byte : sub.end_byte]
             elif child.type == "identifier":
-                return source[child.start_byte:child.end_byte]
+                return source[child.start_byte : child.end_byte]
         return None
 
     def _direct_name(node) -> Optional[str]:
         """Return first identifier child text."""
         for child in node.children:
             if child.type == "identifier":
-                return source[child.start_byte:child.end_byte]
+                return source[child.start_byte : child.end_byte]
         return None
 
     def _walk(node, scope: str = "") -> None:
@@ -6199,13 +6783,20 @@ def _parse_julia_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                 qualified_name=qualified,
                 kind=kind,
                 language="julia",
-                signature=source[node.start_byte:node.start_byte + min(120, node.end_byte - node.start_byte)].split("\n")[0].strip(),
+                signature=source[
+                    node.start_byte : node.start_byte
+                    + min(120, node.end_byte - node.start_byte)
+                ]
+                .split("\n")[0]
+                .strip(),
                 docstring="",
                 line=node.start_point[0] + 1,
                 end_line=node.end_point[0] + 1,
                 byte_offset=node.start_byte,
                 byte_length=node.end_byte - node.start_byte,
-                content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
+                content_hash=compute_content_hash(
+                    source_bytes[node.start_byte : node.end_byte]
+                ),
             )
             symbols.append(sym)
             new_scope = qualified if node.type == "module_definition" else scope
@@ -6245,7 +6836,7 @@ def _parse_groovy_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     def _id_text(node) -> Optional[str]:
         """Return text if node is an identifier, else None."""
         if node.type == "identifier":
-            return source[node.start_byte:node.end_byte]
+            return source[node.start_byte : node.end_byte]
         return None
 
     def _first_id_in_unit(unit_node) -> Optional[str]:
@@ -6293,7 +6884,11 @@ def _parse_groovy_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
 
                 if class_name:
                     qualified = f"{scope}.{class_name}" if scope else class_name
-                    kind = "type" if first_kw in ("interface", "enum", "trait") else "class"
+                    kind = (
+                        "type"
+                        if first_kw in ("interface", "enum", "trait")
+                        else "class"
+                    )
                     sym = Symbol(
                         id=make_symbol_id(filename, qualified, kind),
                         file=filename,
@@ -6307,7 +6902,9 @@ def _parse_groovy_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                         end_line=node.end_point[0] + 1,
                         byte_offset=node.start_byte,
                         byte_length=node.end_byte - node.start_byte,
-                        content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
+                        content_hash=compute_content_hash(
+                            source_bytes[node.start_byte : node.end_byte]
+                        ),
                     )
                     symbols.append(sym)
                     # Recurse into class body
@@ -6328,7 +6925,10 @@ def _parse_groovy_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                     qualified = f"{scope}.{method_name}" if scope else method_name
                     kind = "method" if scope else "function"
                     # Build a readable signature from source
-                    raw = source[node.start_byte:node.start_byte + min(120, node.end_byte - node.start_byte)]
+                    raw = source[
+                        node.start_byte : node.start_byte
+                        + min(120, node.end_byte - node.start_byte)
+                    ]
                     sig = raw.split("{")[0].strip()
                     sym = Symbol(
                         id=make_symbol_id(filename, qualified, kind),
@@ -6343,7 +6943,9 @@ def _parse_groovy_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                         end_line=node.end_point[0] + 1,
                         byte_offset=node.start_byte,
                         byte_length=node.end_byte - node.start_byte,
-                        content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
+                        content_hash=compute_content_hash(
+                            source_bytes[node.start_byte : node.end_byte]
+                        ),
                     )
                     symbols.append(sym)
                     break
@@ -6378,28 +6980,40 @@ def _parse_autohotkey_symbols(source_bytes: bytes, filename: str) -> list[Symbol
 
     # class ClassName [extends Base] { optional comment
     CLASS_RE = re.compile(
-        r'^\s*class\s+([A-Za-z_]\w*)(?:\s+extends\s+([A-Za-z_]\w*))?\s*(\{)?\s*(?:;.*)?$',
+        r"^\s*class\s+([A-Za-z_]\w*)(?:\s+extends\s+([A-Za-z_]\w*))?\s*(\{)?\s*(?:;.*)?$",
         re.IGNORECASE,
     )
     # [static] FuncName(params) { or => (declaration, not a bare call)
     FUNC_RE = re.compile(
-        r'^(\s*)(static\s+)?([A-Za-z_]\w*)\s*\(([^)]*)\)\s*(?:=>|\{)',
+        r"^(\s*)(static\s+)?([A-Za-z_]\w*)\s*\(([^)]*)\)\s*(?:=>|\{)",
         re.IGNORECASE,
     )
     # Hotkey: Key:: or Key::Action (at top level, not indented inside a class)
     # Matches modifier combos like #n::, ^!Del::, F1::, ~RButton::RunScript()
     HOTKEY_RE = re.compile(
-        r'^([~*$!^#+<>*&\w]+::(?:[^{;\s][^;]*?)?)\s*(?:;.*)?$',
+        r"^([~*$!^#+<>*&\w]+::(?:[^{;\s][^;]*?)?)\s*(?:;.*)?$",
     )
     # #HotIf [expression]
     HOTIF_RE = re.compile(
-        r'^#HotIf(?:\s+(.+?))?\s*(?:;.*)?$',
+        r"^#HotIf(?:\s+(.+?))?\s*(?:;.*)?$",
         re.IGNORECASE,
     )
-    _KEYWORDS = frozenset({
-        "if", "while", "for", "loop", "catch", "switch", "try", "else",
-        "class", "return", "throw", "until",
-    })
+    _KEYWORDS = frozenset(
+        {
+            "if",
+            "while",
+            "for",
+            "loop",
+            "catch",
+            "switch",
+            "try",
+            "else",
+            "class",
+            "return",
+            "throw",
+            "until",
+        }
+    )
 
     depth = 0
     # Stack of (class_name, min_depth_inside_class)
@@ -6410,7 +7024,7 @@ def _parse_autohotkey_symbols(source_bytes: bytes, filename: str) -> list[Symbol
 
     for line_no, raw_line in enumerate(lines, start=1):
         # Strip inline ; comments for analysis (preserve original for nothing else)
-        stripped = re.sub(r'\s*;[^\n]*$', '', raw_line).rstrip()
+        stripped = re.sub(r"\s*;[^\n]*$", "", raw_line).rstrip()
         if not stripped.strip():
             continue
 
@@ -6573,7 +7187,7 @@ def _parse_xml_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             if child.type in ("STag", "EmptyElemTag"):
                 for sub in child.children:
                     if sub.type == "Name":
-                        return source[sub.start_byte:sub.end_byte]
+                        return source[sub.start_byte : sub.end_byte]
                 return None
         return None
 
@@ -6591,10 +7205,10 @@ def _parse_xml_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                         a_value = None
                         for sub in attr.children:
                             if sub.type == "Name":
-                                a_name = source[sub.start_byte:sub.end_byte]
+                                a_name = source[sub.start_byte : sub.end_byte]
                             elif sub.type == "AttValue":
                                 # AttValue includes surrounding quotes
-                                raw = source[sub.start_byte:sub.end_byte]
+                                raw = source[sub.start_byte : sub.end_byte]
                                 a_value = raw.strip('"').strip("'")
                         if a_name == attr_name and a_value is not None:
                             return a_value
@@ -6619,7 +7233,7 @@ def _parse_xml_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             # Walk prolog children in reverse to find trailing Comments
             for child in reversed(prev.children):
                 if child.type == "Comment":
-                    raw = source[child.start_byte:child.end_byte]
+                    raw = source[child.start_byte : child.end_byte]
                     if raw.startswith("<!--"):
                         raw = raw[4:]
                     if raw.endswith("-->"):
@@ -6632,7 +7246,7 @@ def _parse_xml_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             return "\n".join(lines) if lines else ""
 
         while prev and prev.type == "Comment":
-            raw = source[prev.start_byte:prev.end_byte]
+            raw = source[prev.start_byte : prev.end_byte]
             # Strip <!-- and --> delimiters
             if raw.startswith("<!--"):
                 raw = raw[4:]
@@ -6690,7 +7304,9 @@ def _parse_xml_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                     end_line=node.end_point[0] + 1,
                     byte_offset=node.start_byte,
                     byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
+                    content_hash=compute_content_hash(
+                        source_bytes[node.start_byte : node.end_byte]
+                    ),
                 )
                 symbols.append(sym)
 
@@ -6715,7 +7331,9 @@ def _parse_xml_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                         end_line=node.end_point[0] + 1,
                         byte_offset=node.start_byte,
                         byte_length=node.end_byte - node.start_byte,
-                        content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
+                        content_hash=compute_content_hash(
+                            source_bytes[node.start_byte : node.end_byte]
+                        ),
                     )
                     symbols.append(sym)
 
@@ -6725,7 +7343,15 @@ def _parse_xml_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             elem_name = _get_attr(node, "name")
             elem_key = _get_attr(node, "key")
             ident_attr, ident_val = next(
-                ((a, v) for a, v in (("id", elem_id), ("name", elem_name), ("key", elem_key)) if v),
+                (
+                    (a, v)
+                    for a, v in (
+                        ("id", elem_id),
+                        ("name", elem_name),
+                        ("key", elem_key),
+                    )
+                    if v
+                ),
                 (None, None),
             )
             if ident_val:
@@ -6745,7 +7371,9 @@ def _parse_xml_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                     end_line=node.end_point[0] + 1,
                     byte_offset=node.start_byte,
                     byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
+                    content_hash=compute_content_hash(
+                        source_bytes[node.start_byte : node.end_byte]
+                    ),
                 )
                 symbols.append(sym)
 
@@ -6760,6 +7388,7 @@ def _load_yaml_data(source: str):
     """Load YAML content, returning None on parser/import failure."""
     try:
         import yaml as _yaml
+
         docs = [doc for doc in _yaml.safe_load_all(source) if doc is not None]
         if not docs:
             return None
@@ -6820,22 +7449,24 @@ def _append_virtual_symbol(
     """Append a synthesized symbol backed by signature bytes."""
     payload = signature.encode("utf-8")
     symbol_id = make_symbol_id(filename, qualified_name, kind)
-    symbols.append(Symbol(
-        id=symbol_id,
-        file=filename,
-        name=name,
-        qualified_name=qualified_name,
-        kind=kind,
-        language=language,
-        signature=signature,
-        docstring=docstring,
-        parent=parent,
-        line=line,
-        end_line=line,
-        byte_offset=_byte_start(offsets, line),
-        byte_length=len(payload),
-        content_hash=compute_content_hash(payload),
-    ))
+    symbols.append(
+        Symbol(
+            id=symbol_id,
+            file=filename,
+            name=name,
+            qualified_name=qualified_name,
+            kind=kind,
+            language=language,
+            signature=signature,
+            docstring=docstring,
+            parent=parent,
+            line=line,
+            end_line=line,
+            byte_offset=_byte_start(offsets, line),
+            byte_length=len(payload),
+            content_hash=compute_content_hash(payload),
+        )
+    )
     return symbol_id
 
 
@@ -6864,7 +7495,9 @@ def _walk_yaml_value(
         cursor = after_line
         for key, child in value.items():
             key_name = str(key)
-            qualified_name = ".".join(path_parts + [key_name]) if path_parts else key_name
+            qualified_name = (
+                ".".join(path_parts + [key_name]) if path_parts else key_name
+            )
             line = _find_line(lines, f"{key_name}:", cursor - 1)
             next_cursor = line + 1
             cursor = next_cursor
@@ -6872,10 +7505,25 @@ def _walk_yaml_value(
                 kind = "type"
                 signature = f"{key_name}:"
                 _append_virtual_symbol(
-                    symbols, filename, language, key_name, qualified_name, kind, signature, line, offsets
+                    symbols,
+                    filename,
+                    language,
+                    key_name,
+                    qualified_name,
+                    kind,
+                    signature,
+                    line,
+                    offsets,
                 )
                 _walk_yaml_value(
-                    child, path_parts + [key_name], filename, language, symbols, lines, offsets, next_cursor
+                    child,
+                    path_parts + [key_name],
+                    filename,
+                    language,
+                    symbols,
+                    lines,
+                    offsets,
+                    next_cursor,
                 )
             else:
                 signature = _scalar_signature(key_name, child)
@@ -6903,7 +7551,14 @@ def _walk_yaml_value(
             cursor = next_cursor
             if isinstance(child, (dict, list)):
                 _walk_yaml_value(
-                    child, path_parts + [segment], filename, language, symbols, lines, offsets, next_cursor
+                    child,
+                    path_parts + [segment],
+                    filename,
+                    language,
+                    symbols,
+                    lines,
+                    offsets,
+                    next_cursor,
                 )
 
 
@@ -6919,7 +7574,9 @@ def _parse_yaml_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     if isinstance(data, list) and all(isinstance(item, dict) for item in data):
         cursor = 0
         for item in data:
-            _walk_yaml_value(item, [], filename, "yaml", symbols, lines, offsets, cursor)
+            _walk_yaml_value(
+                item, [], filename, "yaml", symbols, lines, offsets, cursor
+            )
             cursor += 1
         return symbols
     _walk_yaml_value(data, [], filename, "yaml", symbols, lines, offsets)
@@ -6929,7 +7586,8 @@ def _parse_yaml_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
 def _looks_like_ansible_play(item: object) -> bool:
     """Heuristic for Ansible playbook entries."""
     return isinstance(item, dict) and any(
-        key in item for key in ("hosts", "tasks", "handlers", "pre_tasks", "post_tasks", "roles")
+        key in item
+        for key in ("hosts", "tasks", "handlers", "pre_tasks", "post_tasks", "roles")
     )
 
 
@@ -6939,11 +7597,32 @@ def _ansible_task_name(task: dict, index: int) -> str:
     if isinstance(name, str) and name.strip():
         return name.strip()
     skip = {
-        "name", "when", "vars", "register", "tags", "loop", "with_items",
-        "delegate_to", "become", "become_user", "notify", "listen",
-        "environment", "args", "retries", "delay", "until", "changed_when",
-        "failed_when", "loop_control", "ignore_errors", "import_tasks",
-        "include_tasks", "block", "rescue", "always",
+        "name",
+        "when",
+        "vars",
+        "register",
+        "tags",
+        "loop",
+        "with_items",
+        "delegate_to",
+        "become",
+        "become_user",
+        "notify",
+        "listen",
+        "environment",
+        "args",
+        "retries",
+        "delay",
+        "until",
+        "changed_when",
+        "failed_when",
+        "loop_control",
+        "ignore_errors",
+        "import_tasks",
+        "include_tasks",
+        "block",
+        "rescue",
+        "always",
     }
     for key in task:
         if key not in skip:
@@ -7027,12 +7706,36 @@ def _append_ansible_vars(
             cursor = next_cursor
             if isinstance(child, dict):
                 _append_virtual_symbol(
-                    symbols, filename, "ansible", key_name, qualified_name, "type", f"{key_name}:", line, offsets
+                    symbols,
+                    filename,
+                    "ansible",
+                    key_name,
+                    qualified_name,
+                    "type",
+                    f"{key_name}:",
+                    line,
+                    offsets,
                 )
-                _append_ansible_vars(symbols, filename, offsets, lines, child, qualified_name, next_cursor)
+                _append_ansible_vars(
+                    symbols,
+                    filename,
+                    offsets,
+                    lines,
+                    child,
+                    qualified_name,
+                    next_cursor,
+                )
             elif isinstance(child, list):
                 _append_virtual_symbol(
-                    symbols, filename, "ansible", key_name, qualified_name, "type", f"{key_name}:", line, offsets
+                    symbols,
+                    filename,
+                    "ansible",
+                    key_name,
+                    qualified_name,
+                    "type",
+                    f"{key_name}:",
+                    line,
+                    offsets,
                 )
                 list_cursor = next_cursor
                 for idx, item in enumerate(child):
@@ -7043,7 +7746,13 @@ def _append_ansible_vars(
                             item_line = _find_line(lines, item["name"], list_cursor - 1)
                         item_cursor = item_line + 1
                         _append_ansible_vars(
-                            symbols, filename, offsets, lines, item, f"{qualified_name}.{segment}", item_cursor
+                            symbols,
+                            filename,
+                            offsets,
+                            lines,
+                            item,
+                            f"{qualified_name}.{segment}",
+                            item_cursor,
                         )
                         list_cursor = item_cursor
             else:
@@ -7071,7 +7780,10 @@ def _parse_ansible_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     lines, offsets = _build_line_offsets(source)
     symbols: list[Symbol] = []
 
-    is_var_file = any(marker in lower for marker in ("/group_vars/", "/host_vars/", "/vars/", "/defaults/"))
+    is_var_file = any(
+        marker in lower
+        for marker in ("/group_vars/", "/host_vars/", "/vars/", "/defaults/")
+    )
     is_task_file = any(marker in lower for marker in ("/tasks/", "/handlers/"))
 
     if isinstance(data, list) and any(_looks_like_ansible_play(item) for item in data):
@@ -7089,7 +7801,11 @@ def _parse_ansible_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             play_line = _find_line(lines, str(play_name), cursor - 1)
             cursor = play_line
             host_text = play.get("hosts")
-            docstring = f"hosts: {host_text}" if isinstance(host_text, str) and host_text.strip() else ""
+            docstring = (
+                f"hosts: {host_text}"
+                if isinstance(host_text, str) and host_text.strip()
+                else ""
+            )
             play_id = _append_virtual_symbol(
                 symbols,
                 filename,
@@ -7104,7 +7820,15 @@ def _parse_ansible_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             )
             for section in ("pre_tasks", "tasks", "post_tasks", "handlers"):
                 _append_ansible_tasks(
-                    symbols, filename, offsets, lines, section, play.get(section), str(play_name), play_id, play_line
+                    symbols,
+                    filename,
+                    offsets,
+                    lines,
+                    section,
+                    play.get(section),
+                    str(play_name),
+                    play_id,
+                    play_line,
                 )
             roles = play.get("roles")
             if isinstance(roles, list):
@@ -7130,7 +7854,9 @@ def _parse_ansible_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     if is_task_file and isinstance(data, list):
         section = "handlers" if "/handlers/" in lower else "tasks"
         scope_name = section.rstrip("s")
-        _append_ansible_tasks(symbols, filename, offsets, lines, section, data, scope_name, None, 1)
+        _append_ansible_tasks(
+            symbols, filename, offsets, lines, section, data, scope_name, None, 1
+        )
         return symbols
 
     if is_var_file and isinstance(data, dict):
@@ -7160,12 +7886,14 @@ def _parse_openapi_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     if is_json:
         try:
             import json as _json
+
             data = _json.loads(source)
         except Exception:
             return symbols
     else:
         try:
             import yaml as _yaml  # optional dep; degrades gracefully
+
             data = _yaml.safe_load(source)
         except Exception:
             return symbols
@@ -7309,7 +8037,7 @@ def _parse_asm_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     # Labels: "name:" at column 0 (no leading whitespace = global label)
     # Excludes anonymous labels (+, -, ++, etc.) and _prefixed local labels
     LABEL_RE = re.compile(
-        r'^([A-Za-z][A-Za-z0-9_.]*)\s*:',
+        r"^([A-Za-z][A-Za-z0-9_.]*)\s*:",
     )
 
     # Sections: .section "name" [type], .ramsection "name" [...]
@@ -7319,7 +8047,7 @@ def _parse_asm_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     )
     # NASM-style: section .text / section .data / section .bss
     NASM_SECTION_RE = re.compile(
-        r'^\s*section\s+(\.\w+)',
+        r"^\s*section\s+(\.\w+)",
         re.IGNORECASE,
     )
     # CA65-style: .segment "CODE"
@@ -7330,66 +8058,66 @@ def _parse_asm_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
 
     # Macros: .macro NAME, %macro NAME [nargs]
     MACRO_START_RE = re.compile(
-        r'^\s*[.%](?:macro|macrocall)\s+([A-Za-z_]\w*)',
+        r"^\s*[.%](?:macro|macrocall)\s+([A-Za-z_]\w*)",
         re.IGNORECASE,
     )
     MACRO_END_RE = re.compile(
-        r'^\s*[.%](?:endm|endmacro)\b',
+        r"^\s*[.%](?:endm|endmacro)\b",
         re.IGNORECASE,
     )
 
     # Constants: .define NAME value, .def NAME value
     WLADX_DEFINE_RE = re.compile(
-        r'^\s*\.(?:define|def)\s+([A-Za-z_][A-Za-z0-9_.]*)\s+(.*)',
+        r"^\s*\.(?:define|def)\s+([A-Za-z_][A-Za-z0-9_.]*)\s+(.*)",
         re.IGNORECASE,
     )
     # GAS style: .set NAME, value / .equ NAME, value
     GAS_CONST_RE = re.compile(
-        r'^\s*\.(?:set|equ)\s+([A-Za-z_]\w*)\s*,\s*(.*)',
+        r"^\s*\.(?:set|equ)\s+([A-Za-z_]\w*)\s*,\s*(.*)",
         re.IGNORECASE,
     )
     # NASM style: %define NAME value
     NASM_DEFINE_RE = re.compile(
-        r'^\s*%define\s+([A-Za-z_]\w*)\s*(.*)',
+        r"^\s*%define\s+([A-Za-z_]\w*)\s*(.*)",
         re.IGNORECASE,
     )
     # EQU constant: NAME equ VALUE or NAME = VALUE (may be indented)
     EQU_RE = re.compile(
-        r'^\s*([A-Za-z_][A-Za-z0-9_.]*)\s+(?:equ|EQU|=)\s+(.*)',
+        r"^\s*([A-Za-z_][A-Za-z0-9_.]*)\s+(?:equ|EQU|=)\s+(.*)",
     )
 
     # Structs: .struct NAME, .STRUCT NAME, struc NAME (NASM)
     STRUCT_START_RE = re.compile(
-        r'^\s*\.?(?:struct|struc)\s+([A-Za-z_]\w*)',
+        r"^\s*\.?(?:struct|struc)\s+([A-Za-z_]\w*)",
         re.IGNORECASE,
     )
     STRUCT_END_RE = re.compile(
-        r'^\s*\.?(?:endst|endstruc|ends)\b',
+        r"^\s*\.?(?:endst|endstruc|ends)\b",
         re.IGNORECASE,
     )
 
     # Enums: .enum [value] [export] (WLA-DX)
     ENUM_START_RE = re.compile(
-        r'^\s*\.enum\b',
+        r"^\s*\.enum\b",
         re.IGNORECASE,
     )
     ENUM_END_RE = re.compile(
-        r'^\s*\.ende\b',
+        r"^\s*\.ende\b",
         re.IGNORECASE,
     )
     # Enum member: NAME db/dw/ds/dsb/dsw (WLA-DX enum body syntax)
     ENUM_MEMBER_RE = re.compile(
-        r'^([A-Za-z_][A-Za-z0-9_.]*)\s+(?:db|dw|dl|ds|dsb|dsw)\b',
+        r"^([A-Za-z_][A-Za-z0-9_.]*)\s+(?:db|dw|dl|ds|dsb|dsw)\b",
     )
 
     # Procedures: .proc NAME (CA65 / WLA-DX)
     PROC_RE = re.compile(
-        r'^\s*\.proc\s+([A-Za-z_]\w*)',
+        r"^\s*\.proc\s+([A-Za-z_]\w*)",
         re.IGNORECASE,
     )
 
     # Comment line (for docstring extraction): ; or @ prefixed
-    COMMENT_RE = re.compile(r'^\s*[;@]\s?(.*)')
+    COMMENT_RE = re.compile(r"^\s*[;@]\s?(.*)")
 
     # --- State tracking ---
     current_section: Optional[str] = None
@@ -7564,7 +8292,7 @@ def _parse_asm_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             continue
 
         # --- Section end (.ends) resets section context ---
-        if re.match(r'^\s*\.ends\b', line, re.IGNORECASE):
+        if re.match(r"^\s*\.ends\b", line, re.IGNORECASE):
             current_section = None
             current_section_id = None
             pending_comments.clear()
@@ -7609,7 +8337,9 @@ def _parse_asm_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                 qualified_name=const_name,
                 kind="constant",
                 language="asm",
-                signature=f"{const_name} = {const_value}" if const_value else const_name,
+                signature=f"{const_name} = {const_value}"
+                if const_value
+                else const_name,
                 docstring=docstring,
                 line=line_no,
                 end_line=line_no,
@@ -7629,7 +8359,9 @@ def _parse_asm_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                 qualified_name=const_name,
                 kind="constant",
                 language="asm",
-                signature=f"{const_name} = {const_value}" if const_value else const_name,
+                signature=f"{const_name} = {const_value}"
+                if const_value
+                else const_name,
                 docstring=docstring,
                 line=line_no,
                 end_line=line_no,
@@ -7673,9 +8405,7 @@ def _parse_asm_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
 # VHDL
 # ---------------------------------------------------------------------------
 
-_VHDL_ENTITY = _re.compile(
-    r"^\s*entity\s+(\w+)\s+is\b", _re.IGNORECASE | _re.MULTILINE
-)
+_VHDL_ENTITY = _re.compile(r"^\s*entity\s+(\w+)\s+is\b", _re.IGNORECASE | _re.MULTILINE)
 _VHDL_ARCHITECTURE = _re.compile(
     r"^\s*architecture\s+(\w+)\s+of\s+(\w+)\s+is\b", _re.IGNORECASE | _re.MULTILINE
 )
@@ -7688,15 +8418,11 @@ _VHDL_PROCESS = _re.compile(
 _VHDL_FUNCTION = _re.compile(
     r"^\s*(?:(?:pure|impure)\s+)?function\s+(\w+)", _re.IGNORECASE | _re.MULTILINE
 )
-_VHDL_PROCEDURE = _re.compile(
-    r"^\s*procedure\s+(\w+)", _re.IGNORECASE | _re.MULTILINE
-)
+_VHDL_PROCEDURE = _re.compile(r"^\s*procedure\s+(\w+)", _re.IGNORECASE | _re.MULTILINE)
 _VHDL_COMPONENT = _re.compile(
     r"^\s*component\s+(\w+)\b", _re.IGNORECASE | _re.MULTILINE
 )
-_VHDL_SIGNAL = _re.compile(
-    r"^\s*signal\s+(\w+)\s*:", _re.IGNORECASE | _re.MULTILINE
-)
+_VHDL_SIGNAL = _re.compile(r"^\s*signal\s+(\w+)\s*:", _re.IGNORECASE | _re.MULTILINE)
 _VHDL_CONSTANT = _re.compile(
     r"^\s*constant\s+(\w+)\s*:", _re.IGNORECASE | _re.MULTILINE
 )
@@ -7716,113 +8442,183 @@ def _parse_vhdl_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     for m in _VHDL_ENTITY.finditer(source):
         name = m.group(1)
         ln = _line_of(m.start())
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, name, "class"),
-            file=filename, name=name, qualified_name=name,
-            kind="class", language="vhdl",
-            signature=f"entity {name}",
-            docstring="", line=ln, end_line=ln,
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, name, "class"),
+                file=filename,
+                name=name,
+                qualified_name=name,
+                kind="class",
+                language="vhdl",
+                signature=f"entity {name}",
+                docstring="",
+                line=ln,
+                end_line=ln,
+            )
+        )
 
     for m in _VHDL_ARCHITECTURE.finditer(source):
         arch_name, entity_name = m.group(1), m.group(2)
         qualified = f"{entity_name}.{arch_name}"
         ln = _line_of(m.start())
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, qualified, "class"),
-            file=filename, name=arch_name, qualified_name=qualified,
-            kind="class", language="vhdl",
-            signature=f"architecture {arch_name} of {entity_name}",
-            docstring="", line=ln, end_line=ln,
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, qualified, "class"),
+                file=filename,
+                name=arch_name,
+                qualified_name=qualified,
+                kind="class",
+                language="vhdl",
+                signature=f"architecture {arch_name} of {entity_name}",
+                docstring="",
+                line=ln,
+                end_line=ln,
+            )
+        )
 
     for m in _VHDL_PACKAGE.finditer(source):
         name = m.group(1)
         ln = _line_of(m.start())
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, name, "class"),
-            file=filename, name=name, qualified_name=name,
-            kind="class", language="vhdl",
-            signature=f"package {name}",
-            docstring="", line=ln, end_line=ln,
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, name, "class"),
+                file=filename,
+                name=name,
+                qualified_name=name,
+                kind="class",
+                language="vhdl",
+                signature=f"package {name}",
+                docstring="",
+                line=ln,
+                end_line=ln,
+            )
+        )
 
     for m in _VHDL_PROCESS.finditer(source):
         name = m.group(1)
         ln = _line_of(m.start())
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, name, "function"),
-            file=filename, name=name, qualified_name=name,
-            kind="function", language="vhdl",
-            signature=f"{name}: process",
-            docstring="", line=ln, end_line=ln,
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, name, "function"),
+                file=filename,
+                name=name,
+                qualified_name=name,
+                kind="function",
+                language="vhdl",
+                signature=f"{name}: process",
+                docstring="",
+                line=ln,
+                end_line=ln,
+            )
+        )
 
     for m in _VHDL_FUNCTION.finditer(source):
         name = m.group(1)
         ln = _line_of(m.start())
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, name, "function"),
-            file=filename, name=name, qualified_name=name,
-            kind="function", language="vhdl",
-            signature=f"function {name}",
-            docstring="", line=ln, end_line=ln,
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, name, "function"),
+                file=filename,
+                name=name,
+                qualified_name=name,
+                kind="function",
+                language="vhdl",
+                signature=f"function {name}",
+                docstring="",
+                line=ln,
+                end_line=ln,
+            )
+        )
 
     for m in _VHDL_PROCEDURE.finditer(source):
         name = m.group(1)
         ln = _line_of(m.start())
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, name, "function"),
-            file=filename, name=name, qualified_name=name,
-            kind="function", language="vhdl",
-            signature=f"procedure {name}",
-            docstring="", line=ln, end_line=ln,
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, name, "function"),
+                file=filename,
+                name=name,
+                qualified_name=name,
+                kind="function",
+                language="vhdl",
+                signature=f"procedure {name}",
+                docstring="",
+                line=ln,
+                end_line=ln,
+            )
+        )
 
     for m in _VHDL_COMPONENT.finditer(source):
         name = m.group(1)
         ln = _line_of(m.start())
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, name, "type"),
-            file=filename, name=name, qualified_name=name,
-            kind="type", language="vhdl",
-            signature=f"component {name}",
-            docstring="", line=ln, end_line=ln,
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, name, "type"),
+                file=filename,
+                name=name,
+                qualified_name=name,
+                kind="type",
+                language="vhdl",
+                signature=f"component {name}",
+                docstring="",
+                line=ln,
+                end_line=ln,
+            )
+        )
 
     for m in _VHDL_SIGNAL.finditer(source):
         name = m.group(1)
         ln = _line_of(m.start())
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, name, "constant"),
-            file=filename, name=name, qualified_name=name,
-            kind="constant", language="vhdl",
-            signature=f"signal {name}",
-            docstring="", line=ln, end_line=ln,
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, name, "constant"),
+                file=filename,
+                name=name,
+                qualified_name=name,
+                kind="constant",
+                language="vhdl",
+                signature=f"signal {name}",
+                docstring="",
+                line=ln,
+                end_line=ln,
+            )
+        )
 
     for m in _VHDL_CONSTANT.finditer(source):
         name = m.group(1)
         ln = _line_of(m.start())
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, name, "constant"),
-            file=filename, name=name, qualified_name=name,
-            kind="constant", language="vhdl",
-            signature=f"constant {name}",
-            docstring="", line=ln, end_line=ln,
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, name, "constant"),
+                file=filename,
+                name=name,
+                qualified_name=name,
+                kind="constant",
+                language="vhdl",
+                signature=f"constant {name}",
+                docstring="",
+                line=ln,
+                end_line=ln,
+            )
+        )
 
     for m in _VHDL_TYPE.finditer(source):
         name = m.group(1)
         ln = _line_of(m.start())
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, name, "type"),
-            file=filename, name=name, qualified_name=name,
-            kind="type", language="vhdl",
-            signature=f"type {name}",
-            docstring="", line=ln, end_line=ln,
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, name, "type"),
+                file=filename,
+                name=name,
+                qualified_name=name,
+                kind="type",
+                language="vhdl",
+                signature=f"type {name}",
+                docstring="",
+                line=ln,
+                end_line=ln,
+            )
+        )
 
     symbols.sort(key=lambda s: s.line)
     return symbols
@@ -7832,15 +8628,9 @@ def _parse_vhdl_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
 # Verilog / SystemVerilog
 # ---------------------------------------------------------------------------
 
-_VERILOG_MODULE = _re.compile(
-    r"^\s*module\s+(\w+)", _re.MULTILINE
-)
-_VERILOG_INTERFACE = _re.compile(
-    r"^\s*interface\s+(\w+)", _re.MULTILINE
-)
-_VERILOG_CLASS = _re.compile(
-    r"^\s*(?:virtual\s+)?class\s+(\w+)", _re.MULTILINE
-)
+_VERILOG_MODULE = _re.compile(r"^\s*module\s+(\w+)", _re.MULTILINE)
+_VERILOG_INTERFACE = _re.compile(r"^\s*interface\s+(\w+)", _re.MULTILINE)
+_VERILOG_CLASS = _re.compile(r"^\s*(?:virtual\s+)?class\s+(\w+)", _re.MULTILINE)
 _VERILOG_FUNCTION = _re.compile(
     r"^\s*(?:(?:static|virtual|protected|local)\s+)*function\s+(?:(?:automatic|static)\s+)?(?:(?:void|[\w]+(?:\s*\[[^\]]*\])?)\s+)?(\w+)\s*[;(]",
     _re.MULTILINE,
@@ -7849,9 +8639,7 @@ _VERILOG_TASK = _re.compile(
     r"^\s*(?:(?:static|virtual|protected|local)\s+)*task\s+(?:(?:automatic|static)\s+)?(\w+)\s*[;(]",
     _re.MULTILINE,
 )
-_VERILOG_PACKAGE = _re.compile(
-    r"^\s*package\s+(\w+)\s*;", _re.MULTILINE
-)
+_VERILOG_PACKAGE = _re.compile(r"^\s*package\s+(\w+)\s*;", _re.MULTILINE)
 _VERILOG_TYPEDEF = _re.compile(
     r"^\s*typedef\s+(?:(?:enum|struct|union)\b[^{;]*)?(?:\{[^}]*\}\s*)?(\w+)\s*;",
     _re.MULTILINE | _re.DOTALL,
@@ -7864,9 +8652,7 @@ _VERILOG_PARAM = _re.compile(
     r"^\s*(?:localparam|parameter)\s+(?:\w+\s+)?(\w+)\s*=",
     _re.MULTILINE,
 )
-_VERILOG_DEFINE = _re.compile(
-    r"^\s*`define\s+(\w+)", _re.MULTILINE
-)
+_VERILOG_DEFINE = _re.compile(r"^\s*`define\s+(\w+)", _re.MULTILINE)
 
 
 def _parse_verilog_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
@@ -7880,81 +8666,130 @@ def _parse_verilog_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     for m in _VERILOG_MODULE.finditer(source):
         name = m.group(1)
         ln = _line_of(m.start())
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, name, "class"),
-            file=filename, name=name, qualified_name=name,
-            kind="class", language="verilog",
-            signature=f"module {name}",
-            docstring="", line=ln, end_line=ln,
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, name, "class"),
+                file=filename,
+                name=name,
+                qualified_name=name,
+                kind="class",
+                language="verilog",
+                signature=f"module {name}",
+                docstring="",
+                line=ln,
+                end_line=ln,
+            )
+        )
 
     for m in _VERILOG_INTERFACE.finditer(source):
         name = m.group(1)
         ln = _line_of(m.start())
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, name, "class"),
-            file=filename, name=name, qualified_name=name,
-            kind="class", language="verilog",
-            signature=f"interface {name}",
-            docstring="", line=ln, end_line=ln,
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, name, "class"),
+                file=filename,
+                name=name,
+                qualified_name=name,
+                kind="class",
+                language="verilog",
+                signature=f"interface {name}",
+                docstring="",
+                line=ln,
+                end_line=ln,
+            )
+        )
 
     for m in _VERILOG_CLASS.finditer(source):
         name = m.group(1)
         ln = _line_of(m.start())
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, name, "class"),
-            file=filename, name=name, qualified_name=name,
-            kind="class", language="verilog",
-            signature=f"class {name}",
-            docstring="", line=ln, end_line=ln,
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, name, "class"),
+                file=filename,
+                name=name,
+                qualified_name=name,
+                kind="class",
+                language="verilog",
+                signature=f"class {name}",
+                docstring="",
+                line=ln,
+                end_line=ln,
+            )
+        )
 
     for m in _VERILOG_FUNCTION.finditer(source):
         name = m.group(1)
         ln = _line_of(m.start())
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, name, "function"),
-            file=filename, name=name, qualified_name=name,
-            kind="function", language="verilog",
-            signature=f"function {name}",
-            docstring="", line=ln, end_line=ln,
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, name, "function"),
+                file=filename,
+                name=name,
+                qualified_name=name,
+                kind="function",
+                language="verilog",
+                signature=f"function {name}",
+                docstring="",
+                line=ln,
+                end_line=ln,
+            )
+        )
 
     for m in _VERILOG_TASK.finditer(source):
         name = m.group(1)
         ln = _line_of(m.start())
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, name, "function"),
-            file=filename, name=name, qualified_name=name,
-            kind="function", language="verilog",
-            signature=f"task {name}",
-            docstring="", line=ln, end_line=ln,
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, name, "function"),
+                file=filename,
+                name=name,
+                qualified_name=name,
+                kind="function",
+                language="verilog",
+                signature=f"task {name}",
+                docstring="",
+                line=ln,
+                end_line=ln,
+            )
+        )
 
     for m in _VERILOG_PACKAGE.finditer(source):
         name = m.group(1)
         ln = _line_of(m.start())
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, name, "class"),
-            file=filename, name=name, qualified_name=name,
-            kind="class", language="verilog",
-            signature=f"package {name}",
-            docstring="", line=ln, end_line=ln,
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, name, "class"),
+                file=filename,
+                name=name,
+                qualified_name=name,
+                kind="class",
+                language="verilog",
+                signature=f"package {name}",
+                docstring="",
+                line=ln,
+                end_line=ln,
+            )
+        )
 
     typedef_names: set[str] = set()
     for m in _VERILOG_TYPEDEF.finditer(source):
         name = m.group(1)
         typedef_names.add(name)
         ln = _line_of(m.start())
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, name, "type"),
-            file=filename, name=name, qualified_name=name,
-            kind="type", language="verilog",
-            signature=f"typedef {name}",
-            docstring="", line=ln, end_line=ln,
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, name, "type"),
+                file=filename,
+                name=name,
+                qualified_name=name,
+                kind="type",
+                language="verilog",
+                signature=f"typedef {name}",
+                docstring="",
+                line=ln,
+                end_line=ln,
+            )
+        )
 
     # Fallback for simple typedefs: typedef logic [7:0] byte_t;
     for m in _VERILOG_TYPEDEF_SIMPLE.finditer(source):
@@ -7962,35 +8797,56 @@ def _parse_verilog_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         if name not in typedef_names:
             typedef_names.add(name)
             ln = _line_of(m.start())
-            symbols.append(Symbol(
-                id=make_symbol_id(filename, name, "type"),
-                file=filename, name=name, qualified_name=name,
-                kind="type", language="verilog",
-                signature=f"typedef {name}",
-                docstring="", line=ln, end_line=ln,
-            ))
+            symbols.append(
+                Symbol(
+                    id=make_symbol_id(filename, name, "type"),
+                    file=filename,
+                    name=name,
+                    qualified_name=name,
+                    kind="type",
+                    language="verilog",
+                    signature=f"typedef {name}",
+                    docstring="",
+                    line=ln,
+                    end_line=ln,
+                )
+            )
 
     for m in _VERILOG_PARAM.finditer(source):
         name = m.group(1)
         ln = _line_of(m.start())
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, name, "constant"),
-            file=filename, name=name, qualified_name=name,
-            kind="constant", language="verilog",
-            signature=f"parameter {name}",
-            docstring="", line=ln, end_line=ln,
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, name, "constant"),
+                file=filename,
+                name=name,
+                qualified_name=name,
+                kind="constant",
+                language="verilog",
+                signature=f"parameter {name}",
+                docstring="",
+                line=ln,
+                end_line=ln,
+            )
+        )
 
     for m in _VERILOG_DEFINE.finditer(source):
         name = m.group(1)
         ln = _line_of(m.start())
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, name, "constant"),
-            file=filename, name=name, qualified_name=name,
-            kind="constant", language="verilog",
-            signature=f"`define {name}",
-            docstring="", line=ln, end_line=ln,
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, name, "constant"),
+                file=filename,
+                name=name,
+                qualified_name=name,
+                kind="constant",
+                language="verilog",
+                signature=f"`define {name}",
+                docstring="",
+                line=ln,
+                end_line=ln,
+            )
+        )
 
     symbols.sort(key=lambda s: s.line)
     return symbols
@@ -7999,6 +8855,7 @@ def _parse_verilog_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
 # ---------------------------------------------------------------------------
 # Pascal / Delphi / Object Pascal
 # ---------------------------------------------------------------------------
+
 
 def _parse_pascal_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     """Parse Pascal/Delphi source and extract procedures, functions, types, and constants.
@@ -8018,7 +8875,7 @@ def _parse_pascal_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     symbols: list[Symbol] = []
 
     def _text(node) -> str:
-        return source[node.start_byte:node.end_byte]
+        return source[node.start_byte : node.end_byte]
 
     def _first_child_of_type(node, *types) -> "Optional[Any]":
         for child in node.children:
@@ -8035,18 +8892,25 @@ def _parse_pascal_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                     name = _text(ident)
                     qualified = f"{scope}.{name}" if scope else name
                     sig = _text(decl).split(";")[0].strip()
-                    symbols.append(Symbol(
-                        id=make_symbol_id(filename, qualified, "function"),
-                        file=filename, name=name, qualified_name=qualified,
-                        kind="function", language="pascal",
-                        signature=sig[:120],
-                        docstring="",
-                        line=node.start_point[0] + 1,
-                        end_line=node.end_point[0] + 1,
-                        byte_offset=node.start_byte,
-                        byte_length=node.end_byte - node.start_byte,
-                        content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                    ))
+                    symbols.append(
+                        Symbol(
+                            id=make_symbol_id(filename, qualified, "function"),
+                            file=filename,
+                            name=name,
+                            qualified_name=qualified,
+                            kind="function",
+                            language="pascal",
+                            signature=sig[:120],
+                            docstring="",
+                            line=node.start_point[0] + 1,
+                            end_line=node.end_point[0] + 1,
+                            byte_offset=node.start_byte,
+                            byte_length=node.end_byte - node.start_byte,
+                            content_hash=compute_content_hash(
+                                source_bytes[node.start_byte : node.end_byte]
+                            ),
+                        )
+                    )
         elif node.type == "declType":
             ident = _first_child_of_type(node, "identifier")
             cls = _first_child_of_type(node, "declClass", "declRecord")
@@ -8054,18 +8918,25 @@ def _parse_pascal_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                 name = _text(ident)
                 kind = "class" if cls and cls.type == "declClass" else "type"
                 qualified = f"{scope}.{name}" if scope else name
-                symbols.append(Symbol(
-                    id=make_symbol_id(filename, qualified, kind),
-                    file=filename, name=name, qualified_name=qualified,
-                    kind=kind, language="pascal",
-                    signature=f"type {name}",
-                    docstring="",
-                    line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                    byte_offset=node.start_byte,
-                    byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                ))
+                symbols.append(
+                    Symbol(
+                        id=make_symbol_id(filename, qualified, kind),
+                        file=filename,
+                        name=name,
+                        qualified_name=qualified,
+                        kind=kind,
+                        language="pascal",
+                        signature=f"type {name}",
+                        docstring="",
+                        line=node.start_point[0] + 1,
+                        end_line=node.end_point[0] + 1,
+                        byte_offset=node.start_byte,
+                        byte_length=node.end_byte - node.start_byte,
+                        content_hash=compute_content_hash(
+                            source_bytes[node.start_byte : node.end_byte]
+                        ),
+                    )
+                )
                 # Walk inside class declarations for methods
                 if cls:
                     for child in cls.children:
@@ -8075,15 +8946,20 @@ def _parse_pascal_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             ident = _first_child_of_type(node, "identifier")
             if ident:
                 name = _text(ident)
-                symbols.append(Symbol(
-                    id=make_symbol_id(filename, name, "constant"),
-                    file=filename, name=name, qualified_name=name,
-                    kind="constant", language="pascal",
-                    signature=_text(node).split(";")[0].strip()[:120],
-                    docstring="",
-                    line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                ))
+                symbols.append(
+                    Symbol(
+                        id=make_symbol_id(filename, name, "constant"),
+                        file=filename,
+                        name=name,
+                        qualified_name=name,
+                        kind="constant",
+                        language="pascal",
+                        signature=_text(node).split(";")[0].strip()[:120],
+                        docstring="",
+                        line=node.start_point[0] + 1,
+                        end_line=node.end_point[0] + 1,
+                    )
+                )
 
         for child in node.children:
             _walk(child, scope)
@@ -8095,6 +8971,7 @@ def _parse_pascal_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
 # ---------------------------------------------------------------------------
 # MATLAB / Octave
 # ---------------------------------------------------------------------------
+
 
 def _parse_matlab_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     """Parse MATLAB source and extract functions, classes, and methods.
@@ -8115,7 +8992,7 @@ def _parse_matlab_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     symbols: list[Symbol] = []
 
     def _text(node) -> str:
-        return source[node.start_byte:node.end_byte]
+        return source[node.start_byte : node.end_byte]
 
     def _first_child_of_type(node, *types):
         for child in node.children:
@@ -8138,35 +9015,49 @@ def _parse_matlab_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                 if args:
                     sig_parts.append(_text(args))
                 kind = "method" if scope else "function"
-                symbols.append(Symbol(
-                    id=make_symbol_id(filename, qualified, kind),
-                    file=filename, name=name, qualified_name=qualified,
-                    kind=kind, language="matlab",
-                    signature=" ".join(sig_parts)[:120],
-                    docstring="",
-                    line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                    byte_offset=node.start_byte,
-                    byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                ))
+                symbols.append(
+                    Symbol(
+                        id=make_symbol_id(filename, qualified, kind),
+                        file=filename,
+                        name=name,
+                        qualified_name=qualified,
+                        kind=kind,
+                        language="matlab",
+                        signature=" ".join(sig_parts)[:120],
+                        docstring="",
+                        line=node.start_point[0] + 1,
+                        end_line=node.end_point[0] + 1,
+                        byte_offset=node.start_byte,
+                        byte_length=node.end_byte - node.start_byte,
+                        content_hash=compute_content_hash(
+                            source_bytes[node.start_byte : node.end_byte]
+                        ),
+                    )
+                )
                 return  # Don't recurse into nested functions
         elif node.type == "class_definition":
             ident = _first_child_of_type(node, "identifier")
             if ident:
                 name = _text(ident)
-                symbols.append(Symbol(
-                    id=make_symbol_id(filename, name, "class"),
-                    file=filename, name=name, qualified_name=name,
-                    kind="class", language="matlab",
-                    signature=f"classdef {name}",
-                    docstring="",
-                    line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                    byte_offset=node.start_byte,
-                    byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                ))
+                symbols.append(
+                    Symbol(
+                        id=make_symbol_id(filename, name, "class"),
+                        file=filename,
+                        name=name,
+                        qualified_name=name,
+                        kind="class",
+                        language="matlab",
+                        signature=f"classdef {name}",
+                        docstring="",
+                        line=node.start_point[0] + 1,
+                        end_line=node.end_point[0] + 1,
+                        byte_offset=node.start_byte,
+                        byte_length=node.end_byte - node.start_byte,
+                        content_hash=compute_content_hash(
+                            source_bytes[node.start_byte : node.end_byte]
+                        ),
+                    )
+                )
                 for child in node.children:
                     _walk(child, name)
                 return
@@ -8181,6 +9072,7 @@ def _parse_matlab_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
 # ---------------------------------------------------------------------------
 # Ada
 # ---------------------------------------------------------------------------
+
 
 def _parse_ada_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     """Parse Ada source and extract subprograms, packages, types, and constants.
@@ -8201,7 +9093,7 @@ def _parse_ada_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     symbols: list[Symbol] = []
 
     def _text(node) -> str:
-        return source[node.start_byte:node.end_byte]
+        return source[node.start_byte : node.end_byte]
 
     def _first_child_of_type(node, *types):
         for child in node.children:
@@ -8215,7 +9107,9 @@ def _parse_ada_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         sig = ""
 
         if node.type == "subprogram_body":
-            spec = _first_child_of_type(node, "function_specification", "procedure_specification")
+            spec = _first_child_of_type(
+                node, "function_specification", "procedure_specification"
+            )
             if spec:
                 ident = _first_child_of_type(spec, "identifier")
                 if ident:
@@ -8245,18 +9139,25 @@ def _parse_ada_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
 
         if name and kind:
             qualified = f"{scope}::{name}" if scope else name
-            symbols.append(Symbol(
-                id=make_symbol_id(filename, qualified, kind),
-                file=filename, name=name, qualified_name=qualified,
-                kind=kind, language="ada",
-                signature=sig,
-                docstring="",
-                line=node.start_point[0] + 1,
-                end_line=node.end_point[0] + 1,
-                byte_offset=node.start_byte,
-                byte_length=node.end_byte - node.start_byte,
-                content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-            ))
+            symbols.append(
+                Symbol(
+                    id=make_symbol_id(filename, qualified, kind),
+                    file=filename,
+                    name=name,
+                    qualified_name=qualified,
+                    kind=kind,
+                    language="ada",
+                    signature=sig,
+                    docstring="",
+                    line=node.start_point[0] + 1,
+                    end_line=node.end_point[0] + 1,
+                    byte_offset=node.start_byte,
+                    byte_length=node.end_byte - node.start_byte,
+                    content_hash=compute_content_hash(
+                        source_bytes[node.start_byte : node.end_byte]
+                    ),
+                )
+            )
             new_scope = qualified if kind == "class" else scope
             for child in node.children:
                 _walk(child, new_scope)
@@ -8273,18 +9174,12 @@ def _parse_ada_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
 # COBOL
 # ---------------------------------------------------------------------------
 
-_COBOL_PARAGRAPH = re.compile(
-    r"^       (\S[\w-]+)\.\s*$", re.MULTILINE
-)
+_COBOL_PARAGRAPH = re.compile(r"^       (\S[\w-]+)\.\s*$", re.MULTILINE)
 _COBOL_SECTION = re.compile(
     r"^       (\S[\w-]+)\s+SECTION\.\s*$", re.MULTILINE | re.IGNORECASE
 )
-_COBOL_PROGRAM_ID = re.compile(
-    r"PROGRAM-ID\.\s+(\S+)", re.IGNORECASE
-)
-_COBOL_DATA_ITEM = re.compile(
-    r"^       01\s+(\S+)\s", re.MULTILINE
-)
+_COBOL_PROGRAM_ID = re.compile(r"PROGRAM-ID\.\s+(\S+)", re.IGNORECASE)
+_COBOL_DATA_ITEM = re.compile(r"^       01\s+(\S+)\s", re.MULTILINE)
 
 
 def _parse_cobol_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
@@ -8304,46 +9199,82 @@ def _parse_cobol_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     if m:
         name = m.group(1).rstrip(".")
         ln = _line_of(m.start())
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, name, "class"),
-            file=filename, name=name, qualified_name=name,
-            kind="class", language="cobol",
-            signature=f"PROGRAM-ID. {name}",
-            docstring="", line=ln, end_line=ln,
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, name, "class"),
+                file=filename,
+                name=name,
+                qualified_name=name,
+                kind="class",
+                language="cobol",
+                signature=f"PROGRAM-ID. {name}",
+                docstring="",
+                line=ln,
+                end_line=ln,
+            )
+        )
 
     # Sections
     for m in _COBOL_SECTION.finditer(source):
         name = m.group(1)
         ln = _line_of(m.start())
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, name, "function"),
-            file=filename, name=name, qualified_name=name,
-            kind="function", language="cobol",
-            signature=f"{name} SECTION.",
-            docstring="", line=ln, end_line=ln,
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, name, "function"),
+                file=filename,
+                name=name,
+                qualified_name=name,
+                kind="function",
+                language="cobol",
+                signature=f"{name} SECTION.",
+                docstring="",
+                line=ln,
+                end_line=ln,
+            )
+        )
 
     # Paragraphs (but skip division/section headers and reserved words)
-    _COBOL_RESERVED = frozenset({
-        "IDENTIFICATION", "ENVIRONMENT", "DATA", "PROCEDURE",
-        "WORKING-STORAGE", "LINKAGE", "FILE", "SCREEN",
-        "INPUT-OUTPUT", "CONFIGURATION", "LOCAL-STORAGE",
-    })
+    _COBOL_RESERVED = frozenset(
+        {
+            "IDENTIFICATION",
+            "ENVIRONMENT",
+            "DATA",
+            "PROCEDURE",
+            "WORKING-STORAGE",
+            "LINKAGE",
+            "FILE",
+            "SCREEN",
+            "INPUT-OUTPUT",
+            "CONFIGURATION",
+            "LOCAL-STORAGE",
+        }
+    )
     section_names = {m.group(1).upper() for m in _COBOL_SECTION.finditer(source)}
     for m in _COBOL_PARAGRAPH.finditer(source):
         name = m.group(1)
         upper = name.upper()
-        if upper in _COBOL_RESERVED or upper.endswith("DIVISION") or upper.endswith("SECTION") or upper in section_names:
+        if (
+            upper in _COBOL_RESERVED
+            or upper.endswith("DIVISION")
+            or upper.endswith("SECTION")
+            or upper in section_names
+        ):
             continue
         ln = _line_of(m.start())
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, name, "function"),
-            file=filename, name=name, qualified_name=name,
-            kind="function", language="cobol",
-            signature=f"{name}.",
-            docstring="", line=ln, end_line=ln,
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, name, "function"),
+                file=filename,
+                name=name,
+                qualified_name=name,
+                kind="function",
+                language="cobol",
+                signature=f"{name}.",
+                docstring="",
+                line=ln,
+                end_line=ln,
+            )
+        )
 
     # 01-level data items
     for m in _COBOL_DATA_ITEM.finditer(source):
@@ -8351,13 +9282,20 @@ def _parse_cobol_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         if name.upper() == "FILLER":
             continue
         ln = _line_of(m.start())
-        symbols.append(Symbol(
-            id=make_symbol_id(filename, name, "constant"),
-            file=filename, name=name, qualified_name=name,
-            kind="constant", language="cobol",
-            signature=f"01 {name}",
-            docstring="", line=ln, end_line=ln,
-        ))
+        symbols.append(
+            Symbol(
+                id=make_symbol_id(filename, name, "constant"),
+                file=filename,
+                name=name,
+                qualified_name=name,
+                kind="constant",
+                language="cobol",
+                signature=f"01 {name}",
+                docstring="",
+                line=ln,
+                end_line=ln,
+            )
+        )
 
     symbols.sort(key=lambda s: s.line)
     return symbols
@@ -8366,6 +9304,7 @@ def _parse_cobol_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
 # ---------------------------------------------------------------------------
 # Common Lisp
 # ---------------------------------------------------------------------------
+
 
 def _parse_commonlisp_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     """Parse Common Lisp source and extract defun, defmacro, defmethod,
@@ -8385,12 +9324,18 @@ def _parse_commonlisp_symbols(source_bytes: bytes, filename: str) -> list[Symbol
     symbols: list[Symbol] = []
 
     def _text(node) -> str:
-        return source[node.start_byte:node.end_byte]
+        return source[node.start_byte : node.end_byte]
 
-    _DEF_KEYWORDS = frozenset({
-        "defclass", "defstruct", "defvar", "defconstant",
-        "defparameter", "define-condition",
-    })
+    _DEF_KEYWORDS = frozenset(
+        {
+            "defclass",
+            "defstruct",
+            "defvar",
+            "defconstant",
+            "defparameter",
+            "define-condition",
+        }
+    )
 
     def _walk(node) -> None:
         if node.type == "defun":
@@ -8407,22 +9352,31 @@ def _parse_commonlisp_symbols(source_bytes: bytes, filename: str) -> list[Symbol
                 if name_node:
                     name = _text(name_node)
                     sig = _text(header)[:120]
-                    symbols.append(Symbol(
-                        id=make_symbol_id(filename, name, "function"),
-                        file=filename, name=name, qualified_name=name,
-                        kind="function", language="commonlisp",
-                        signature=sig,
-                        docstring="",
-                        line=node.start_point[0] + 1,
-                        end_line=node.end_point[0] + 1,
-                        byte_offset=node.start_byte,
-                        byte_length=node.end_byte - node.start_byte,
-                        content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                    ))
+                    symbols.append(
+                        Symbol(
+                            id=make_symbol_id(filename, name, "function"),
+                            file=filename,
+                            name=name,
+                            qualified_name=name,
+                            kind="function",
+                            language="commonlisp",
+                            signature=sig,
+                            docstring="",
+                            line=node.start_point[0] + 1,
+                            end_line=node.end_point[0] + 1,
+                            byte_offset=node.start_byte,
+                            byte_length=node.end_byte - node.start_byte,
+                            content_hash=compute_content_hash(
+                                source_bytes[node.start_byte : node.end_byte]
+                            ),
+                        )
+                    )
                     return
 
         elif node.type == "list_lit":
-            children = [c for c in node.children if c.type not in ("(", ")", "quasiquote")]
+            children = [
+                c for c in node.children if c.type not in ("(", ")", "quasiquote")
+            ]
             if len(children) >= 2 and children[0].type == "sym_lit":
                 kw = _text(children[0]).lower()
                 if kw in _DEF_KEYWORDS and children[1].type == "sym_lit":
@@ -8433,18 +9387,25 @@ def _parse_commonlisp_symbols(source_bytes: bytes, filename: str) -> list[Symbol
                         kind = "constant"
                     else:
                         kind = "type"
-                    symbols.append(Symbol(
-                        id=make_symbol_id(filename, name, kind),
-                        file=filename, name=name, qualified_name=name,
-                        kind=kind, language="commonlisp",
-                        signature=f"({kw} {name})",
-                        docstring="",
-                        line=node.start_point[0] + 1,
-                        end_line=node.end_point[0] + 1,
-                        byte_offset=node.start_byte,
-                        byte_length=node.end_byte - node.start_byte,
-                        content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                    ))
+                    symbols.append(
+                        Symbol(
+                            id=make_symbol_id(filename, name, kind),
+                            file=filename,
+                            name=name,
+                            qualified_name=name,
+                            kind=kind,
+                            language="commonlisp",
+                            signature=f"({kw} {name})",
+                            docstring="",
+                            line=node.start_point[0] + 1,
+                            end_line=node.end_point[0] + 1,
+                            byte_offset=node.start_byte,
+                            byte_length=node.end_byte - node.start_byte,
+                            content_hash=compute_content_hash(
+                                source_bytes[node.start_byte : node.end_byte]
+                            ),
+                        )
+                    )
                     return
 
         for child in node.children:
@@ -8457,6 +9418,7 @@ def _parse_commonlisp_symbols(source_bytes: bytes, filename: str) -> list[Symbol
 # ---------------------------------------------------------------------------
 # Solidity
 # ---------------------------------------------------------------------------
+
 
 def _parse_solidity_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     """Parse Solidity source and extract contracts, interfaces, libraries,
@@ -8477,7 +9439,7 @@ def _parse_solidity_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     symbols: list[Symbol] = []
 
     def _text(node) -> str:
-        return source[node.start_byte:node.end_byte]
+        return source[node.start_byte : node.end_byte]
 
     def _first_identifier(node) -> "Optional[str]":
         for child in node.children:
@@ -8504,18 +9466,25 @@ def _parse_solidity_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             name = _first_identifier(node)
             if name:
                 kind = _CONTRACT_TYPES[node.type]
-                symbols.append(Symbol(
-                    id=make_symbol_id(filename, name, kind),
-                    file=filename, name=name, qualified_name=name,
-                    kind=kind, language="solidity",
-                    signature=f"{node.type.replace('_declaration', '').replace('_', ' ')} {name}",
-                    docstring="",
-                    line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                    byte_offset=node.start_byte,
-                    byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                ))
+                symbols.append(
+                    Symbol(
+                        id=make_symbol_id(filename, name, kind),
+                        file=filename,
+                        name=name,
+                        qualified_name=name,
+                        kind=kind,
+                        language="solidity",
+                        signature=f"{node.type.replace('_declaration', '').replace('_', ' ')} {name}",
+                        docstring="",
+                        line=node.start_point[0] + 1,
+                        end_line=node.end_point[0] + 1,
+                        byte_offset=node.start_byte,
+                        byte_length=node.end_byte - node.start_byte,
+                        content_hash=compute_content_hash(
+                            source_bytes[node.start_byte : node.end_byte]
+                        ),
+                    )
+                )
                 for child in node.children:
                     if child.type == "contract_body":
                         for member in child.children:
@@ -8528,33 +9497,45 @@ def _parse_solidity_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                 kind = _MEMBER_TYPES[node.type]
                 qualified = f"{scope}.{name}" if scope else name
                 sig_line = _text(node).split("{")[0].split(";")[0].strip()
-                symbols.append(Symbol(
-                    id=make_symbol_id(filename, qualified, kind),
-                    file=filename, name=name, qualified_name=qualified,
-                    kind=kind, language="solidity",
-                    signature=sig_line[:120],
-                    docstring="",
-                    line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                    byte_offset=node.start_byte,
-                    byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                ))
+                symbols.append(
+                    Symbol(
+                        id=make_symbol_id(filename, qualified, kind),
+                        file=filename,
+                        name=name,
+                        qualified_name=qualified,
+                        kind=kind,
+                        language="solidity",
+                        signature=sig_line[:120],
+                        docstring="",
+                        line=node.start_point[0] + 1,
+                        end_line=node.end_point[0] + 1,
+                        byte_offset=node.start_byte,
+                        byte_length=node.end_byte - node.start_byte,
+                        content_hash=compute_content_hash(
+                            source_bytes[node.start_byte : node.end_byte]
+                        ),
+                    )
+                )
                 return
 
         if node.type == "state_variable_declaration":
             name = _first_identifier(node)
             if name:
                 qualified = f"{scope}.{name}" if scope else name
-                symbols.append(Symbol(
-                    id=make_symbol_id(filename, qualified, "constant"),
-                    file=filename, name=name, qualified_name=qualified,
-                    kind="constant", language="solidity",
-                    signature=_text(node).split(";")[0].strip()[:120],
-                    docstring="",
-                    line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                ))
+                symbols.append(
+                    Symbol(
+                        id=make_symbol_id(filename, qualified, "constant"),
+                        file=filename,
+                        name=name,
+                        qualified_name=qualified,
+                        kind="constant",
+                        language="solidity",
+                        signature=_text(node).split(";")[0].strip()[:120],
+                        docstring="",
+                        line=node.start_point[0] + 1,
+                        end_line=node.end_point[0] + 1,
+                    )
+                )
                 return
 
         for child in node.children:
@@ -8567,6 +9548,7 @@ def _parse_solidity_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
 # ---------------------------------------------------------------------------
 # Zig
 # ---------------------------------------------------------------------------
+
 
 def _parse_zig_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     """Parse Zig source and extract functions, structs, enums, unions, and constants.
@@ -8588,7 +9570,7 @@ def _parse_zig_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     symbols: list[Symbol] = []
 
     def _text(node) -> str:
-        return source[node.start_byte:node.end_byte]
+        return source[node.start_byte : node.end_byte]
 
     def _first_child_of_type(node, *types):
         for child in node.children:
@@ -8617,18 +9599,25 @@ def _parse_zig_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                     name = _text(ident)
                     qualified = f"{scope}.{name}" if scope else name
                     sig = _text(fn_proto)[:120]
-                    symbols.append(Symbol(
-                        id=make_symbol_id(filename, qualified, "function"),
-                        file=filename, name=name, qualified_name=qualified,
-                        kind="function", language="zig",
-                        signature=sig,
-                        docstring="",
-                        line=node.start_point[0] + 1,
-                        end_line=node.end_point[0] + 1,
-                        byte_offset=node.start_byte,
-                        byte_length=node.end_byte - node.start_byte,
-                        content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                    ))
+                    symbols.append(
+                        Symbol(
+                            id=make_symbol_id(filename, qualified, "function"),
+                            file=filename,
+                            name=name,
+                            qualified_name=qualified,
+                            kind="function",
+                            language="zig",
+                            signature=sig,
+                            docstring="",
+                            line=node.start_point[0] + 1,
+                            end_line=node.end_point[0] + 1,
+                            byte_offset=node.start_byte,
+                            byte_length=node.end_byte - node.start_byte,
+                            content_hash=compute_content_hash(
+                                source_bytes[node.start_byte : node.end_byte]
+                            ),
+                        )
+                    )
                     return
 
             if var_decl:
@@ -8645,18 +9634,27 @@ def _parse_zig_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                             type_kw = _is_type_expr(child)
                             if type_kw:
                                 kind = "class" if type_kw == "struct" else "type"
-                                symbols.append(Symbol(
-                                    id=make_symbol_id(filename, qualified, kind),
-                                    file=filename, name=name, qualified_name=qualified,
-                                    kind=kind, language="zig",
-                                    signature=f"const {name} = {type_kw}",
-                                    docstring="",
-                                    line=node.start_point[0] + 1,
-                                    end_line=node.end_point[0] + 1,
-                                    byte_offset=node.start_byte,
-                                    byte_length=node.end_byte - node.start_byte,
-                                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                                ))
+                                symbols.append(
+                                    Symbol(
+                                        id=make_symbol_id(filename, qualified, kind),
+                                        file=filename,
+                                        name=name,
+                                        qualified_name=qualified,
+                                        kind=kind,
+                                        language="zig",
+                                        signature=f"const {name} = {type_kw}",
+                                        docstring="",
+                                        line=node.start_point[0] + 1,
+                                        end_line=node.end_point[0] + 1,
+                                        byte_offset=node.start_byte,
+                                        byte_length=node.end_byte - node.start_byte,
+                                        content_hash=compute_content_hash(
+                                            source_bytes[
+                                                node.start_byte : node.end_byte
+                                            ]
+                                        ),
+                                    )
+                                )
                                 # Walk inside the struct/enum for nested decls
                                 for sub in child.children:
                                     _walk(sub, qualified)
@@ -8665,33 +9663,45 @@ def _parse_zig_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                     # Plain constant
                     is_const = any(c.type == "const" for c in var_decl.children)
                     if is_const:
-                        symbols.append(Symbol(
-                            id=make_symbol_id(filename, qualified, "constant"),
-                            file=filename, name=name, qualified_name=qualified,
-                            kind="constant", language="zig",
-                            signature=_text(var_decl).split("\n")[0].strip()[:120],
-                            docstring="",
-                            line=node.start_point[0] + 1,
-                            end_line=node.end_point[0] + 1,
-                        ))
+                        symbols.append(
+                            Symbol(
+                                id=make_symbol_id(filename, qualified, "constant"),
+                                file=filename,
+                                name=name,
+                                qualified_name=qualified,
+                                kind="constant",
+                                language="zig",
+                                signature=_text(var_decl).split("\n")[0].strip()[:120],
+                                docstring="",
+                                line=node.start_point[0] + 1,
+                                end_line=node.end_point[0] + 1,
+                            )
+                        )
                         return
 
         elif node.type == "TestDecl":
             str_node = _first_child_of_type(node, "STRINGLITERALSINGLE")
             if str_node:
                 name = _text(str_node).strip('"')
-                symbols.append(Symbol(
-                    id=make_symbol_id(filename, f"test:{name}", "function"),
-                    file=filename, name=f"test \"{name}\"", qualified_name=f"test:{name}",
-                    kind="function", language="zig",
-                    signature=f"test \"{name}\"",
-                    docstring="",
-                    line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                    byte_offset=node.start_byte,
-                    byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                ))
+                symbols.append(
+                    Symbol(
+                        id=make_symbol_id(filename, f"test:{name}", "function"),
+                        file=filename,
+                        name=f'test "{name}"',
+                        qualified_name=f"test:{name}",
+                        kind="function",
+                        language="zig",
+                        signature=f'test "{name}"',
+                        docstring="",
+                        line=node.start_point[0] + 1,
+                        end_line=node.end_point[0] + 1,
+                        byte_offset=node.start_byte,
+                        byte_length=node.end_byte - node.start_byte,
+                        content_hash=compute_content_hash(
+                            source_bytes[node.start_byte : node.end_byte]
+                        ),
+                    )
+                )
                 return
 
         for child in node.children:
@@ -8704,6 +9714,7 @@ def _parse_zig_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
 # ---------------------------------------------------------------------------
 # PowerShell
 # ---------------------------------------------------------------------------
+
 
 def _parse_powershell_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     """Parse PowerShell source and extract functions, classes, enums, and class methods.
@@ -8723,7 +9734,7 @@ def _parse_powershell_symbols(source_bytes: bytes, filename: str) -> list[Symbol
     symbols: list[Symbol] = []
 
     def _text(node) -> str:
-        return source[node.start_byte:node.end_byte]
+        return source[node.start_byte : node.end_byte]
 
     def _first_child_of_type(node, *types):
         for child in node.children:
@@ -8737,71 +9748,101 @@ def _parse_powershell_symbols(source_bytes: bytes, filename: str) -> list[Symbol
             if name_node:
                 name = _text(name_node)
                 qualified = f"{scope}.{name}" if scope else name
-                symbols.append(Symbol(
-                    id=make_symbol_id(filename, qualified, "function"),
-                    file=filename, name=name, qualified_name=qualified,
-                    kind="function", language="powershell",
-                    signature=f"function {name}",
-                    docstring="",
-                    line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                    byte_offset=node.start_byte,
-                    byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                ))
+                symbols.append(
+                    Symbol(
+                        id=make_symbol_id(filename, qualified, "function"),
+                        file=filename,
+                        name=name,
+                        qualified_name=qualified,
+                        kind="function",
+                        language="powershell",
+                        signature=f"function {name}",
+                        docstring="",
+                        line=node.start_point[0] + 1,
+                        end_line=node.end_point[0] + 1,
+                        byte_offset=node.start_byte,
+                        byte_length=node.end_byte - node.start_byte,
+                        content_hash=compute_content_hash(
+                            source_bytes[node.start_byte : node.end_byte]
+                        ),
+                    )
+                )
                 return
 
         elif node.type == "class_statement":
             name_node = _first_child_of_type(node, "simple_name")
             if name_node:
                 name = _text(name_node)
-                symbols.append(Symbol(
-                    id=make_symbol_id(filename, name, "class"),
-                    file=filename, name=name, qualified_name=name,
-                    kind="class", language="powershell",
-                    signature=f"class {name}",
-                    docstring="",
-                    line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                    byte_offset=node.start_byte,
-                    byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                ))
+                symbols.append(
+                    Symbol(
+                        id=make_symbol_id(filename, name, "class"),
+                        file=filename,
+                        name=name,
+                        qualified_name=name,
+                        kind="class",
+                        language="powershell",
+                        signature=f"class {name}",
+                        docstring="",
+                        line=node.start_point[0] + 1,
+                        end_line=node.end_point[0] + 1,
+                        byte_offset=node.start_byte,
+                        byte_length=node.end_byte - node.start_byte,
+                        content_hash=compute_content_hash(
+                            source_bytes[node.start_byte : node.end_byte]
+                        ),
+                    )
+                )
                 for child in node.children:
                     if child.type == "class_method_definition":
                         mname_node = _first_child_of_type(child, "simple_name")
                         if mname_node:
                             mname = _text(mname_node)
-                            symbols.append(Symbol(
-                                id=make_symbol_id(filename, f"{name}.{mname}", "method"),
-                                file=filename, name=mname, qualified_name=f"{name}.{mname}",
-                                kind="method", language="powershell",
-                                signature=_text(child).split("{")[0].strip()[:120],
-                                docstring="",
-                                line=child.start_point[0] + 1,
-                                end_line=child.end_point[0] + 1,
-                                byte_offset=child.start_byte,
-                                byte_length=child.end_byte - child.start_byte,
-                                content_hash=compute_content_hash(source_bytes[child.start_byte:child.end_byte]),
-                            ))
+                            symbols.append(
+                                Symbol(
+                                    id=make_symbol_id(
+                                        filename, f"{name}.{mname}", "method"
+                                    ),
+                                    file=filename,
+                                    name=mname,
+                                    qualified_name=f"{name}.{mname}",
+                                    kind="method",
+                                    language="powershell",
+                                    signature=_text(child).split("{")[0].strip()[:120],
+                                    docstring="",
+                                    line=child.start_point[0] + 1,
+                                    end_line=child.end_point[0] + 1,
+                                    byte_offset=child.start_byte,
+                                    byte_length=child.end_byte - child.start_byte,
+                                    content_hash=compute_content_hash(
+                                        source_bytes[child.start_byte : child.end_byte]
+                                    ),
+                                )
+                            )
                 return
 
         elif node.type == "enum_statement":
             name_node = _first_child_of_type(node, "simple_name")
             if name_node:
                 name = _text(name_node)
-                symbols.append(Symbol(
-                    id=make_symbol_id(filename, name, "type"),
-                    file=filename, name=name, qualified_name=name,
-                    kind="type", language="powershell",
-                    signature=f"enum {name}",
-                    docstring="",
-                    line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                    byte_offset=node.start_byte,
-                    byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                ))
+                symbols.append(
+                    Symbol(
+                        id=make_symbol_id(filename, name, "type"),
+                        file=filename,
+                        name=name,
+                        qualified_name=name,
+                        kind="type",
+                        language="powershell",
+                        signature=f"enum {name}",
+                        docstring="",
+                        line=node.start_point[0] + 1,
+                        end_line=node.end_point[0] + 1,
+                        byte_offset=node.start_byte,
+                        byte_length=node.end_byte - node.start_byte,
+                        content_hash=compute_content_hash(
+                            source_bytes[node.start_byte : node.end_byte]
+                        ),
+                    )
+                )
                 return
 
         for child in node.children:
@@ -8814,6 +9855,7 @@ def _parse_powershell_symbols(source_bytes: bytes, filename: str) -> list[Symbol
 # ---------------------------------------------------------------------------
 # Apex (Salesforce)
 # ---------------------------------------------------------------------------
+
 
 def _parse_apex_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     """Parse Apex source and extract classes, interfaces, enums, methods, and triggers.
@@ -8833,7 +9875,7 @@ def _parse_apex_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     symbols: list[Symbol] = []
 
     def _text(node) -> str:
-        return source[node.start_byte:node.end_byte]
+        return source[node.start_byte : node.end_byte]
 
     def _first_child_of_type(node, *types):
         for child in node.children:
@@ -8841,7 +9883,11 @@ def _parse_apex_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                 return child
         return None
 
-    _CLASS_TYPES = {"class_declaration": "class", "interface_declaration": "type", "enum_declaration": "type"}
+    _CLASS_TYPES = {
+        "class_declaration": "class",
+        "interface_declaration": "type",
+        "enum_declaration": "type",
+    }
 
     def _walk(node, scope: str = "") -> None:
         if node.type in _CLASS_TYPES:
@@ -8850,19 +9896,28 @@ def _parse_apex_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                 name = _text(ident)
                 kind = _CLASS_TYPES[node.type]
                 qualified = f"{scope}.{name}" if scope else name
-                symbols.append(Symbol(
-                    id=make_symbol_id(filename, qualified, kind),
-                    file=filename, name=name, qualified_name=qualified,
-                    kind=kind, language="apex",
-                    signature=f"{node.type.replace('_declaration', '').replace('_', ' ')} {name}",
-                    docstring="",
-                    line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                    byte_offset=node.start_byte,
-                    byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                ))
-                body = _first_child_of_type(node, "class_body", "interface_body", "enum_body")
+                symbols.append(
+                    Symbol(
+                        id=make_symbol_id(filename, qualified, kind),
+                        file=filename,
+                        name=name,
+                        qualified_name=qualified,
+                        kind=kind,
+                        language="apex",
+                        signature=f"{node.type.replace('_declaration', '').replace('_', ' ')} {name}",
+                        docstring="",
+                        line=node.start_point[0] + 1,
+                        end_line=node.end_point[0] + 1,
+                        byte_offset=node.start_byte,
+                        byte_length=node.end_byte - node.start_byte,
+                        content_hash=compute_content_hash(
+                            source_bytes[node.start_byte : node.end_byte]
+                        ),
+                    )
+                )
+                body = _first_child_of_type(
+                    node, "class_body", "interface_body", "enum_body"
+                )
                 if body:
                     for child in body.children:
                         _walk(child, qualified)
@@ -8874,18 +9929,25 @@ def _parse_apex_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                 name = _text(ident)
                 qualified = f"{scope}.{name}" if scope else name
                 sig = _text(node).split("{")[0].strip()[:120]
-                symbols.append(Symbol(
-                    id=make_symbol_id(filename, qualified, "method"),
-                    file=filename, name=name, qualified_name=qualified,
-                    kind="method", language="apex",
-                    signature=sig,
-                    docstring="",
-                    line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                    byte_offset=node.start_byte,
-                    byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                ))
+                symbols.append(
+                    Symbol(
+                        id=make_symbol_id(filename, qualified, "method"),
+                        file=filename,
+                        name=name,
+                        qualified_name=qualified,
+                        kind="method",
+                        language="apex",
+                        signature=sig,
+                        docstring="",
+                        line=node.start_point[0] + 1,
+                        end_line=node.end_point[0] + 1,
+                        byte_offset=node.start_byte,
+                        byte_length=node.end_byte - node.start_byte,
+                        content_hash=compute_content_hash(
+                            source_bytes[node.start_byte : node.end_byte]
+                        ),
+                    )
+                )
                 return
 
         elif node.type == "trigger_declaration":
@@ -8893,18 +9955,25 @@ def _parse_apex_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             if ident:
                 name = _text(ident)
                 sig = _text(node).split("{")[0].strip()[:120]
-                symbols.append(Symbol(
-                    id=make_symbol_id(filename, name, "function"),
-                    file=filename, name=name, qualified_name=name,
-                    kind="function", language="apex",
-                    signature=sig,
-                    docstring="",
-                    line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                    byte_offset=node.start_byte,
-                    byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                ))
+                symbols.append(
+                    Symbol(
+                        id=make_symbol_id(filename, name, "function"),
+                        file=filename,
+                        name=name,
+                        qualified_name=name,
+                        kind="function",
+                        language="apex",
+                        signature=sig,
+                        docstring="",
+                        line=node.start_point[0] + 1,
+                        end_line=node.end_point[0] + 1,
+                        byte_offset=node.start_byte,
+                        byte_length=node.end_byte - node.start_byte,
+                        content_hash=compute_content_hash(
+                            source_bytes[node.start_byte : node.end_byte]
+                        ),
+                    )
+                )
                 return
 
         for child in node.children:
@@ -8917,6 +9986,7 @@ def _parse_apex_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
 # ---------------------------------------------------------------------------
 # OCaml
 # ---------------------------------------------------------------------------
+
 
 def _parse_ocaml_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     """Parse OCaml source and extract let bindings, types, modules, and classes.
@@ -8937,7 +10007,7 @@ def _parse_ocaml_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     symbols: list[Symbol] = []
 
     def _text(node) -> str:
-        return source[node.start_byte:node.end_byte]
+        return source[node.start_byte : node.end_byte]
 
     def _first_child_of_type(node, *types):
         for child in node.children:
@@ -8956,18 +10026,25 @@ def _parse_ocaml_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                         has_params = any(c.type == "parameter" for c in child.children)
                         kind = "function" if has_params else "constant"
                         sig = _text(child).split("\n")[0].strip()[:120]
-                        symbols.append(Symbol(
-                            id=make_symbol_id(filename, qualified, kind),
-                            file=filename, name=name, qualified_name=qualified,
-                            kind=kind, language="ocaml",
-                            signature=f"let {sig}",
-                            docstring="",
-                            line=child.start_point[0] + 1,
-                            end_line=child.end_point[0] + 1,
-                            byte_offset=child.start_byte,
-                            byte_length=child.end_byte - child.start_byte,
-                            content_hash=compute_content_hash(source_bytes[child.start_byte:child.end_byte]),
-                        ))
+                        symbols.append(
+                            Symbol(
+                                id=make_symbol_id(filename, qualified, kind),
+                                file=filename,
+                                name=name,
+                                qualified_name=qualified,
+                                kind=kind,
+                                language="ocaml",
+                                signature=f"let {sig}",
+                                docstring="",
+                                line=child.start_point[0] + 1,
+                                end_line=child.end_point[0] + 1,
+                                byte_offset=child.start_byte,
+                                byte_length=child.end_byte - child.start_byte,
+                                content_hash=compute_content_hash(
+                                    source_bytes[child.start_byte : child.end_byte]
+                                ),
+                            )
+                        )
             return
 
         elif node.type == "type_definition":
@@ -8978,18 +10055,25 @@ def _parse_ocaml_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                         name = _text(tc)
                         qualified = f"{scope}.{name}" if scope else name
                         sig_text = _text(child).split("\n")[0].strip()[:120]
-                        symbols.append(Symbol(
-                            id=make_symbol_id(filename, qualified, "type"),
-                            file=filename, name=name, qualified_name=qualified,
-                            kind="type", language="ocaml",
-                            signature=f"type {sig_text}",
-                            docstring="",
-                            line=child.start_point[0] + 1,
-                            end_line=child.end_point[0] + 1,
-                            byte_offset=child.start_byte,
-                            byte_length=child.end_byte - child.start_byte,
-                            content_hash=compute_content_hash(source_bytes[child.start_byte:child.end_byte]),
-                        ))
+                        symbols.append(
+                            Symbol(
+                                id=make_symbol_id(filename, qualified, "type"),
+                                file=filename,
+                                name=name,
+                                qualified_name=qualified,
+                                kind="type",
+                                language="ocaml",
+                                signature=f"type {sig_text}",
+                                docstring="",
+                                line=child.start_point[0] + 1,
+                                end_line=child.end_point[0] + 1,
+                                byte_offset=child.start_byte,
+                                byte_length=child.end_byte - child.start_byte,
+                                content_hash=compute_content_hash(
+                                    source_bytes[child.start_byte : child.end_byte]
+                                ),
+                            )
+                        )
             return
 
         elif node.type == "module_definition":
@@ -8999,18 +10083,25 @@ def _parse_ocaml_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                     if mn:
                         name = _text(mn)
                         qualified = f"{scope}.{name}" if scope else name
-                        symbols.append(Symbol(
-                            id=make_symbol_id(filename, qualified, "class"),
-                            file=filename, name=name, qualified_name=qualified,
-                            kind="class", language="ocaml",
-                            signature=f"module {name}",
-                            docstring="",
-                            line=node.start_point[0] + 1,
-                            end_line=node.end_point[0] + 1,
-                            byte_offset=node.start_byte,
-                            byte_length=node.end_byte - node.start_byte,
-                            content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                        ))
+                        symbols.append(
+                            Symbol(
+                                id=make_symbol_id(filename, qualified, "class"),
+                                file=filename,
+                                name=name,
+                                qualified_name=qualified,
+                                kind="class",
+                                language="ocaml",
+                                signature=f"module {name}",
+                                docstring="",
+                                line=node.start_point[0] + 1,
+                                end_line=node.end_point[0] + 1,
+                                byte_offset=node.start_byte,
+                                byte_length=node.end_byte - node.start_byte,
+                                content_hash=compute_content_hash(
+                                    source_bytes[node.start_byte : node.end_byte]
+                                ),
+                            )
+                        )
                         # Walk inside the module for nested definitions
                         for sub in child.children:
                             if sub.type == "structure":
@@ -9025,18 +10116,25 @@ def _parse_ocaml_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                     if cn:
                         name = _text(cn)
                         qualified = f"{scope}.{name}" if scope else name
-                        symbols.append(Symbol(
-                            id=make_symbol_id(filename, qualified, "class"),
-                            file=filename, name=name, qualified_name=qualified,
-                            kind="class", language="ocaml",
-                            signature=f"class {name}",
-                            docstring="",
-                            line=node.start_point[0] + 1,
-                            end_line=node.end_point[0] + 1,
-                            byte_offset=node.start_byte,
-                            byte_length=node.end_byte - node.start_byte,
-                            content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                        ))
+                        symbols.append(
+                            Symbol(
+                                id=make_symbol_id(filename, qualified, "class"),
+                                file=filename,
+                                name=name,
+                                qualified_name=qualified,
+                                kind="class",
+                                language="ocaml",
+                                signature=f"class {name}",
+                                docstring="",
+                                line=node.start_point[0] + 1,
+                                end_line=node.end_point[0] + 1,
+                                byte_offset=node.start_byte,
+                                byte_length=node.end_byte - node.start_byte,
+                                content_hash=compute_content_hash(
+                                    source_bytes[node.start_byte : node.end_byte]
+                                ),
+                            )
+                        )
                         return
 
         for child in node.children:
@@ -9049,6 +10147,7 @@ def _parse_ocaml_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
 # ---------------------------------------------------------------------------
 # F# custom parser
 # ---------------------------------------------------------------------------
+
 
 def _parse_fsharp_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     """Extract symbols from F# source code using tree-sitter."""
@@ -9072,18 +10171,25 @@ def _parse_fsharp_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             if ident:
                 mod_name = _text(ident)
                 qualified = f"{scope}.{mod_name}" if scope else mod_name
-                symbols.append(Symbol(
-                    id=make_symbol_id(filename, qualified, "class"),
-                    file=filename, name=mod_name, qualified_name=qualified,
-                    kind="class", language="fsharp",
-                    signature=f"module {mod_name}",
-                    docstring="",
-                    line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                    byte_offset=node.start_byte,
-                    byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                ))
+                symbols.append(
+                    Symbol(
+                        id=make_symbol_id(filename, qualified, "class"),
+                        file=filename,
+                        name=mod_name,
+                        qualified_name=qualified,
+                        kind="class",
+                        language="fsharp",
+                        signature=f"module {mod_name}",
+                        docstring="",
+                        line=node.start_point[0] + 1,
+                        end_line=node.end_point[0] + 1,
+                        byte_offset=node.start_byte,
+                        byte_length=node.end_byte - node.start_byte,
+                        content_hash=compute_content_hash(
+                            source_bytes[node.start_byte : node.end_byte]
+                        ),
+                    )
+                )
                 for child in node.children:
                     _walk(child, qualified)
                 return
@@ -9113,60 +10219,87 @@ def _parse_fsharp_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                             if rt.type in ("simple_type", "type"):
                                 sig += f" : {_text(rt)}"
                             break
-                    symbols.append(Symbol(
-                        id=make_symbol_id(filename, qualified, "function"),
-                        file=filename, name=name, qualified_name=qualified,
-                        kind="function", language="fsharp",
-                        signature=sig,
-                        docstring="",
-                        line=node.start_point[0] + 1,
-                        end_line=node.end_point[0] + 1,
-                        byte_offset=node.start_byte,
-                        byte_length=node.end_byte - node.start_byte,
-                        content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                    ))
+                    symbols.append(
+                        Symbol(
+                            id=make_symbol_id(filename, qualified, "function"),
+                            file=filename,
+                            name=name,
+                            qualified_name=qualified,
+                            kind="function",
+                            language="fsharp",
+                            signature=sig,
+                            docstring="",
+                            line=node.start_point[0] + 1,
+                            end_line=node.end_point[0] + 1,
+                            byte_offset=node.start_byte,
+                            byte_length=node.end_byte - node.start_byte,
+                            content_hash=compute_content_hash(
+                                source_bytes[node.start_byte : node.end_byte]
+                            ),
+                        )
+                    )
             elif vdl:
                 ip = _first_child_of_type(vdl, "identifier_pattern")
                 if ip:
                     name = _text(ip)
                     qualified = f"{scope}.{name}" if scope else name
                     sig = f"let {name}"
-                    symbols.append(Symbol(
-                        id=make_symbol_id(filename, qualified, "constant"),
-                        file=filename, name=name, qualified_name=qualified,
-                        kind="constant", language="fsharp",
-                        signature=sig,
-                        docstring="",
-                        line=node.start_point[0] + 1,
-                        end_line=node.end_point[0] + 1,
-                        byte_offset=node.start_byte,
-                        byte_length=node.end_byte - node.start_byte,
-                        content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                    ))
+                    symbols.append(
+                        Symbol(
+                            id=make_symbol_id(filename, qualified, "constant"),
+                            file=filename,
+                            name=name,
+                            qualified_name=qualified,
+                            kind="constant",
+                            language="fsharp",
+                            signature=sig,
+                            docstring="",
+                            line=node.start_point[0] + 1,
+                            end_line=node.end_point[0] + 1,
+                            byte_offset=node.start_byte,
+                            byte_length=node.end_byte - node.start_byte,
+                            content_hash=compute_content_hash(
+                                source_bytes[node.start_byte : node.end_byte]
+                            ),
+                        )
+                    )
             return
 
         elif node.type == "type_definition":
-            td = _first_child_of_type(node, "record_type_defn", "union_type_defn",
-                                       "type_abbrev_defn", "enum_type_defn",
-                                       "class_type_defn", "anon_type_defn")
+            td = _first_child_of_type(
+                node,
+                "record_type_defn",
+                "union_type_defn",
+                "type_abbrev_defn",
+                "enum_type_defn",
+                "class_type_defn",
+                "anon_type_defn",
+            )
             if td:
                 ident = _first_child_of_type(td, "type_name", "identifier")
                 if ident:
                     name = _text(ident)
                     qualified = f"{scope}.{name}" if scope else name
                     sig_text = _text(node).split("\n")[0].strip()[:120]
-                    symbols.append(Symbol(
-                        id=make_symbol_id(filename, qualified, "type"),
-                        file=filename, name=name, qualified_name=qualified,
-                        kind="type", language="fsharp",
-                        signature=sig_text,
-                        docstring="",
-                        line=node.start_point[0] + 1,
-                        end_line=node.end_point[0] + 1,
-                        byte_offset=node.start_byte,
-                        byte_length=node.end_byte - node.start_byte,
-                        content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                    ))
+                    symbols.append(
+                        Symbol(
+                            id=make_symbol_id(filename, qualified, "type"),
+                            file=filename,
+                            name=name,
+                            qualified_name=qualified,
+                            kind="type",
+                            language="fsharp",
+                            signature=sig_text,
+                            docstring="",
+                            line=node.start_point[0] + 1,
+                            end_line=node.end_point[0] + 1,
+                            byte_offset=node.start_byte,
+                            byte_length=node.end_byte - node.start_byte,
+                            content_hash=compute_content_hash(
+                                source_bytes[node.start_byte : node.end_byte]
+                            ),
+                        )
+                    )
             return
 
         for child in node.children:
@@ -9231,18 +10364,25 @@ def _parse_clojure_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                                 break
                     sig_parts.append(")")
                     sig = "".join(sig_parts)[:120]
-                    symbols.append(Symbol(
-                        id=make_symbol_id(filename, qualified, kind),
-                        file=filename, name=name, qualified_name=qualified,
-                        kind=kind, language="clojure",
-                        signature=sig,
-                        docstring="",
-                        line=node.start_point[0] + 1,
-                        end_line=node.end_point[0] + 1,
-                        byte_offset=node.start_byte,
-                        byte_length=node.end_byte - node.start_byte,
-                        content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                    ))
+                    symbols.append(
+                        Symbol(
+                            id=make_symbol_id(filename, qualified, kind),
+                            file=filename,
+                            name=name,
+                            qualified_name=qualified,
+                            kind=kind,
+                            language="clojure",
+                            signature=sig,
+                            docstring="",
+                            line=node.start_point[0] + 1,
+                            end_line=node.end_point[0] + 1,
+                            byte_offset=node.start_byte,
+                            byte_length=node.end_byte - node.start_byte,
+                            content_hash=compute_content_hash(
+                                source_bytes[node.start_byte : node.end_byte]
+                            ),
+                        )
+                    )
                     return
 
         for child in node.children:
@@ -9255,6 +10395,7 @@ def _parse_clojure_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
 # ---------------------------------------------------------------------------
 # Emacs Lisp custom parser
 # ---------------------------------------------------------------------------
+
 
 def _parse_elisp_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     """Extract symbols from Emacs Lisp source code using tree-sitter."""
@@ -9291,18 +10432,25 @@ def _parse_elisp_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                     elif found_params and child.type == "string":
                         docstring = _text(child).strip('"')
                         break
-                symbols.append(Symbol(
-                    id=make_symbol_id(filename, name, "function"),
-                    file=filename, name=name, qualified_name=name,
-                    kind="function", language="elisp",
-                    signature=sig[:120],
-                    docstring=docstring,
-                    line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                    byte_offset=node.start_byte,
-                    byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                ))
+                symbols.append(
+                    Symbol(
+                        id=make_symbol_id(filename, name, "function"),
+                        file=filename,
+                        name=name,
+                        qualified_name=name,
+                        kind="function",
+                        language="elisp",
+                        signature=sig[:120],
+                        docstring=docstring,
+                        line=node.start_point[0] + 1,
+                        end_line=node.end_point[0] + 1,
+                        byte_offset=node.start_byte,
+                        byte_length=node.end_byte - node.start_byte,
+                        content_hash=compute_content_hash(
+                            source_bytes[node.start_byte : node.end_byte]
+                        ),
+                    )
+                )
                 return
 
         elif node.type == "macro_definition":
@@ -9315,18 +10463,25 @@ def _parse_elisp_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                 if params:
                     sig += f" {_text(params)}"
                 sig += ")"
-                symbols.append(Symbol(
-                    id=make_symbol_id(filename, name, "function"),
-                    file=filename, name=name, qualified_name=name,
-                    kind="function", language="elisp",
-                    signature=sig[:120],
-                    docstring="",
-                    line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                    byte_offset=node.start_byte,
-                    byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                ))
+                symbols.append(
+                    Symbol(
+                        id=make_symbol_id(filename, name, "function"),
+                        file=filename,
+                        name=name,
+                        qualified_name=name,
+                        kind="function",
+                        language="elisp",
+                        signature=sig[:120],
+                        docstring="",
+                        line=node.start_point[0] + 1,
+                        end_line=node.end_point[0] + 1,
+                        byte_offset=node.start_byte,
+                        byte_length=node.end_byte - node.start_byte,
+                        content_hash=compute_content_hash(
+                            source_bytes[node.start_byte : node.end_byte]
+                        ),
+                    )
+                )
                 return
 
         elif node.type == "special_form":
@@ -9345,18 +10500,25 @@ def _parse_elisp_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                             if c.type == "string":
                                 docstring = _text(c).strip('"')
                                 break
-                        symbols.append(Symbol(
-                            id=make_symbol_id(filename, name, "constant"),
-                            file=filename, name=name, qualified_name=name,
-                            kind="constant", language="elisp",
-                            signature=sig,
-                            docstring=docstring,
-                            line=node.start_point[0] + 1,
-                            end_line=node.end_point[0] + 1,
-                            byte_offset=node.start_byte,
-                            byte_length=node.end_byte - node.start_byte,
-                            content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                        ))
+                        symbols.append(
+                            Symbol(
+                                id=make_symbol_id(filename, name, "constant"),
+                                file=filename,
+                                name=name,
+                                qualified_name=name,
+                                kind="constant",
+                                language="elisp",
+                                signature=sig,
+                                docstring=docstring,
+                                line=node.start_point[0] + 1,
+                                end_line=node.end_point[0] + 1,
+                                byte_offset=node.start_byte,
+                                byte_length=node.end_byte - node.start_byte,
+                                content_hash=compute_content_hash(
+                                    source_bytes[node.start_byte : node.end_byte]
+                                ),
+                            )
+                        )
                     return
 
         for child in node.children:
@@ -9369,6 +10531,7 @@ def _parse_elisp_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
 # ---------------------------------------------------------------------------
 # Nim custom parser
 # ---------------------------------------------------------------------------
+
 
 def _parse_nim_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     """Extract symbols from Nim source code using tree-sitter."""
@@ -9386,10 +10549,15 @@ def _parse_nim_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
         return None
 
     def _walk(node, scope: str = ""):
-        if node.type in ("proc_declaration", "func_declaration",
-                         "template_declaration", "macro_declaration",
-                         "method_declaration", "iterator_declaration",
-                         "converter_declaration"):
+        if node.type in (
+            "proc_declaration",
+            "func_declaration",
+            "template_declaration",
+            "macro_declaration",
+            "method_declaration",
+            "iterator_declaration",
+            "converter_declaration",
+        ):
             ident = _first_child_of_type(node, "identifier")
             if ident:
                 name = _text(ident)
@@ -9415,18 +10583,25 @@ def _parse_nim_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                         if rt.type == "type_expression":
                             sig += f": {_text(rt)}"
                         break
-                symbols.append(Symbol(
-                    id=make_symbol_id(filename, qualified, "function"),
-                    file=filename, name=name, qualified_name=qualified,
-                    kind="function", language="nim",
-                    signature=sig[:120],
-                    docstring="",
-                    line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                    byte_offset=node.start_byte,
-                    byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                ))
+                symbols.append(
+                    Symbol(
+                        id=make_symbol_id(filename, qualified, "function"),
+                        file=filename,
+                        name=name,
+                        qualified_name=qualified,
+                        kind="function",
+                        language="nim",
+                        signature=sig[:120],
+                        docstring="",
+                        line=node.start_point[0] + 1,
+                        end_line=node.end_point[0] + 1,
+                        byte_offset=node.start_byte,
+                        byte_length=node.end_byte - node.start_byte,
+                        content_hash=compute_content_hash(
+                            source_bytes[node.start_byte : node.end_byte]
+                        ),
+                    )
+                )
             return
 
         elif node.type == "type_section":
@@ -9437,18 +10612,25 @@ def _parse_nim_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                         name = _text(tsd).strip().rstrip("*")
                         qualified = f"{scope}.{name}" if scope else name
                         sig_text = _text(child).split("\n")[0].strip()[:120]
-                        symbols.append(Symbol(
-                            id=make_symbol_id(filename, qualified, "type"),
-                            file=filename, name=name, qualified_name=qualified,
-                            kind="type", language="nim",
-                            signature=sig_text,
-                            docstring="",
-                            line=child.start_point[0] + 1,
-                            end_line=child.end_point[0] + 1,
-                            byte_offset=child.start_byte,
-                            byte_length=child.end_byte - child.start_byte,
-                            content_hash=compute_content_hash(source_bytes[child.start_byte:child.end_byte]),
-                        ))
+                        symbols.append(
+                            Symbol(
+                                id=make_symbol_id(filename, qualified, "type"),
+                                file=filename,
+                                name=name,
+                                qualified_name=qualified,
+                                kind="type",
+                                language="nim",
+                                signature=sig_text,
+                                docstring="",
+                                line=child.start_point[0] + 1,
+                                end_line=child.end_point[0] + 1,
+                                byte_offset=child.start_byte,
+                                byte_length=child.end_byte - child.start_byte,
+                                content_hash=compute_content_hash(
+                                    source_bytes[child.start_byte : child.end_byte]
+                                ),
+                            )
+                        )
             return
 
         elif node.type in ("var_section", "let_section", "const_section"):
@@ -9462,18 +10644,25 @@ def _parse_nim_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                         name = _text(name_node).strip().rstrip("*")
                         qualified = f"{scope}.{name}" if scope else name
                         sig = f"{section_kind} {_text(child).strip()}"[:120]
-                        symbols.append(Symbol(
-                            id=make_symbol_id(filename, qualified, "constant"),
-                            file=filename, name=name, qualified_name=qualified,
-                            kind="constant", language="nim",
-                            signature=sig,
-                            docstring="",
-                            line=child.start_point[0] + 1,
-                            end_line=child.end_point[0] + 1,
-                            byte_offset=child.start_byte,
-                            byte_length=child.end_byte - child.start_byte,
-                            content_hash=compute_content_hash(source_bytes[child.start_byte:child.end_byte]),
-                        ))
+                        symbols.append(
+                            Symbol(
+                                id=make_symbol_id(filename, qualified, "constant"),
+                                file=filename,
+                                name=name,
+                                qualified_name=qualified,
+                                kind="constant",
+                                language="nim",
+                                signature=sig,
+                                docstring="",
+                                line=child.start_point[0] + 1,
+                                end_line=child.end_point[0] + 1,
+                                byte_offset=child.start_byte,
+                                byte_length=child.end_byte - child.start_byte,
+                                content_hash=compute_content_hash(
+                                    source_bytes[child.start_byte : child.end_byte]
+                                ),
+                            )
+                        )
             return
 
         for child in node.children:
@@ -9486,6 +10675,7 @@ def _parse_nim_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
 # ---------------------------------------------------------------------------
 # Tcl custom parser
 # ---------------------------------------------------------------------------
+
 
 def _parse_tcl_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     """Extract symbols from Tcl source code using tree-sitter."""
@@ -9516,18 +10706,25 @@ def _parse_tcl_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                 sig = f"proc {name}"
                 if args_node:
                     sig += f" {_text(args_node)}"
-                symbols.append(Symbol(
-                    id=make_symbol_id(filename, qualified, "function"),
-                    file=filename, name=name, qualified_name=qualified,
-                    kind="function", language="tcl",
-                    signature=sig[:120],
-                    docstring="",
-                    line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                    byte_offset=node.start_byte,
-                    byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                ))
+                symbols.append(
+                    Symbol(
+                        id=make_symbol_id(filename, qualified, "function"),
+                        file=filename,
+                        name=name,
+                        qualified_name=qualified,
+                        kind="function",
+                        language="tcl",
+                        signature=sig[:120],
+                        docstring="",
+                        line=node.start_point[0] + 1,
+                        end_line=node.end_point[0] + 1,
+                        byte_offset=node.start_byte,
+                        byte_length=node.end_byte - node.start_byte,
+                        content_hash=compute_content_hash(
+                            source_bytes[node.start_byte : node.end_byte]
+                        ),
+                    )
+                )
                 # Walk into body for nested procs
                 for child in node.children:
                     if child.type == "braced_word":
@@ -9547,18 +10744,25 @@ def _parse_tcl_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                 if len(named) >= 2 and _text(named[0]) == "eval":
                     ns_name = _text(named[1])
                     qualified = f"{scope}::{ns_name}" if scope else ns_name
-                    symbols.append(Symbol(
-                        id=make_symbol_id(filename, qualified, "class"),
-                        file=filename, name=ns_name, qualified_name=qualified,
-                        kind="class", language="tcl",
-                        signature=f"namespace eval {ns_name}",
-                        docstring="",
-                        line=node.start_point[0] + 1,
-                        end_line=node.end_point[0] + 1,
-                        byte_offset=node.start_byte,
-                        byte_length=node.end_byte - node.start_byte,
-                        content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                    ))
+                    symbols.append(
+                        Symbol(
+                            id=make_symbol_id(filename, qualified, "class"),
+                            file=filename,
+                            name=ns_name,
+                            qualified_name=qualified,
+                            kind="class",
+                            language="tcl",
+                            signature=f"namespace eval {ns_name}",
+                            docstring="",
+                            line=node.start_point[0] + 1,
+                            end_line=node.end_point[0] + 1,
+                            byte_offset=node.start_byte,
+                            byte_length=node.end_byte - node.start_byte,
+                            content_hash=compute_content_hash(
+                                source_bytes[node.start_byte : node.end_byte]
+                            ),
+                        )
+                    )
                     # Walk inside the braced_word for nested procs
                     for child in wl.children:
                         if child.type == "braced_word":
@@ -9576,6 +10780,7 @@ def _parse_tcl_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
 # ---------------------------------------------------------------------------
 # D language custom parser
 # ---------------------------------------------------------------------------
+
 
 def _parse_dlang_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
     """Extract symbols from D source code using tree-sitter."""
@@ -9612,39 +10817,56 @@ def _parse_dlang_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
                 sig += name
                 if params:
                     sig += _text(params)
-                symbols.append(Symbol(
-                    id=make_symbol_id(filename, qualified, "function"),
-                    file=filename, name=name, qualified_name=qualified,
-                    kind="function", language="dlang",
-                    signature=sig[:120],
-                    docstring="",
-                    line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                    byte_offset=node.start_byte,
-                    byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                ))
+                symbols.append(
+                    Symbol(
+                        id=make_symbol_id(filename, qualified, "function"),
+                        file=filename,
+                        name=name,
+                        qualified_name=qualified,
+                        kind="function",
+                        language="dlang",
+                        signature=sig[:120],
+                        docstring="",
+                        line=node.start_point[0] + 1,
+                        end_line=node.end_point[0] + 1,
+                        byte_offset=node.start_byte,
+                        byte_length=node.end_byte - node.start_byte,
+                        content_hash=compute_content_hash(
+                            source_bytes[node.start_byte : node.end_byte]
+                        ),
+                    )
+                )
             return
 
-        elif node.type in ("class_declaration", "struct_declaration",
-                           "interface_declaration"):
+        elif node.type in (
+            "class_declaration",
+            "struct_declaration",
+            "interface_declaration",
+        ):
             ident = _first_child_of_type(node, "identifier")
             if ident:
                 name = _text(ident)
                 qualified = f"{scope}.{name}" if scope else name
                 keyword = node.type.replace("_declaration", "")
-                symbols.append(Symbol(
-                    id=make_symbol_id(filename, qualified, "class"),
-                    file=filename, name=name, qualified_name=qualified,
-                    kind="class", language="dlang",
-                    signature=f"{keyword} {name}",
-                    docstring="",
-                    line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                    byte_offset=node.start_byte,
-                    byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                ))
+                symbols.append(
+                    Symbol(
+                        id=make_symbol_id(filename, qualified, "class"),
+                        file=filename,
+                        name=name,
+                        qualified_name=qualified,
+                        kind="class",
+                        language="dlang",
+                        signature=f"{keyword} {name}",
+                        docstring="",
+                        line=node.start_point[0] + 1,
+                        end_line=node.end_point[0] + 1,
+                        byte_offset=node.start_byte,
+                        byte_length=node.end_byte - node.start_byte,
+                        content_hash=compute_content_hash(
+                            source_bytes[node.start_byte : node.end_byte]
+                        ),
+                    )
+                )
                 # Walk into body for methods
                 body = _first_child_of_type(node, "aggregate_body")
                 if body:
@@ -9657,18 +10879,25 @@ def _parse_dlang_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             if ident:
                 name = _text(ident)
                 qualified = f"{scope}.{name}" if scope else name
-                symbols.append(Symbol(
-                    id=make_symbol_id(filename, qualified, "type"),
-                    file=filename, name=name, qualified_name=qualified,
-                    kind="type", language="dlang",
-                    signature=f"enum {name}",
-                    docstring="",
-                    line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                    byte_offset=node.start_byte,
-                    byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                ))
+                symbols.append(
+                    Symbol(
+                        id=make_symbol_id(filename, qualified, "type"),
+                        file=filename,
+                        name=name,
+                        qualified_name=qualified,
+                        kind="type",
+                        language="dlang",
+                        signature=f"enum {name}",
+                        docstring="",
+                        line=node.start_point[0] + 1,
+                        end_line=node.end_point[0] + 1,
+                        byte_offset=node.start_byte,
+                        byte_length=node.end_byte - node.start_byte,
+                        content_hash=compute_content_hash(
+                            source_bytes[node.start_byte : node.end_byte]
+                        ),
+                    )
+                )
             return
 
         elif node.type == "template_declaration":
@@ -9676,18 +10905,25 @@ def _parse_dlang_symbols(source_bytes: bytes, filename: str) -> list[Symbol]:
             if ident:
                 name = _text(ident)
                 qualified = f"{scope}.{name}" if scope else name
-                symbols.append(Symbol(
-                    id=make_symbol_id(filename, qualified, "function"),
-                    file=filename, name=name, qualified_name=qualified,
-                    kind="function", language="dlang",
-                    signature=f"template {name}",
-                    docstring="",
-                    line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                    byte_offset=node.start_byte,
-                    byte_length=node.end_byte - node.start_byte,
-                    content_hash=compute_content_hash(source_bytes[node.start_byte:node.end_byte]),
-                ))
+                symbols.append(
+                    Symbol(
+                        id=make_symbol_id(filename, qualified, "function"),
+                        file=filename,
+                        name=name,
+                        qualified_name=qualified,
+                        kind="function",
+                        language="dlang",
+                        signature=f"template {name}",
+                        docstring="",
+                        line=node.start_point[0] + 1,
+                        end_line=node.end_point[0] + 1,
+                        byte_offset=node.start_byte,
+                        byte_length=node.end_byte - node.start_byte,
+                        content_hash=compute_content_hash(
+                            source_bytes[node.start_byte : node.end_byte]
+                        ),
+                    )
+                )
             return
 
         for child in node.children:

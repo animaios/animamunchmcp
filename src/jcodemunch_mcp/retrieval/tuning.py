@@ -155,7 +155,9 @@ class WeightTuner:
     def __init__(self, base_path: Optional[str] = None):
         self._base_path = base_path
 
-    def _load_events(self, repo: str, max_age_days: int = _DEFAULT_MAX_AGE_DAYS) -> list[tuple]:
+    def _load_events(
+        self, repo: str, max_age_days: int = _DEFAULT_MAX_AGE_DAYS
+    ) -> list[tuple]:
         # Pull the most recent N rows for this repo, bounded by the
         # recency window so stale events can't anchor the proposal.
         window = float(max_age_days) * 86_400 if max_age_days > 0 else None
@@ -193,8 +195,12 @@ class WeightTuner:
                 continue
             sem_used = bool(row[9])
             id_hit = bool(row[10])
-            (confidences_with_sem if sem_used else confidences_without_sem).append(float(conf))
-            (confidences_with_id if id_hit else confidences_without_id).append(float(conf))
+            (confidences_with_sem if sem_used else confidences_without_sem).append(
+                float(conf)
+            )
+            (confidences_with_id if id_hit else confidences_without_id).append(
+                float(conf)
+            )
 
         mean_sem_on = _mean(confidences_with_sem)
         mean_sem_off = _mean(confidences_without_sem)
@@ -202,7 +208,8 @@ class WeightTuner:
         mean_id_off = _mean(confidences_without_id)
 
         signals = {
-            "events_with_confidence": len(confidences_with_sem) + len(confidences_without_sem),
+            "events_with_confidence": len(confidences_with_sem)
+            + len(confidences_without_sem),
             "mean_confidence_semantic_on": _round(mean_sem_on),
             "mean_confidence_semantic_off": _round(mean_sem_off),
             "mean_confidence_identity_on": _round(mean_id_on),
@@ -211,9 +218,7 @@ class WeightTuner:
 
         new_sem = None
         if mean_sem_on is not None and mean_sem_off is not None:
-            current = float(
-                existing.get("semantic_weight", _DEFAULT_SEMANTIC_WEIGHT)
-            )
+            current = float(existing.get("semantic_weight", _DEFAULT_SEMANTIC_WEIGHT))
             delta_conf = mean_sem_on - mean_sem_off
             if abs(delta_conf) >= _CONFIDENCE_DELTA_THRESHOLD:
                 step = _LEARN_STEP if delta_conf > 0 else -_LEARN_STEP
@@ -222,9 +227,7 @@ class WeightTuner:
 
         new_id = None
         if mean_id_on is not None and mean_id_off is not None:
-            current = float(
-                existing.get("identity_boost", _DEFAULT_IDENTITY_BOOST)
-            )
+            current = float(existing.get("identity_boost", _DEFAULT_IDENTITY_BOOST))
             delta_conf = mean_id_on - mean_id_off
             if abs(delta_conf) >= _CONFIDENCE_DELTA_THRESHOLD:
                 step = _LEARN_STEP if delta_conf > 0 else -_LEARN_STEP
@@ -232,61 +235,6 @@ class WeightTuner:
                 signals["identity_step"] = step
 
         return new_sem, new_id, signals
-
-    def learn(
-        self,
-        repo: str,
-        *,
-        dry_run: bool = False,
-        min_events: int = _DEFAULT_MIN_EVENTS,
-        max_age_days: int = _DEFAULT_MAX_AGE_DAYS,
-    ) -> dict:
-        """Learn (and optionally apply) updated weights for ``repo``."""
-        events = self._load_events(repo, max_age_days=max_age_days)
-        before = get_overrides(repo, self._base_path)
-        if len(events) < min_events:
-            return {
-                "repo": repo,
-                "applied": False,
-                "reason": f"insufficient_events ({len(events)} < {min_events})",
-                "events": len(events),
-                "max_age_days": max_age_days,
-                "before": before,
-                "after": before,
-            }
-        new_sem, new_id, signals = self._propose(events, before)
-        after: dict = dict(before)
-        changed = False
-        if new_sem is not None and new_sem != before.get("semantic_weight"):
-            after["semantic_weight"] = round(new_sem, 4)
-            changed = True
-        if new_id is not None and new_id != before.get("identity_boost"):
-            after["identity_boost"] = round(new_id, 4)
-            changed = True
-        if not changed:
-            return {
-                "repo": repo,
-                "applied": False,
-                "reason": "no_significant_signal",
-                "events": len(events),
-                "max_age_days": max_age_days,
-                "before": before,
-                "after": before,
-                "signals": signals,
-            }
-        after["learned_from_events"] = len(events)
-        after["captured_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        if not dry_run:
-            self._persist(repo, after)
-        return {
-            "repo": repo,
-            "applied": (not dry_run),
-            "events": len(events),
-            "max_age_days": max_age_days,
-            "before": before,
-            "after": after,
-            "signals": signals,
-        }
 
     def _persist(self, repo: str, overrides: dict) -> None:
         path = _tuning_path(self._base_path)

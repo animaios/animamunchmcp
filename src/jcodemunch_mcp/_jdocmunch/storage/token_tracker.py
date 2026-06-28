@@ -22,8 +22,9 @@ _TELEMETRY_URL = "https://j.gravelle.us/APIs/savings/post.php"
 _SAVINGS_LOCK = threading.Lock()
 
 PRICING = {
-    "claude_opus":  15.00 / 1_000_000,  # Claude Opus 4.6 — $15.00 / 1M input tokens
-    "gpt5_latest":  10.00 / 1_000_000,  # GPT-5.2 (latest flagship GPT) — $10.00 / 1M input tokens
+    "claude_opus": 15.00 / 1_000_000,  # Claude Opus 4.6 — $15.00 / 1M input tokens
+    "gpt5_latest": 10.00
+    / 1_000_000,  # GPT-5.2 (latest flagship GPT) — $10.00 / 1M input tokens
 }
 
 
@@ -43,6 +44,7 @@ def _share_savings(delta: int, anon_id: str) -> None:
     def _post() -> None:
         try:
             import httpx
+
             httpx.post(
                 _TELEMETRY_URL,
                 json={"delta": delta, "anon_id": anon_id},
@@ -97,6 +99,7 @@ def count_tokens(text: str) -> int:
     """
     try:
         import tiktoken
+
         enc = tiktoken.get_encoding("cl100k_base")
         return len(enc.encode(text))
     except Exception:
@@ -115,22 +118,11 @@ def estimate_savings(raw_bytes: int, response_bytes: int) -> int:
     return max(0, (raw_bytes - response_bytes) // _BYTES_PER_TOKEN)
 
 
-def estimate_savings_text(raw: str, response: str) -> int:
-    """Token-accurate variant of estimate_savings using count_tokens.
-
-    Falls back to the bytes/4 heuristic when ``tiktoken`` is unavailable
-    (so behavior is bounded). Use when the caller already has the strings
-    on hand and a precise number matters.
-    """
-    return max(0, count_tokens(raw or "") - count_tokens(response or ""))
-
-
 def cost_avoided(tokens_saved: int, total_tokens_saved: int) -> dict:
     """Return cost avoided estimates for this call and the running total."""
     return {
         "cost_avoided": {
-            model: round(tokens_saved * rate, 4)
-            for model, rate in PRICING.items()
+            model: round(tokens_saved * rate, 4) for model, rate in PRICING.items()
         },
         "total_cost_avoided": {
             model: round(total_tokens_saved * rate, 4)
@@ -188,7 +180,9 @@ def _ensure_telemetry_schema(conn: sqlite3.Connection) -> None:
         )
         """
     )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_tool_calls_tool_ts ON tool_calls(tool, ts)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tool_calls_tool_ts ON tool_calls(tool, ts)"
+    )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_tool_calls_ts ON tool_calls(ts)")
 
 
@@ -258,7 +252,9 @@ def _percentile(sorted_xs: list, p: float) -> float:
         return 0.0
     if len(sorted_xs) == 1:
         return float(sorted_xs[0])
-    idx = max(0, min(len(sorted_xs) - 1, int(round((p / 100.0) * (len(sorted_xs) - 1)))))
+    idx = max(
+        0, min(len(sorted_xs) - 1, int(round((p / 100.0) * (len(sorted_xs) - 1))))
+    )
     return float(sorted_xs[idx])
 
 
@@ -342,13 +338,6 @@ def latency_db_query(window: str, base_path: Optional[str] = None) -> dict:
     return out
 
 
-def reset_latency_state() -> None:
-    """Test hook — clear the in-memory ring and error counts."""
-    with _LATENCY_LOCK:
-        _TOOL_LATENCIES.clear()
-        _TOOL_ERRORS.clear()
-
-
 # ---------------------------------------------------------------------------
 # v1.23.0 — ranking-event ledger
 #
@@ -362,6 +351,7 @@ def reset_latency_state() -> None:
 # Behavior is identical to the v1.14 latency sink: free in-memory, opt-in
 # SQLite via ``JDOCMUNCH_PERF_TELEMETRY=1``. Failures swallowed.
 # ---------------------------------------------------------------------------
+
 
 def _ensure_ranking_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
@@ -381,7 +371,9 @@ def _ensure_ranking_schema(conn: sqlite3.Connection) -> None:
         )
         """
     )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_ranking_repo_ts ON ranking_events(repo, ts)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ranking_repo_ts ON ranking_events(repo, ts)"
+    )
 
 
 def record_ranking_event(
@@ -479,7 +471,16 @@ def ranking_db_query(
         return []
 
     cols = [
-        "ts", "repo", "tool", "query", "mode", "semantic_used", "semantic_weight",
-        "top1_score", "top2_score", "confidence", "result_count",
+        "ts",
+        "repo",
+        "tool",
+        "query",
+        "mode",
+        "semantic_used",
+        "semantic_weight",
+        "top1_score",
+        "top2_score",
+        "confidence",
+        "result_count",
     ]
     return [dict(zip(cols, r)) for r in rows]

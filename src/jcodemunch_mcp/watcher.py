@@ -923,13 +923,6 @@ async def watch_folders(
             for sig in (signal.SIGINT, signal.SIGTERM):
                 loop.add_signal_handler(sig, stop_event.set)
 
-    # Idle timeout tracking (must be created before manager so on_reindex works)
-    last_reindex_time = time.monotonic()
-
-    def update_reindex_time() -> None:
-        nonlocal last_reindex_time
-        last_reindex_time = time.monotonic()
-
     # Create WatcherManager and add initial paths
     manager = WatcherManager(
         debounce_ms=debounce_ms,
@@ -939,7 +932,6 @@ async def watch_folders(
         follow_symlinks=follow_symlinks,
         quiet=quiet,
         log_file_handle=_watcher_output_stream,
-        on_reindex=update_reindex_time,
     )
     manager._stop_event = stop_event  # inject stop_event for run() loop
 
@@ -968,7 +960,7 @@ async def watch_folders(
             _idle_timeout_watchdog(
                 stop_event=stop_event,
                 idle_minutes=idle_timeout_minutes,
-                get_last_reindex=lambda: last_reindex_time,
+                get_last_reindex=time.monotonic,
             ),
             name="idle-watchdog",
         )

@@ -48,6 +48,8 @@ from typing import Optional
 
 from .related import (
     _by_id as _related_by_id,
+)
+from .related import (
     _children_by_parent,
     semantic_neighbors,
     structural_neighbors,
@@ -126,12 +128,12 @@ def _semantic_edges_matrix(section_dicts, *, top_n, min_score):
     n = matrix.shape[0]
     edges: dict = {}
     for start in range(0, n, _SEMANTIC_ROW_BLOCK):
-        block = matrix[start:start + _SEMANTIC_ROW_BLOCK]   # (b, D)
-        sims = block @ matrix.T                              # (b, N) cosine
+        block = matrix[start : start + _SEMANTIC_ROW_BLOCK]  # (b, D)
+        sims = block @ matrix.T  # (b, N) cosine
         for offset in range(sims.shape[0]):
             i = start + offset
             row = sims[offset]
-            row[i] = -1.0                                    # never self
+            row[i] = -1.0  # never self
             cand = np.nonzero(row >= min_score)[0]
             if cand.size == 0:
                 edges[ids[i]] = []
@@ -175,15 +177,14 @@ def build(sections: list, *, top_n_semantic: int = 5, min_score: float = 0.6) ->
     )
     skip_semantic = False
     if semantic_map is None:
-        embedded = sum(
-            1 for s in section_dicts if s.get("id") and s.get("embedding")
-        )
+        embedded = sum(1 for s in section_dicts if s.get("id") and s.get("embedding"))
         if embedded > _PUREPY_SEMANTIC_MAX:
             logger.warning(
                 "related sidecar: numpy unavailable and %d embedded sections "
                 "exceed the pure-Python cap (%d); skipping semantic edges. "
                 "Install numpy for full semantic neighbors at this scale.",
-                embedded, _PUREPY_SEMANTIC_MAX,
+                embedded,
+                _PUREPY_SEMANTIC_MAX,
             )
             skip_semantic = True
 
@@ -282,15 +283,3 @@ def lookup(
     if not data:
         return None
     return (data.get("by_section") or {}).get(section_id)
-
-
-def purge(base_path: Optional[str], owner: str, name: str) -> bool:
-    """Delete the sidecar. Returns True on success."""
-    path = _path(base_path, owner, name)
-    if path.exists():
-        try:
-            path.unlink()
-            return True
-        except OSError:
-            return False
-    return False

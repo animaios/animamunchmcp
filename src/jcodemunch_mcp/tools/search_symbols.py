@@ -1210,7 +1210,6 @@ def search_symbols(
         "_meta": meta,
     }
     from ..retrieval.confidence import attach_confidence as _attach_confidence
-    from ..retrieval.confidence import extract_ledger_features as _ledger_feats
     from ..retrieval.freshness import FreshnessProbe as _FreshnessProbe
     from ..storage.token_tracker import record_ranking_event as _record_ranking_event
 
@@ -1233,7 +1232,6 @@ def search_symbols(
     if _runtime_summary:
         meta["runtime_freshness"] = _runtime_summary
     _attach_confidence(result, scored_results, is_stale=_probe.repo_is_stale)
-    _feat = _ledger_feats(scored_results)
     _record_ranking_event(
         tool="search_symbols",
         repo=f"{owner}/{name}",
@@ -1242,7 +1240,6 @@ def search_symbols(
         confidence=result["_meta"].get("confidence"),
         semantic_used=False,
         repo_is_stale=_probe.repo_is_stale,
-        **_feat,
     )
 
     # Feature 1: Add negative_evidence if present
@@ -1509,7 +1506,6 @@ def _search_symbols_semantic(
         "_meta": meta,
     }
     from ..retrieval.confidence import attach_confidence as _attach_confidence
-    from ..retrieval.confidence import extract_ledger_features as _ledger_feats
     from ..retrieval.freshness import FreshnessProbe as _FreshnessProbe
     from ..storage.token_tracker import record_ranking_event as _record_ranking_event
 
@@ -1532,7 +1528,6 @@ def _search_symbols_semantic(
     if _runtime_summary:
         meta["runtime_freshness"] = _runtime_summary
     _attach_confidence(result, scored_results, is_stale=_probe.repo_is_stale)
-    _feat = _ledger_feats(scored_results)
     _record_ranking_event(
         tool="search_symbols",
         repo=f"{owner}/{name}",
@@ -1541,7 +1536,6 @@ def _search_symbols_semantic(
         confidence=result["_meta"].get("confidence"),
         semantic_used=True,
         repo_is_stale=_probe.repo_is_stale,
-        **_feat,
     )
     best_score = max_cos if semantic_only else max_bm25
     if not scored_results or best_score < _ne_threshold:
@@ -1816,7 +1810,6 @@ def _search_symbols_fusion(
         "_meta": meta,
     }
     from ..retrieval.confidence import attach_confidence as _attach_confidence
-    from ..retrieval.confidence import extract_ledger_features as _ledger_feats
     from ..retrieval.freshness import FreshnessProbe as _FreshnessProbe
     from ..storage.token_tracker import record_ranking_event as _record_ranking_event
 
@@ -1839,7 +1832,6 @@ def _search_symbols_fusion(
     if _runtime_summary:
         meta["runtime_freshness"] = _runtime_summary
     _attach_confidence(result, scored_results, is_stale=_probe.repo_is_stale)
-    _feat = _ledger_feats(scored_results)
     _record_ranking_event(
         tool="search_symbols_fusion",
         repo=f"{owner}/{name}",
@@ -1848,7 +1840,6 @@ def _search_symbols_fusion(
         confidence=result["_meta"].get("confidence"),
         semantic_used=True,
         repo_is_stale=_probe.repo_is_stale,
-        **_feat,
     )
 
     if cacheable and cache_key is not None:

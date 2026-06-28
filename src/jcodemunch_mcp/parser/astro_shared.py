@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-
 _ASTRO_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 
 
@@ -26,7 +25,8 @@ def split_astro_frontmatter(text: str) -> tuple[Optional[str], str, int, int]:
     while j < len(lines):
         if lines[j].strip() == "---":
             frontmatter = "".join(lines[start:j])
-            remainder = "".join(lines[j + 1:])
+            remainder = "".join(lines[j + 1 :])
+            remainder = "".join(lines[j + 1 :])
             return frontmatter, remainder, start + 1, j + 2
         j += 1
 
@@ -36,9 +36,7 @@ def split_astro_frontmatter(text: str) -> tuple[Optional[str], str, int, int]:
 
 def mask_html_comments_keep_offsets(text: str) -> str:
     """Replace HTML comment content with spaces while preserving offsets."""
-
-    def _comment_repl(match: re.Match[str]) -> str:
-        block = match.group(0)
-        return "".join("\n" if ch == "\n" else " " for ch in block)
-
-    return _ASTRO_HTML_COMMENT_RE.sub(_comment_repl, text)
+    return _ASTRO_HTML_COMMENT_RE.sub(
+        lambda match: "".join("\n" if ch == "\n" else " " for ch in match.group(0)),
+        text,
+    )

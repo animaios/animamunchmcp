@@ -81,18 +81,10 @@ def _maybe_apply_adaptive(folder_path: str, result: dict) -> None:
         logger.debug("adaptive language update skipped", exc_info=True)
 
 
-def get_filtered_files(path: str) -> Generator[str, None, None]:
-    """Generator function to filter directories and files"""
-    skip_dirs_regex = _build_skip_dirs_regex()
-    # Use os.walk with followlinks=False to avoid infinite loops caused by
-    # NTFS junctions or symlinks pointing back to ancestor directories.
-    for dirpath, dirnames, filenames in os.walk(path, followlinks=False):
-        # Don't walk directories that should be skipped
-        dirnames[:] = [dir for dir in dirnames if not skip_dirs_regex.match(dir)]
-        dpath = Path(dirpath)
-        for file in filenames:
-            if not SKIP_FILES_REGEX.search(file):
-                yield dpath / file
+def _build_skip_dirs_regex() -> re.Pattern[str]:
+    """Build regex from config-filtered skip directories (called per-index)."""
+    dirs = get_skip_directories()
+    return re.compile("^(" + "|".join(dirs) + ")$")
 
 
 def _load_gitignore(folder_path: Path) -> Optional[pathspec.PathSpec]:
@@ -105,28 +97,6 @@ def _load_gitignore(folder_path: Path) -> Optional[pathspec.PathSpec]:
         except Exception:
             pass
     return None
-
-
-def _load_all_gitignores(root: Path) -> dict[Path, pathspec.PathSpec]:
-    """Load all .gitignore files in the tree, keyed by their directory.
-
-    Supports monorepos and poncho-style projects where subdirectories each
-    have their own .gitignore (e.g. cap/.gitignore, core/.gitignore).
-
-    Uses os.walk(followlinks=False) to avoid infinite loops caused by
-    NTFS junctions or symlinks pointing back to ancestor directories.
-    """
-    specs: dict[Path, pathspec.PathSpec] = {}
-    for dirpath, dirnames, filenames in os.walk(str(root), followlinks=False):
-        if ".gitignore" in filenames:
-            gitignore_path = Path(dirpath) / ".gitignore"
-            try:
-                content = gitignore_path.read_text(encoding="utf-8", errors="replace")
-                spec = pathspec.PathSpec.from_lines("gitignore", content.splitlines())
-                specs[gitignore_path.parent.resolve()] = spec
-            except Exception:
-                pass
-    return specs
 
 
 def _is_container() -> bool:
@@ -184,22 +154,29 @@ def _is_trusted(
 
     return is_in_list if whitelist_mode else not is_in_list
 
+    @lru_cache(maxsize=512)
+    def _is_trusted(
+        folder_path: Path, trusted_folders: tuple, whitelist_mode: bool = True
+    ) -> bool:
+        """Return True when folder_path is trusted.
 
-def _is_gitignored(
-    file_path: Path, gitignore_specs: dict[Path, pathspec.PathSpec]
-) -> bool:
-    """Check if a file is excluded by any .gitignore in its ancestor chain.
+        whitelist_mode=True (default): trusted_folders contains trusted paths
+        whitelist_mode=False: trusted_folders contains untrusted paths (blacklist)
 
-    Each spec is applied relative to its own directory, matching standard git behaviour.
-    """
-    for gitignore_dir, spec in gitignore_specs.items():
-        try:
-            rel = file_path.relative_to(gitignore_dir)
-            if spec.match_file(rel.as_posix()):
-                return True
-        except ValueError:
-            continue
-    return False
+        Empty list returns False (nothing explicitly trusted) for backward compatibility.
+        The trust check is skipped for empty list, but the broad check uses this value.
+        """
+        if not trusted_folders:
+            # Empty list: nothing explicitly trusted (backward compatible)
+            return False
+
+        is_in_list = any(
+            folder_path == Path(trusted_folder)
+            or Path(trusted_folder) in folder_path.parents
+            for trusted_folder in trusted_folders
+        )
+
+        return is_in_list if whitelist_mode else not is_in_list
 
 
 def _is_gitignored_fast(
@@ -2004,8 +1981,8 @@ def index_folder(
             for _incr_idx, rel_path in enumerate(sorted(files_to_parse)):
                 if progress_cb:
                     progress_cb(_incr_idx, _incr_total, rel_path)
-                # Use content cached by _hash_file if available (avoids second read)
-                content = _hash_file_cache.pop(rel_path, None) or _read_file(rel_path)
+                # Read file content directly (cache removed)
+                content = _read_file(rel_path)
                 if content is None:
                     continue
                 raw_files_subset[rel_path] = content

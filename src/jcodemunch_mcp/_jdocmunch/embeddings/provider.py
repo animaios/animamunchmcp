@@ -18,7 +18,6 @@ import os
 from collections import OrderedDict
 from typing import Optional
 
-
 # ---------------------------------------------------------------------------
 # Text preparation
 # ---------------------------------------------------------------------------
@@ -38,6 +37,7 @@ def _section_embed_text(section) -> str:
     or fenced code, matching the BM25 channel's text.
     """
     from ..retrieval.tokenize import prose_view
+
     parts = [section.title]
     if section.summary and section.summary != section.title:
         parts.append(section.summary)
@@ -57,6 +57,7 @@ def _embed_cache_key(section) -> str:
 # Cosine similarity (pure Python — no numpy dependency)
 # ---------------------------------------------------------------------------
 
+
 def cosine_similarity(a: list, b: list) -> float:
     """Cosine similarity between two float vectors."""
     dot = sum(x * y for x, y in zip(a, b))
@@ -70,6 +71,7 @@ def cosine_similarity(a: list, b: list) -> float:
 # ---------------------------------------------------------------------------
 # Provider detection
 # ---------------------------------------------------------------------------
+
 
 def _openai_compat_url() -> str:
     return os.environ.get("JDOCMUNCH_OPENAI_COMPAT_URL", "").strip()
@@ -98,6 +100,7 @@ def _sentence_transformers_available() -> bool:
     """Return True if sentence-transformers is importable."""
     try:
         import sentence_transformers  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -132,6 +135,7 @@ def get_provider_name() -> Optional[str]:
 # Gemini provider
 # ---------------------------------------------------------------------------
 
+
 class _GeminiProvider:
     """Embed via Google Gemini text-embedding-004 (768 dims)."""
 
@@ -140,6 +144,7 @@ class _GeminiProvider:
 
     def __init__(self):
         import google.generativeai as genai
+
         genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
         self._genai = genai
 
@@ -162,6 +167,7 @@ class _GeminiProvider:
 # OpenAI provider
 # ---------------------------------------------------------------------------
 
+
 class _OpenAIProvider:
     """Embed via OpenAI text-embedding-3-small (1536 dims)."""
 
@@ -170,13 +176,14 @@ class _OpenAIProvider:
 
     def __init__(self):
         from openai import OpenAI
+
         self._client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
     def embed_texts(self, texts: list, task_type: str = "retrieval_document") -> list:
         # task_type is ignored for OpenAI — included for interface compatibility
         embeddings = []
         for i in range(0, len(texts), self.BATCH_SIZE):
-            batch = texts[i:i + self.BATCH_SIZE]
+            batch = texts[i : i + self.BATCH_SIZE]
             try:
                 response = self._client.embeddings.create(model=self.MODEL, input=batch)
                 embeddings.extend([e.embedding for e in response.data])
@@ -188,6 +195,7 @@ class _OpenAIProvider:
 # ---------------------------------------------------------------------------
 # OpenAI-compatible provider
 # ---------------------------------------------------------------------------
+
 
 class _OpenAICompatibleProvider:
     """Embed via a caller-supplied OpenAI-compatible embeddings endpoint."""
@@ -232,7 +240,7 @@ class _OpenAICompatibleProvider:
         # task_type is ignored for OpenAI-compatible endpoints.
         embeddings = []
         for i in range(0, len(texts), self.batch_size):
-            batch = texts[i:i + self.batch_size]
+            batch = texts[i : i + self.batch_size]
             try:
                 response = self._client.embeddings.create(model=self.model, input=batch)
                 embeddings.extend([e.embedding for e in response.data])
@@ -244,6 +252,7 @@ class _OpenAICompatibleProvider:
 # ---------------------------------------------------------------------------
 # sentence-transformers provider (fully offline)
 # ---------------------------------------------------------------------------
+
 
 class _SentenceTransformersProvider:
     """Embed via sentence-transformers (all-MiniLM-L6-v2 by default, 384 dims).
@@ -258,6 +267,7 @@ class _SentenceTransformersProvider:
 
     def __init__(self):
         from sentence_transformers import SentenceTransformer
+
         model_name = os.environ.get("JDOCMUNCH_ST_MODEL", self.DEFAULT_MODEL)
         self._model = SentenceTransformer(model_name)
 
@@ -265,7 +275,9 @@ class _SentenceTransformersProvider:
         # task_type is ignored — sentence-transformers handles asymmetric search
         # via separate query/passage models when needed; for MiniLM it's symmetric.
         try:
-            embeddings = self._model.encode(texts, batch_size=self.BATCH_SIZE, show_progress_bar=False)
+            embeddings = self._model.encode(
+                texts, batch_size=self.BATCH_SIZE, show_progress_bar=False
+            )
             return [emb.tolist() for emb in embeddings]
         except Exception:
             return [[] for _ in texts]
@@ -296,7 +308,12 @@ _PROVIDER_CACHE: dict = {}
 def _provider_signature(name: str) -> tuple:
     """Compute a cache key that invalidates when env-driven model choice changes."""
     if name == "sentence-transformers":
-        return (name, os.environ.get("JDOCMUNCH_ST_MODEL", _SentenceTransformersProvider.DEFAULT_MODEL))
+        return (
+            name,
+            os.environ.get(
+                "JDOCMUNCH_ST_MODEL", _SentenceTransformersProvider.DEFAULT_MODEL
+            ),
+        )
     if name == "gemini":
         return (name, _GeminiProvider.MODEL, os.environ.get("GOOGLE_API_KEY", "")[:8])
     if name == "openai":
@@ -310,11 +327,6 @@ def _provider_signature(name: str) -> tuple:
             _openai_compat_batch_size(_OpenAICompatibleProvider.BATCH_SIZE),
         )
     return (name,)
-
-
-def _reset_provider_cache() -> None:
-    """Test hook — clears the provider cache."""
-    _PROVIDER_CACHE.clear()
 
 
 def _get_provider():
@@ -356,7 +368,9 @@ def _provider_identity(name: str) -> tuple[str, Optional[int]]:
         return (f"{_openai_compat_url()}::{_openai_compat_model()}", dim)
     if name == "sentence-transformers":
         return (
-            os.environ.get("JDOCMUNCH_ST_MODEL", _SentenceTransformersProvider.DEFAULT_MODEL),
+            os.environ.get(
+                "JDOCMUNCH_ST_MODEL", _SentenceTransformersProvider.DEFAULT_MODEL
+            ),
             None,
         )
     return (name, None)
@@ -393,9 +407,14 @@ def embed_sections(
     cache_enabled = bool(owner and name)
     if cache_enabled:
         from . import cache as _cache  # local import to avoid circulars
+
         cached = _cache.load(
-            storage_path, owner, name,
-            provider=provider_name, model=model, dim=dim,
+            storage_path,
+            owner,
+            name,
+            provider=provider_name,
+            model=model,
+            dim=dim,
         )
     else:
         cached = {}
@@ -426,6 +445,7 @@ def embed_sections(
     # Rewrite cache when enabled — gathers all current (hash, vector) pairs.
     if cache_enabled:
         from . import cache as _cache
+
         entries = []
         for sec in sections:
             k = _embed_cache_key(sec)
@@ -435,8 +455,12 @@ def embed_sections(
         if entries:
             try:
                 _cache.write(
-                    storage_path, owner, name,
-                    provider=provider_name, model=model, dim=dim,
+                    storage_path,
+                    owner,
+                    name,
+                    provider=provider_name,
+                    model=model,
+                    dim=dim,
                     entries=entries,
                 )
             except Exception:
@@ -513,12 +537,6 @@ def _query_cache() -> "OrderedDict":
     if _QUERY_CACHE is None:
         _QUERY_CACHE = OrderedDict()
     return _QUERY_CACHE
-
-
-def _reset_query_cache() -> None:
-    """Test hook — clears the query embedding cache."""
-    cache = _query_cache()
-    cache.clear()
 
 
 def embed_query(query: str) -> Optional[list]:

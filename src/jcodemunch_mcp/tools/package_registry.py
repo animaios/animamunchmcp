@@ -23,6 +23,7 @@ _registry_cache_mtime: float = 0.0
 # Package name extraction from manifest files
 # ---------------------------------------------------------------------------
 
+
 def _norm_python_pkg(name: str) -> str:
     """Normalize a Python package name per PEP 503: lowercase + replace _ and - with -."""
     return re.sub(r"[-_]+", "-", name.lower())
@@ -55,7 +56,10 @@ def _extract_from_pyproject_toml(content: str) -> Optional[str]:
             if name and isinstance(name, str):
                 return _norm_python_pkg(name.strip())
     except Exception:
-        logger.debug("tomllib parse failed for pyproject.toml, falling back to regex", exc_info=True)
+        logger.debug(
+            "tomllib parse failed for pyproject.toml, falling back to regex",
+            exc_info=True,
+        )
 
     # Regex fallback for Python 3.10 or parse failures
     # Find [project] section first, then look for name = "..."
@@ -63,7 +67,9 @@ def _extract_from_pyproject_toml(content: str) -> Optional[str]:
     for line in content.splitlines():
         stripped = line.strip()
         if stripped.startswith("["):
-            in_project = stripped.startswith("[project]") and not stripped.startswith("[project.")
+            in_project = stripped.startswith("[project]") and not stripped.startswith(
+                "[project."
+            )
             continue
         if in_project:
             m = re.match(r'^name\s*=\s*["\']([^"\']+)["\']', stripped)
@@ -81,7 +87,7 @@ def _extract_from_setup_cfg(content: str) -> Optional[str]:
             in_metadata = stripped.startswith("[metadata]")
             continue
         if in_metadata:
-            m = re.match(r'^name\s*=\s*(.+)$', stripped)
+            m = re.match(r"^name\s*=\s*(.+)$", stripped)
             if m:
                 return _norm_python_pkg(m.group(1).strip())
     return None
@@ -90,6 +96,7 @@ def _extract_from_setup_cfg(content: str) -> Optional[str]:
 def _extract_from_package_json(content: str) -> Optional[str]:
     """Extract package name from package.json."""
     import json
+
     try:
         data = json.loads(content)
         name = data.get("name")
@@ -106,7 +113,7 @@ def _extract_from_package_json(content: str) -> Optional[str]:
 def _extract_from_go_mod(content: str) -> Optional[str]:
     """Extract module path from go.mod."""
     for line in content.splitlines():
-        m = re.match(r'^module\s+(\S+)', line.strip())
+        m = re.match(r"^module\s+(\S+)", line.strip())
         if m:
             return m.group(1)
     return None
@@ -129,7 +136,9 @@ def _extract_from_cargo_toml(content: str) -> Optional[str]:
             if name and isinstance(name, str):
                 return name.strip()
     except Exception:
-        logger.debug("tomllib parse failed for Cargo.toml, falling back to regex", exc_info=True)
+        logger.debug(
+            "tomllib parse failed for Cargo.toml, falling back to regex", exc_info=True
+        )
 
     # Regex fallback
     in_package = False
@@ -149,7 +158,7 @@ def _extract_from_csproj(content: str) -> Optional[str]:
     """Extract PackageName or AssemblyName from a .csproj file."""
     # Try PackageName first, then AssemblyName
     for tag in ("PackageName", "AssemblyName"):
-        m = re.search(r'<' + tag + r'>\s*([^<]+)\s*</' + tag + r'>', content)
+        m = re.search(r"<" + tag + r">\s*([^<]+)\s*</" + tag + r">", content)
         if m:
             return m.group(1).strip()
     return None
@@ -234,6 +243,7 @@ def extract_package_names(source_root: str) -> list[str]:
 # Root package extraction from import specifiers
 # ---------------------------------------------------------------------------
 
+
 def extract_root_package_from_specifier(specifier: str, language: str) -> str:
     """Extract the root package name from an import specifier.
 
@@ -291,6 +301,7 @@ def extract_root_package_from_specifier(specifier: str, language: str) -> str:
 # ---------------------------------------------------------------------------
 # Registry building
 # ---------------------------------------------------------------------------
+
 
 def _get_newest_index_mtime(all_repos: list[dict]) -> float:
     """Return the maximum mtime of all index .db files for cache invalidation."""
@@ -355,7 +366,9 @@ def build_package_registry(all_repos: list[dict]) -> dict[str, list[str]]:
                 try:
                     pkg_names = extract_package_names(source_root)
                 except Exception:
-                    logger.debug("Failed to extract package names for %s", repo_id, exc_info=True)
+                    logger.debug(
+                        "Failed to extract package names for %s", repo_id, exc_info=True
+                    )
 
         for pkg in pkg_names:
             if pkg:
@@ -366,16 +379,10 @@ def build_package_registry(all_repos: list[dict]) -> dict[str, list[str]]:
     return registry
 
 
-def invalidate_registry_cache() -> None:
-    """Clear the module-level package registry cache."""
-    global _registry_cache, _registry_cache_mtime
-    _registry_cache = None
-    _registry_cache_mtime = 0.0
-
-
 # ---------------------------------------------------------------------------
 # Cross-repo resolution helpers
 # ---------------------------------------------------------------------------
+
 
 def find_repos_for_package(package_name: str, all_repos: list[dict]) -> list[str]:
     """Return repo IDs that publish the given package name.
@@ -389,59 +396,6 @@ def find_repos_for_package(package_name: str, all_repos: list[dict]) -> list[str
     """
     registry = build_package_registry(all_repos)
     return list(registry.get(package_name, []))
-
-
-def resolve_cross_repo_file(
-    specifier: str,
-    language: str,
-    importing_repo_id: str,
-    all_repos: list[dict],
-    storage_path: Optional[str] = None,
-) -> list[dict]:
-    """Given an unresolved import specifier, find files in other indexed repos.
-
-    Args:
-        specifier: Raw import specifier string.
-        language: Language of the importing file.
-        importing_repo_id: Repo ID of the importing repo (to exclude self).
-        all_repos: List of repo dicts from list_repos().
-        storage_path: Custom storage path.
-
-    Returns:
-        List of dicts: [{repo_id, file, package_name}], or [] if no match.
-    """
-    root_pkg = extract_root_package_from_specifier(specifier, language)
-    if not root_pkg:
-        return []
-
-    candidate_repos = find_repos_for_package(root_pkg, all_repos)
-    # Exclude the importing repo itself
-    candidate_repos = [r for r in candidate_repos if r != importing_repo_id]
-
-    if not candidate_repos:
-        return []
-
-    results: list[dict] = []
-    from ..storage import IndexStore
-    store = IndexStore(base_path=storage_path)
-
-    for repo_id in candidate_repos:
-        if "/" not in repo_id:
-            continue
-        owner, name = repo_id.split("/", 1)
-        index = store.load_index(owner, name)
-        if not index:
-            continue
-
-        # Find the best entry-point file for this repo
-        entry_file = _find_entry_point(index.source_files, language)
-        results.append({
-            "repo_id": repo_id,
-            "file": entry_file or "",
-            "package_name": root_pkg,
-        })
-
-    return results
 
 
 def _find_entry_point(source_files: list[str], language: str) -> Optional[str]:
@@ -458,8 +412,14 @@ def _find_entry_point(source_files: list[str], language: str) -> Optional[str]:
         patterns = ["__init__.py", "main.py", "app.py"]
     elif lang in ("javascript", "typescript", "tsx", "jsx", "vue", "astro"):
         patterns = [
-            "index.js", "index.ts", "index.tsx", "index.jsx",
-            "main.js", "main.ts", "src/index.js", "src/index.ts",
+            "index.js",
+            "index.ts",
+            "index.tsx",
+            "index.jsx",
+            "main.js",
+            "main.ts",
+            "src/index.js",
+            "src/index.ts",
         ]
     elif lang == "go":
         patterns = ["main.go", "cmd/main.go"]

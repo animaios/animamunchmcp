@@ -36,7 +36,7 @@ Public surface:
         name a given env var was resolved from, or ``None`` if the env
         var was not keyring-sourced.
 
-    keyring_set / keyring_get / keyring_delete / keyring_list
+    keyring_set / keyring_get / keyring_delete
         Thin wrappers over the keyring library so the CLI doesn't need
         a direct dependency. Each raises ImportError if keyring isn't
         installed.
@@ -98,11 +98,12 @@ def _import_keyring():
     """Import the keyring library, raising ImportError with an actionable hint."""
     try:
         import keyring  # noqa: F401  (returned by reference)
+
         return __import__("keyring")
     except ImportError as e:
         raise ImportError(
             "Keyring resolution requires the 'keyring' package. "
-            "Install with: pip install \"jcodemunch-mcp[keyring]\""
+            'Install with: pip install "jcodemunch-mcp[keyring]"'
         ) from e
 
 
@@ -131,18 +132,6 @@ def keyring_delete(name: str) -> bool:
         return False
 
 
-def keyring_list() -> list[str]:
-    """Return the list of recognised env-var names users can store secrets under.
-
-    The keyring library doesn't offer cross-backend enumeration of stored
-    entries (macOS Keychain does, freedesktop Secret Service partially does,
-    Windows Credential Manager doesn't), so we surface the documented set of
-    env-var names rather than probing the backend. The caller can then run
-    ``keyring_get(name)`` on each to see which are actually populated.
-    """
-    return list(CREDENTIAL_ENV_VARS)
-
-
 def resolve_credentials_in_env() -> None:
     """Rewrite ``keyring:NAME`` references in credential env vars in-place.
 
@@ -166,7 +155,7 @@ def resolve_credentials_in_env() -> None:
         if not raw.startswith(KEYRING_PREFIX):
             continue
 
-        entry_name = raw[len(KEYRING_PREFIX):].strip()
+        entry_name = raw[len(KEYRING_PREFIX) :].strip()
         if not entry_name:
             logger.warning(
                 "%s set to bare '%s' with no entry name; leaving unchanged",

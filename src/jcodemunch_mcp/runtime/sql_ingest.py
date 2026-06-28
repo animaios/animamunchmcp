@@ -35,7 +35,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-
 from .redact import redact_trace_record
 from .sql_log import SqlQueryRecord, iter_sql_from_text, parse_sql_log_file
 
@@ -141,16 +140,21 @@ def _ingest_sql_iter(
         records += 1
         sql_text = query.sql
         if redact_enabled:
-            redacted, fired_labels = redact_trace_record({"sql": sql_text}, source="sql_log")
+            redacted, fired_labels = redact_trace_record(
+                {"sql": sql_text}, source="sql_log"
+            )
             for label in fired_labels:
                 redactions_fired[label] = redactions_fired.get(label, 0) + 1
             # The redacted SQL is what gets re-parsed for tables/columns.
-            sql_text_red = redacted.get("sql") if isinstance(redacted, dict) else sql_text
+            sql_text_red = (
+                redacted.get("sql") if isinstance(redacted, dict) else sql_text
+            )
             if isinstance(sql_text_red, str):
                 # Re-parse the redacted text so any redaction-induced ref
                 # changes (rare; redaction targets values, not idents) are
                 # reflected. Cheap regex pass.
                 from .sql_log import _build_record  # type: ignore
+
                 requery = _build_record(
                     sql=sql_text_red,
                     calls=query.calls,
@@ -168,7 +172,9 @@ def _ingest_sql_iter(
             columns = query.columns
 
         if not tables:
-            unmapped_reasons["parse_no_tables"] = unmapped_reasons.get("parse_no_tables", 0) + 1
+            unmapped_reasons["parse_no_tables"] = (
+                unmapped_reasons.get("parse_no_tables", 0) + 1
+            )
             continue
 
         # Resolve each referenced table to one or more symbol_ids
@@ -189,7 +195,9 @@ def _ingest_sql_iter(
                 aggregator.unmapped_inc(table=table, count=query.calls)
 
         if not any_table_resolved:
-            unmapped_reasons["no_table_match"] = unmapped_reasons.get("no_table_match", 0) + 1
+            unmapped_reasons["no_table_match"] = (
+                unmapped_reasons.get("no_table_match", 0) + 1
+            )
 
         # Record column references — only those that the dbt_columns
         # metadata recognises against a resolved model. Unqualified columns
@@ -219,9 +227,9 @@ def _ingest_sql_iter(
 
     return {
         "records": records,
-        "mapped": aggregator.mapped_call_total,
-        "unmapped": aggregator.unmapped_call_total,
-        "columns_recorded": aggregator.column_total,
+        "mapped": sum(aggregator._calls.values()),
+        "unmapped": sum(aggregator._unmapped.values()),
+        "columns_recorded": sum(aggregator._columns.values()),
         "redactions_fired": redactions_fired,
         "unmapped_reasons": unmapped_reasons,
         "evicted": evicted,
@@ -339,7 +347,11 @@ def _resolve_column_target(
     Returns the model name (the runtime_columns key) or None when no model in
     the query declares that column.
     """
-    if table_alias and table_alias in metadata.dbt_columns and col in metadata.dbt_columns[table_alias]:
+    if (
+        table_alias
+        and table_alias in metadata.dbt_columns
+        and col in metadata.dbt_columns[table_alias]
+    ):
         return table_alias
     for m in query_models:
         if m in metadata.dbt_columns and col in metadata.dbt_columns[m]:
@@ -365,7 +377,9 @@ class _BatchAggregator:
         # table_name → count
         self._unmapped: dict[str, int] = {}
 
-    def mapped_inc(self, *, symbol_id: str, calls: int, mean_ms: Optional[float]) -> None:
+    def mapped_inc(
+        self, *, symbol_id: str, calls: int, mean_ms: Optional[float]
+    ) -> None:
         self._calls[symbol_id] = self._calls.get(symbol_id, 0) + calls
         if mean_ms is not None:
             self._call_durations.setdefault(symbol_id, []).append(mean_ms)
@@ -376,18 +390,6 @@ class _BatchAggregator:
 
     def unmapped_inc(self, *, table: str, count: int) -> None:
         self._unmapped[table] = self._unmapped.get(table, 0) + count
-
-    @property
-    def mapped_call_total(self) -> int:
-        return sum(self._calls.values())
-
-    @property
-    def unmapped_call_total(self) -> int:
-        return sum(self._unmapped.values())
-
-    @property
-    def column_total(self) -> int:
-        return sum(self._columns.values())
 
     def iter_calls(self) -> list[tuple[str, int, Optional[float], Optional[float]]]:
         out: list[tuple[str, int, Optional[float], Optional[float]]] = []
@@ -458,10 +460,7 @@ def _persist(
                 count = count + excluded.count,
                 last_seen = excluded.last_seen
             """,
-            [
-                (model, col, n, now, now)
-                for model, col, n in aggregator.iter_columns()
-            ],
+            [(model, col, n, now, now) for model, col, n in aggregator.iter_columns()],
         )
 
         # runtime_unmapped: store unresolved tables as ``(file=NULL, line=NULL,

@@ -45,8 +45,8 @@ _FILENAME = "{name}.boilerplate.json"
 _LOCK = threading.Lock()
 _SCHEMA_VERSION = 1
 
-_MIN_LINE_LEN = 8       # ignore very short lines (single-word footers)
-_MAX_LINE_LEN = 240     # ignore body paragraphs that happen to repeat
+_MIN_LINE_LEN = 8  # ignore very short lines (single-word footers)
+_MAX_LINE_LEN = 240  # ignore body paragraphs that happen to repeat
 _DEFAULT_MIN_SECTION_RATIO = 0.25
 _DEFAULT_MIN_SECTIONS = 3
 _BLANK_RUN_RE = re.compile(r"\n{3,}")
@@ -78,8 +78,9 @@ def detect(
     counts: dict[str, int] = {}
     total = 0
     for sec in sections:
-        content = (sec.get("content") if isinstance(sec, dict)
-                   else getattr(sec, "content", "")) or ""
+        content = (
+            sec.get("content") if isinstance(sec, dict) else getattr(sec, "content", "")
+        ) or ""
         if not content:
             continue
         total += 1
@@ -166,15 +167,3 @@ def strip(content: str, fragments: list[str]) -> tuple[str, int]:
     new_content = "".join(out_lines)
     new_content = _BLANK_RUN_RE.sub("\n\n", new_content)
     return new_content, removed
-
-
-def purge(base_path: Optional[str], owner: str, name: str) -> bool:
-    """Delete the sidecar. Returns True on success."""
-    path = _path(base_path, owner, name)
-    if path.exists():
-        try:
-            path.unlink()
-            return True
-        except OSError:
-            return False
-    return False

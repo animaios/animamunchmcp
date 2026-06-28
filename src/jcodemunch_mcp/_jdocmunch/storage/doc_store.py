@@ -24,7 +24,7 @@ try:
 except ImportError:  # pragma: no cover - non-Windows
     msvcrt = None
 
-from ..embeddings import embed_query, cosine_similarity
+from ..embeddings import cosine_similarity, embed_query
 
 INDEX_VERSION = 3
 COMMIT_SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
@@ -54,6 +54,7 @@ def _with_index_lock(method):
             return method(self, owner, name, *args, **kwargs)
 
     return wrapper
+
 
 # Module-level LRU cache: {(str(index_path), mtime_ns): DocIndex}
 # Keyed by path + mtime so the entry auto-invalidates whenever the file changes.
@@ -116,13 +117,14 @@ def _evict_index_cache(index_path: Path) -> None:
 @dataclass
 class DocIndex:
     """Index for a repository's documentation."""
+
     repo: str
     owner: str
     name: str
     indexed_at: str
     doc_paths: list
-    doc_types: dict        # {".md": 5, ".txt": 2}
-    sections: list         # Serialized Section dicts (without content by default)
+    doc_types: dict  # {".md": 5, ".txt": 2}
+    sections: list  # Serialized Section dicts (without content by default)
     index_version: int = INDEX_VERSION
     file_hashes: dict = field(default_factory=dict)
     head_sha: Optional[str] = None
@@ -178,7 +180,11 @@ class DocIndex:
         if loader is None:
             return ""
         try:
-            text = loader(sec.get("doc_path", ""), int(sec.get("byte_start", 0)), int(sec.get("byte_end", 0)))
+            text = loader(
+                sec.get("doc_path", ""),
+                int(sec.get("byte_start", 0)),
+                int(sec.get("byte_end", 0)),
+            )
         except Exception:
             text = ""
         if sec_id:
@@ -194,7 +200,9 @@ class DocIndex:
         return any(s.get("embedding") for s in self.sections)
 
     @staticmethod
-    def _path_excluded(sec: dict, doc_path: Optional[str], path_glob: Optional[str]) -> bool:
+    def _path_excluded(
+        sec: dict, doc_path: Optional[str], path_glob: Optional[str]
+    ) -> bool:
         """Candidate pre-filter shared by every search mode (jdoc#32).
 
         ``path_glob`` must run here, before any top-k cut — as a tool-layer
@@ -241,11 +249,17 @@ class DocIndex:
         """
         has_emb = self._has_embeddings()
         if semantic_only:
-            return self._semantic_search(query, doc_path, max_results, path_glob) if has_emb else []
+            return (
+                self._semantic_search(query, doc_path, max_results, path_glob)
+                if has_emb
+                else []
+            )
 
         want_semantic = semantic if semantic is not None else has_emb
         if want_semantic and has_emb and 0.0 < semantic_weight <= 1.0:
-            results = self._hybrid_search(query, doc_path, max_results, semantic_weight, path_glob)
+            results = self._hybrid_search(
+                query, doc_path, max_results, semantic_weight, path_glob
+            )
             if results:
                 return results
         return self._lexical_search(query, doc_path, max_results, path_glob)
@@ -277,7 +291,7 @@ class DocIndex:
         if rows:
             mat = np.asarray([s["embedding"] for s in rows], dtype=np.float64)
             norms = np.linalg.norm(mat, axis=1, keepdims=True)
-            norms[norms == 0.0] = 1.0   # zero vector stays zero -> cosine 0, never NaN
+            norms[norms == 0.0] = 1.0  # zero vector stays zero -> cosine 0, never NaN
             mat /= norms
             result = (np, mat, rows)
         self._sem_matrix_cache = result
@@ -306,7 +320,7 @@ class DocIndex:
         if qn == 0.0:
             return []
         q = q / qn
-        scores = mat @ q   # (R,) cosine in one BLAS call
+        scores = mat @ q  # (R,) cosine in one BLAS call
         out = []
         for i, sec in enumerate(rows):
             if self._path_excluded(sec, doc_path, path_glob):
@@ -385,7 +399,9 @@ class DocIndex:
 
         # ----- Semantic ranking (cosine over stored embeddings) -----
         # jdoc#63: vectorized semantic scoring (same ranking as the loop).
-        sem_pairs = self._semantic_scored(query_vec, doc_path, path_glob) if query_vec else []
+        sem_pairs = (
+            self._semantic_scored(query_vec, doc_path, path_glob) if query_vec else []
+        )
         sem_pairs.sort(key=lambda x: (-x[0], x[1].get("id", "")))
         sem_ranking = [s.get("id", "") for _, s in sem_pairs]
 
@@ -457,14 +473,6 @@ class DocIndex:
             out.append(stripped)
         return out
 
-    @staticmethod
-    def _word_matches(word: str, text: str) -> bool:
-        """True if word is an exact match or prefix of any word in text."""
-        if word in text:
-            return True
-        # prefix match: "authenticat" hits "authentication"
-        return any(t.startswith(word) for t in text.split() if len(word) >= 3)
-
     def _score_section(self, sec: dict, query_lower: str, query_words: set) -> float:
         """BM25-Okapi scoring with tag-match kicker.
 
@@ -477,7 +485,13 @@ class DocIndex:
         # Provide the loader so BM25 can lazily fetch content for the
         # content channel.
         def _loader(doc_path: str, byte_start: int, byte_end: int) -> str:
-            fake = {"content": "", "doc_path": doc_path, "byte_start": byte_start, "byte_end": byte_end, "id": sec.get("id", "")}
+            fake = {
+                "content": "",
+                "doc_path": doc_path,
+                "byte_start": byte_start,
+                "byte_end": byte_end,
+                "id": sec.get("id", ""),
+            }
             return self._ensure_content(fake)
 
         score = _bm25_score(
@@ -509,6 +523,7 @@ class DocStore:
 
     def _safe_repo_component(self, value: str, field_name: str) -> str:
         import re
+
         if not value or value in {".", ".."}:
             raise ValueError(f"Invalid {field_name}: {value!r}")
         if "/" in value or "\\" in value:
@@ -527,7 +542,9 @@ class DocStore:
         n = self._safe_repo_component(name, "name")
         return self.base_path / o / n
 
-    def _safe_content_path(self, content_dir: Path, relative_path: str) -> Optional[Path]:
+    def _safe_content_path(
+        self, content_dir: Path, relative_path: str
+    ) -> Optional[Path]:
         try:
             base = content_dir.resolve()
             candidate = (content_dir / relative_path).resolve()
@@ -583,8 +600,9 @@ class DocStore:
                 os.close(fd)
 
     @staticmethod
-    def _atomic_replace(tmp_path: Path, index_path: Path,
-                        attempts: int = 10, base_delay: float = 0.02) -> None:
+    def _atomic_replace(
+        tmp_path: Path, index_path: Path, attempts: int = 10, base_delay: float = 0.02
+    ) -> None:
         """``os.replace(tmp, dst)`` with bounded backoff for Windows share races.
 
         POSIX ``rename`` is atomic and never collides. On Windows a concurrent
@@ -608,9 +626,9 @@ class DocStore:
         self,
         owner: str,
         name: str,
-        sections: list,         # list[Section]
-        raw_files: dict,        # {doc_path: content}
-        doc_types: dict,        # {".md": N}
+        sections: list,  # list[Section]
+        raw_files: dict,  # {doc_path: content}
+        doc_types: dict,  # {".md": N}
         file_hashes: Optional[dict] = None,
         head_sha: Optional[str] = None,
         source_dirty: bool = False,
@@ -627,6 +645,7 @@ class DocStore:
         # Compute BM25 corpus stats from the in-memory Section objects (which
         # carry full content) before to_dict() drops it.
         from ..retrieval.bm25 import compute_corpus_stats
+
         bm25_stats = compute_corpus_stats(sections)
 
         index = DocIndex(
@@ -761,8 +780,7 @@ class DocStore:
         new_files = list(new_set - old_set)
         deleted_files = list(old_set - new_set)
         changed_files = [
-            fp for fp in (old_set & new_set)
-            if old_hashes[fp] != current_hashes[fp]
+            fp for fp in (old_set & new_set) if old_hashes[fp] != current_hashes[fp]
         ]
 
         return changed_files, new_files, deleted_files
@@ -775,8 +793,8 @@ class DocStore:
         changed_files: list,
         new_files: list,
         deleted_files: list,
-        new_sections: list,     # list[Section]
-        raw_files: dict,        # {doc_path: content} for changed + new files only
+        new_sections: list,  # list[Section]
+        raw_files: dict,  # {doc_path: content} for changed + new files only
         doc_types: dict,
         head_sha=_UNSET,
         source_dirty=_UNSET,
@@ -795,7 +813,9 @@ class DocStore:
 
         # Drop sections belonging to deleted or changed files
         files_to_remove = set(deleted_files) | set(changed_files)
-        kept_sections = [s for s in index.sections if s.get("doc_path") not in files_to_remove]
+        kept_sections = [
+            s for s in index.sections if s.get("doc_path") not in files_to_remove
+        ]
 
         # Merge in new sections
         all_section_dicts = kept_sections + [s.to_dict() for s in new_sections]
@@ -806,6 +826,7 @@ class DocStore:
             dp = s.get("doc_path", "")
             if dp and dp not in seen:
                 import os as _os
+
                 seen[dp] = _os.path.splitext(dp)[1].lower()
         recomputed_types: dict = {}
         for ext in seen.values():
@@ -839,14 +860,6 @@ class DocStore:
         kept_loader = getattr(index, "_content_loader", None)
         new_raw_map = dict(raw_files)
 
-        def _stats_loader(doc_path: str, byte_start: int, byte_end: int) -> str:
-            buf = new_raw_map.get(doc_path)
-            if buf is not None and byte_end > byte_start:
-                return buf[byte_start:byte_end]
-            if kept_loader:
-                return kept_loader(doc_path, byte_start, byte_end) or ""
-            return ""
-
         # Inline content for the new tail so compute_corpus_stats doesn't
         # need to re-read disk for them; kept sections fall through to the
         # _stats_loader byte-range read.
@@ -854,7 +867,9 @@ class DocStore:
             {**s.to_dict(), "content": (getattr(s, "content", "") or "")}
             for s in new_sections
         ]
-        bm25_stats = compute_corpus_stats(merged_for_stats, content_loader=_stats_loader)
+        bm25_stats = compute_corpus_stats(
+            merged_for_stats, content_loader=_stats_loader
+        )
 
         updated = DocIndex(
             repo=f"{owner}/{name}",
@@ -867,11 +882,19 @@ class DocStore:
             index_version=INDEX_VERSION,
             file_hashes=file_hashes,
             head_sha=index.head_sha if head_sha is _UNSET else head_sha,
-            source_dirty=index.source_dirty if source_dirty is _UNSET else bool(source_dirty),
-            sha_certified=index.sha_certified if sha_certified is _UNSET else bool(sha_certified),
+            source_dirty=index.source_dirty
+            if source_dirty is _UNSET
+            else bool(source_dirty),
+            sha_certified=index.sha_certified
+            if sha_certified is _UNSET
+            else bool(sha_certified),
             bm25_stats=bm25_stats,
-            source_root=index.source_root if source_root is _UNSET else (source_root or ""),
-            source_repo=index.source_repo if source_repo is _UNSET else (source_repo or ""),
+            source_root=index.source_root
+            if source_root is _UNSET
+            else (source_root or ""),
+            source_repo=index.source_repo
+            if source_repo is _UNSET
+            else (source_repo or ""),
         )
 
         # Save atomically (per-PID temp + retried replace; see save_index)
@@ -901,7 +924,13 @@ class DocStore:
 
         return updated
 
-    def get_section_content(self, owner: str, name: str, section_id: str, _index: Optional["DocIndex"] = None) -> Optional[str]:
+    def get_section_content(
+        self,
+        owner: str,
+        name: str,
+        section_id: str,
+        _index: Optional["DocIndex"] = None,
+    ) -> Optional[str]:
         """Read section content using stored byte offsets. O(1) — no re-parsing.
 
         Pass _index to avoid a redundant load_index() call when the caller
@@ -962,7 +991,9 @@ class DocStore:
                     row["head_sha"] = sha
                 row["source_dirty"] = source_dirty
                 row["sha_certified"] = sha_certified
-                repo_at_sha = format_repo_at_sha(data["repo"], sha, source_dirty, sha_certified)
+                repo_at_sha = format_repo_at_sha(
+                    data["repo"], sha, source_dirty, sha_certified
+                )
                 if repo_at_sha:
                     row["repo_at_sha"] = repo_at_sha
                 if data.get("source_root"):
@@ -1073,7 +1104,12 @@ class DocStore:
 
         index = self.load_index(owner, name)
         indexed_sha = normalize_commit_sha(index.head_sha if index else None)
-        if index and indexed_sha == wanted_sha and not index.source_dirty and index.sha_certified:
+        if (
+            index
+            and indexed_sha == wanted_sha
+            and not index.source_dirty
+            and index.sha_certified
+        ):
             return owner, name
 
         # Preserve the old tuple-only contract. The invalid name is intentionally

@@ -18,7 +18,7 @@ import re
 import time
 from typing import Optional
 
-from ..storage import IndexStore, record_savings, estimate_savings, cost_avoided
+from ..storage import IndexStore, cost_avoided, estimate_savings, record_savings
 from ._utils import index_status_to_tool_error, resolve_repo
 from .get_class_hierarchy import _build_class_maps
 
@@ -40,9 +40,15 @@ _HANDLER_DECORATOR_PATTERNS = re.compile(
 )
 
 # Valid relationship kinds we emit
-_RELATIONSHIP_KINDS = frozenset({
-    "subclass_override", "interface_impl", "duck_typed", "decorator_handler", "subclass",
-})
+_RELATIONSHIP_KINDS = frozenset(
+    {
+        "subclass_override",
+        "interface_impl",
+        "duck_typed",
+        "decorator_handler",
+        "subclass",
+    }
+)
 
 
 def _has_handler_decorator(sym: dict) -> Optional[str]:
@@ -106,14 +112,21 @@ def _resolve_target_symbol(index, symbol: str) -> Optional[dict]:
     candidates = [s for s in index.symbols if s.get("name") == symbol]
     if not candidates:
         return None
+
     # Prioritise non-import kinds; among those prefer class/method
     def _rank(s: dict) -> tuple:
         kind = s.get("kind", "")
         kind_pri = {
-            "class": 0, "type": 1, "method": 2, "function": 3,
-            "constant": 4, "template": 5, "import": 9,
+            "class": 0,
+            "type": 1,
+            "method": 2,
+            "function": 3,
+            "constant": 4,
+            "template": 5,
+            "import": 9,
         }.get(kind, 8)
         return (kind_pri, -int(s.get("byte_length", 0) or 0))
+
     candidates.sort(key=_rank)
     return candidates[0]
 
@@ -156,7 +169,8 @@ def find_implementations(
 
     kinds_whitelist = (
         set(relationship_kinds) & _RELATIONSHIP_KINDS
-        if relationship_kinds else _RELATIONSHIP_KINDS
+        if relationship_kinds
+        else _RELATIONSHIP_KINDS
     )
 
     try:
@@ -180,13 +194,20 @@ def find_implementations(
     # ── Channel 1: LSP dispatch edges ──────────────────────────────────
     dispatch_edges = (
         (getattr(index, "context_metadata", None) or {}).get("dispatch_edges", [])
-        if hasattr(index, "context_metadata") else []
+        if hasattr(index, "context_metadata")
+        else []
     )
 
     impls_by_id: dict[str, dict] = {}
 
-    def _add_impl(sym: dict, *, kind: str, confidence: float, source: str,
-                  via: Optional[str] = None) -> None:
+    def _add_impl(
+        sym: dict,
+        *,
+        kind: str,
+        confidence: float,
+        source: str,
+        via: Optional[str] = None,
+    ) -> None:
         if kind not in kinds_whitelist:
             return
         sid = sym.get("id", "")
@@ -238,7 +259,9 @@ def find_implementations(
                 continue
 
             # Match: target is the interface itself, or the interface method
-            iface_method_id = f"{iface_name}.{method_name}" if iface_name and method_name else ""
+            iface_method_id = (
+                f"{iface_name}.{method_name}" if iface_name and method_name else ""
+            )
             target_is_iface = (
                 target_name == iface_name
                 or target_name == method_name
@@ -251,7 +274,11 @@ def find_implementations(
             for cand in symbols_by_file.get(impl_file, []):
                 cn = cand.get("name", "")
                 cl = cand.get("line", 0)
-                if (impl_line and cl == impl_line) or (impl_name and cn == impl_name) or cn == method_name:
+                if (
+                    (impl_line and cl == impl_line)
+                    or (impl_name and cn == impl_name)
+                    or cn == method_name
+                ):
                     _add_impl(
                         cand,
                         kind="interface_impl",
@@ -267,6 +294,7 @@ def find_implementations(
     if target_kind in ("class", "type") and include_subclasses:
         # BFS down the class tree
         from collections import deque  # noqa: PLC0415
+
         visited: set[str] = {target_name}
         queue: deque = deque(children_of.get(target_name, []))
         while queue:
@@ -277,8 +305,10 @@ def find_implementations(
             child_sym = class_by_name.get(child_name)
             if child_sym is not None:
                 _add_impl(
-                    child_sym, kind="subclass",
-                    confidence=_CONF_AST, source="class_hierarchy",
+                    child_sym,
+                    kind="subclass",
+                    confidence=_CONF_AST,
+                    source="class_hierarchy",
                 )
             for grand in children_of.get(child_name, []):
                 if grand not in visited:
@@ -309,7 +339,10 @@ def find_implementations(
             cand_class_name = None
             if cand_parent_id:
                 for s in index.symbols:
-                    if s.get("id") == cand_parent_id and s.get("kind") in ("class", "type"):
+                    if s.get("id") == cand_parent_id and s.get("kind") in (
+                        "class",
+                        "type",
+                    ):
                         cand_class_name = s.get("name", "")
                         break
 
@@ -327,16 +360,20 @@ def find_implementations(
 
                 if _is_subclass(cand_class_name, parent_class_name):
                     _add_impl(
-                        cand, kind="subclass_override",
-                        confidence=_CONF_AST, source="class_hierarchy",
+                        cand,
+                        kind="subclass_override",
+                        confidence=_CONF_AST,
+                        source="class_hierarchy",
                         via=cand_class_name,
                     )
                     continue
 
             # No declared inheritance → duck-typed
             _add_impl(
-                cand, kind="duck_typed",
-                confidence=_CONF_DUCK, source="name_match",
+                cand,
+                kind="duck_typed",
+                confidence=_CONF_DUCK,
+                source="name_match",
                 via=cand_class_name or None,
             )
 
@@ -367,8 +404,10 @@ def find_implementations(
                     break
         if match_dec:
             _add_impl(
-                sym, kind="decorator_handler",
-                confidence=_CONF_DECORATOR, source="decorator_match",
+                sym,
+                kind="decorator_handler",
+                confidence=_CONF_DECORATOR,
+                source="decorator_match",
                 via=match_dec,
             )
 
@@ -377,11 +416,15 @@ def find_implementations(
     if cross_repo:
         try:
             from .package_registry import build_package_registry  # noqa: PLC0415
+
             registry = build_package_registry(store.list_repos())
             # Find other repos that import this repo's package(s)
-            our_packages = {pkg for pkg, repos in registry.items() if f"{owner}/{name}" in repos}
+            our_packages = {
+                pkg for pkg, repos in registry.items() if f"{owner}/{name}" in repos
+            }
             other_repos = [
-                rid for rid in {r for repos in registry.values() for r in repos}
+                rid
+                for rid in {r for repos in registry.values() for r in repos}
                 if rid != f"{owner}/{name}"
             ]
             for other_id in other_repos:
@@ -404,7 +447,9 @@ def find_implementations(
                     if not depends:
                         continue
                     # Look for same-named subclasses/methods in the dependent repo
-                    other_class_by_name, other_children = _build_class_maps(other_idx.symbols)
+                    other_class_by_name, other_children = _build_class_maps(
+                        other_idx.symbols
+                    )
                     other_sym_by_name: dict[str, list[dict]] = {}
                     for s in other_idx.symbols:
                         n = s.get("name", "")
@@ -428,7 +473,9 @@ def find_implementations(
                                             "source": "class_hierarchy",
                                             "cross_repo": True,
                                             "source_repo": other_id,
-                                            "byte_length": int(csym.get("byte_length", 0) or 0),
+                                            "byte_length": int(
+                                                csym.get("byte_length", 0) or 0
+                                            ),
                                         }
                                         impls_by_id[csym["id"]] = rec
                                         cross_repo_count += 1
@@ -452,10 +499,18 @@ def find_implementations(
                                 impls_by_id[sym["id"]] = rec
                                 cross_repo_count += 1
                 except Exception as exc:  # noqa: BLE001
-                    logger.debug("find_implementations: cross-repo lookup failed for %s: %s",
-                                 other_id, exc, exc_info=True)
+                    logger.debug(
+                        "find_implementations: cross-repo lookup failed for %s: %s",
+                        other_id,
+                        exc,
+                        exc_info=True,
+                    )
         except Exception as exc:  # noqa: BLE001
-            logger.debug("find_implementations: cross-repo discovery skipped: %s", exc, exc_info=True)
+            logger.debug(
+                "find_implementations: cross-repo discovery skipped: %s",
+                exc,
+                exc_info=True,
+            )
 
     # ── Rank + truncate ────────────────────────────────────────────────
     impls = list(impls_by_id.values())
@@ -468,24 +523,28 @@ def find_implementations(
         else:
             try:
                 from .pagerank import compute_pagerank  # noqa: PLC0415
+
                 pr, _ = compute_pagerank(
-                    index.imports or {}, index.source_files, index.alias_map,
+                    index.imports or {},
+                    index.source_files,
+                    index.alias_map,
                     psr4_map=getattr(index, "psr4_map", None),
                 )
                 cache["pagerank"] = pr
                 pagerank = pr
             except Exception as exc:  # noqa: BLE001
-                logger.debug("find_implementations: pagerank skipped: %s", exc, exc_info=True)
+                logger.debug(
+                    "find_implementations: pagerank skipped: %s", exc, exc_info=True
+                )
 
-    def _impl_rank(rec: dict) -> tuple:
-        # Higher confidence first, then higher PageRank of containing file,
-        # then larger body.
-        conf = float(rec.get("confidence", 0))
-        pr = pagerank.get(rec.get("file", ""), 0.0)
-        bl = int(rec.get("byte_length", 0))
-        return (-conf, -pr, -bl, rec.get("symbol_id", ""))
-
-    impls.sort(key=_impl_rank)
+    impls.sort(
+        key=lambda rec: (
+            -float(rec.get("confidence", 0)),
+            -pagerank.get(rec.get("file", ""), 0.0),
+            -int(rec.get("byte_length", 0)),
+            rec.get("symbol_id", ""),
+        )
+    )
     impls = impls[:max_results]
 
     # Token-pack — each record is ~50 tokens
@@ -501,7 +560,9 @@ def find_implementations(
     # Verdict counts by relationship
     relationship_counts: dict[str, int] = {}
     for r in out:
-        relationship_counts[r["relationship"]] = relationship_counts.get(r["relationship"], 0) + 1
+        relationship_counts[r["relationship"]] = (
+            relationship_counts.get(r["relationship"], 0) + 1
+        )
 
     # Token-savings ledger
     raw_bytes = sum(int(s.get("byte_length", 0) or 0) for s in index.symbols)
