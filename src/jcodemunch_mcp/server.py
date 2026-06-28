@@ -3388,9 +3388,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent] | CallToolR
                 functools.partial(
                     get_outline,
                     repo=arguments["repo"],
-                    file_path=arguments.get("file_path")
-                    or arguments.get("file")
-                    or "",
+                    file_path=arguments.get("file_path") or arguments.get("file") or "",
                     file_paths=arguments.get("file_paths"),
                     domain="code",
                     storage_path=storage_path,
@@ -6943,7 +6941,7 @@ def main(argv: Optional[list[str]] = None):
 
         storage_path = os.environ.get("CODE_INDEX_PATH")
         try:
-            store = IndexStore(storage_path=storage_path)
+            store = IndexStore(base_path=storage_path)
             repo_arg = args.repo
             # Parse owner/name from repo arg
             if "/" in repo_arg:
