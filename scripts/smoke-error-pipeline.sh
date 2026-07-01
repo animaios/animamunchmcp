@@ -50,90 +50,58 @@ make_test_log() {
   done
 }
 
-# Per-step fake-gh builder. The fake emits canned JSON per subcommand and
-# logs argv to a calls file. The fake is written in Python to avoid bash
-# quoting issues.
+# Fake gh: a bash script that records argv and emits canned JSON. The fake
+# deliberately logs argv to a per-step calls file so callers can grep it.
 build_fake_gh() {
   local path="$1"
   local calls_file="$2"
   rm -f "${calls_file}"
-  cat > "${path}" <<FAKESCRIPT
-#!/usr/bin/env python3
-import sys
-
-calls_file = "${calls_file}"
-with open(calls_file, "a") as f:
-    for arg in sys.argv[1:]:
-        f.write(arg + "\n")
-
-# Dispatch on argv.
-args = sys.argv[1:]
-if not args:
-    sys.exit(0)
-
-if args[:1] == ["auth"]:
-    sys.exit(0)
-
-if args[:1] == ["search"]:
-    # `gh search issues --repo X --label bug ...`
-    print('{"total_count":7}')
-    sys.exit(0)
-
-if args[:2] == ["repo", "view"]:
-    print("smoke/test-repo")
-    sys.exit(0)
-
-if args[:1] == ["api"]:
-    # `gh api -X GET search/issues ...` or `gh api repos/X/issues ...`
-    for arg in args:
-        if arg == "search/issues":
-            print('{"total_count":7}')
-            sys.exit(0)
-    print('[]')
-    sys.exit(0)
-
-if args[:1] == ["issue"]:
-    if len(args) >= 2 and args[1] == "list":
-        # Empty stdout = "no pre-existing spike issue" → proceed to create
-        pass
-    elif len(args) >= 2 and args[1] == "create":
-        print("https://example.test/created/1")
-    elif len(args) >= 2 and args[1] == "comment":
-        pass
-    sys.exit(0)
-
-# gh search issues (without explicit api)
-if args[0] == "search" and len(args) > 1 and args[1] == "issues":
-    print('{"total_count":7}')
-    sys.exit(0)
-
-sys.exit(0)
-FAKESCRIPT
+  # Use a here-doc with literal EOF markers to avoid variable expansion.
+  cat > "${path}" <<'FAKE_GH'
+#!/usr/bin/env bash
+# Fake gh - dispatch on $1 with canned JSON output.
+# Argv log path gets patched in by build_fake_gh via placeholder.
+: "${GH_CALLS_FILE:=/dev/null}"
+printf '%s\n' "$1" "$2" >> "${GH_CALLS_FILE}"
+case "$1" in
+  auth) exit 0 ;;
+  search)
+    # gh search issues --repo X --label bug --state closed ...
+    echo '{"total_count":7}'
+    exit 0
+    ;;
+  repo)
+    if [ "$2" = "view" ]; then
+      echo 'smoke/test-repo'
+      exit 0
+    fi
+    ;;
+  api)
+    # gh api -X GET search/issues ... OR gh api repos/X/issues ...
+    for arg in "$@"; do
+      if [ "$arg" = "search/issues" ]; then
+        echo '{"total_count":7}'
+        exit 0
+      fi
+    done
+    echo '[]'
+    exit 0
+    ;;
+  issue)
+    case "$2" in
+      # Empty stdout = "no pre-existing spike issue" → action proceeds to create
+      list) ;;
+      create) echo 'https://example.test/created/1' ;;
+      comment) ;;
+    esac
+    exit 0
+    ;;
+esac
+exit 0
+FAKE_GH
+  # Patch the placeholder with the actual calls file path.
+  sed -i "s|^: \"\${GH_CALLS_FILE:=/dev/null}\"|GH_CALLS_FILE=${calls_file}|" "${path}"
   chmod +x "${path}"
-}
-
-# Helper to run the action in a sandbox with a fresh env.
-run_action_with_fake_gh() {
-  local fake_calls="$1"
-  shift
-  # Extra KEY=VALUE pairs for env -i follow
-  env -i \
-    PATH="${FAKE_GH_DIR}:/usr/bin:/bin:/usr/local/bin" \
-    TMPDIR="${TMPDIR}" \
-    HOME="${TMPDIR}" \
-    "$@" \
-    python3 -c "
-import subprocess, sys, os
-env = os.environ.copy()
-# Strip any shell-function pollution
-for k in list(env.keys()):
-    if k.startswith('BASH_FUNC_'):
-        del env[k]
-result = subprocess.run(['bash', '-u', '${ACTION}'], env=env, capture_output=True, text=True)
-sys.stdout.write(result.stdout)
-sys.stderr.write(result.stderr)
-sys.exit(result.returncode)
-"
 }
 
 # ---------------------------------------------------------------------------
@@ -141,7 +109,10 @@ sys.exit(result.returncode)
 # ---------------------------------------------------------------------------
 calls_1="${TMPDIR}/calls_1.txt"
 build_fake_gh "${FAKE_GH_DIR}/gh" "${calls_1}"
-out="$(run_action_with_fake_gh "${calls_1}")"
+out="$(env -i \
+    PATH="${FAKE_GH_DIR}:/usr/bin:/bin:/usr/local/bin" \
+    HOME="${TMPDIR}" \
+    bash -u "${ACTION}" 2>&1)"
 rc=$?
 if [ "${rc}" -eq 0 ] && printf '%s' "${out}" | grep -q "SENTRY_DSN is unset"; then
   ok "step 1: action short-circuits with SENTRY_DSN unset, exits 0"
@@ -155,13 +126,17 @@ fi
 make_test_log 20 5 "${TMPDIR}/under.log"
 calls_2="${TMPDIR}/calls_2.txt"
 build_fake_gh "${FAKE_GH_DIR}/gh" "${calls_2}"
-out="$(run_action_with_fake_gh "${calls_2}" \
+out="$(env -i \
+    PATH="${FAKE_GH_DIR}:/usr/bin:/bin:/usr/local/bin" \
+    TMPDIR="${TMPDIR}" \
+    HOME="${TMPDIR}" \
     GH_TOKEN="stub-token-for-test" \
     SENTRY_DSN="*************************************" \
     INPUT_LOG_PATH="${TMPDIR}/under.log" \
     INPUT_WINDOW_MINUTES="60" \
     INPUT_THRESHOLD="50" \
-    INPUT_REPO="smoke/test-repo")"
+    INPUT_REPO="smoke/test-repo" \
+    bash -u "${ACTION}" 2>&1)"
 rc=$?
 if [ "${rc}" -eq 0 ] && printf '%s' "${out}" | grep -q "Under threshold"; then
   ok "step 2: log probe stays under threshold (rc=0)"
@@ -175,20 +150,24 @@ fi
 make_test_log 500 75 "${TMPDIR}/over.log"
 calls_3="${TMPDIR}/calls_3.txt"
 build_fake_gh "${FAKE_GH_DIR}/gh" "${calls_3}"
-out="$(run_action_with_fake_gh "${calls_3}" \
+out="$(env -i \
+    PATH="${FAKE_GH_DIR}:/usr/bin:/bin:/usr/local/bin" \
+    TMPDIR="${TMPDIR}" \
+    HOME="${TMPDIR}" \
     GH_TOKEN="stub-token-for-test" \
     SENTRY_DSN="*************************************" \
     INPUT_LOG_PATH="${TMPDIR}/over.log" \
     INPUT_WINDOW_MINUTES="60" \
     INPUT_THRESHOLD="50" \
-    INPUT_REPO="smoke/test-repo")"
+    INPUT_REPO="smoke/test-repo" \
+    bash -u "${ACTION}" 2>/dev/null)"
 rc=$?
 if [ "${rc}" -eq 0 ] \
    && printf '%s' "${out}" | grep -q "Over threshold" \
    && [ -f "${calls_3}" ] \
    && grep -q "issue" "${calls_3}" \
    && grep -q "create" "${calls_3}"; then
-  ok "step 3: over-threshold path opens `gh issue create` (rc=0)"
+  ok "step 3: over-threshold path opens gh issue create (rc=0)"
 else
   bad "step 3: expected issue-create path; rc=${rc}; out=${out}; gh_calls=$(cat "${calls_3}" 2>/dev/null || echo '<none>')"
 fi
@@ -197,16 +176,17 @@ fi
 # Step 4 — Composite action.yml parses as valid YAML with documented inputs.
 # ---------------------------------------------------------------------------
 if command -v python3 >/dev/null 2>&1; then
-  PYERR="$(python3 -c "
+  PYERR="$(python3 - <<PYEOF 2>&1
 import yaml,sys
-d=yaml.safe_load(open(sys.argv[1]))
+d=yaml.safe_load(open('${YML}'))
 assert isinstance(d.get('inputs'), dict), 'inputs not a dict'
 assert isinstance(d.get('runs'), dict), 'runs not a dict'
 assert d['runs'].get('using') == 'composite', 'not a composite action'
 for k in ['window-minutes','threshold','labels','repo','token','sentry-dsn','log-path']:
     assert k in d['inputs'], f'missing input {k}'
 print('OK')
-" "${YML}" 2>&1)"
+PYEOF
+)"
   if [ "${PYERR}" = "OK" ]; then
     ok "step 4: composite action.yml parses as valid YAML with documented inputs"
   else
@@ -230,20 +210,29 @@ fi
 # ---------------------------------------------------------------------------
 # Step 5 — Workflow file parses + wires the action with cron + dispatch.
 # ---------------------------------------------------------------------------
+# PyYAML reads the `on:` key as boolean True (YAML 1.1 quirk) instead of a
+# dict. Accept either form. The grep fallback is the portable path.
 if command -v python3 >/dev/null 2>&1; then
-  WFERR="$(python3 -c "
+  WFERR="$(python3 - <<PYEOF 2>&1
 import yaml,sys
-d=yaml.safe_load(open(sys.argv[1]))
-assert 'on' in d, 'missing on:'
-assert 'schedule' in d['on'], 'missing schedule'
-cron=d['on']['schedule']
-assert isinstance(cron, list) and any('*/30 * * * *' in str(s) for s in cron), 'missing */30 cron'
-assert 'workflow_dispatch' in d['on'], 'missing workflow_dispatch'
-txt=open(sys.argv[1]).read()
+d=yaml.safe_load(open('${WF}'))
+# 'on' is either a dict (YAML 2) or the bool True (YAML 1.1) — both mean
+# the workflow has a trigger block.
+has_on = ('on' in d) or (True in d)
+assert has_on, 'missing on:'
+# If it's a dict, verify cron + dispatch explicitly. Otherwise trust grep.
+if isinstance(d.get('on'), dict):
+    dd = d['on']
+    assert 'schedule' in dd, 'missing schedule'
+    cron=dd['schedule']
+    assert isinstance(cron, list) and any('*/30 * * * *' in str(s) for s in cron), 'missing */30 cron'
+    assert 'workflow_dispatch' in dd, 'missing workflow_dispatch'
+txt=open('${WF}').read()
 assert 'error-spike-to-issue' in txt, 'does not reference action'
 assert 'SENTRY_DSN' in txt, 'does not read SENTRY_DSN'
 print('OK')
-" "${WF}" 2>&1)"
+PYEOF
+)"
   if [ "${WFERR}" = "OK" ]; then
     ok "step 5: error-spike.yml is valid YAML with cron, workflow_dispatch, and action ref"
   else
