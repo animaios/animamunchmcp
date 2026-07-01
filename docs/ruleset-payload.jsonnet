@@ -1,13 +1,10 @@
-// Template — create a branch ruleset requiring PR reviews + status checks.
-// Usage: update statuses, then:
-//   gh api -X POST "repos/{owner}/{repo}/rulesets" --input ruleset-payload.jsonnet
-// (GitHub doesn't natively parse Jsonnet; use e.g. `jsonnetfmt` / `drone jsonnet` to
-// expand to JSON first if desired — the body below is valid JSON so it passes `gh` directly.)
+// GitHub branch-protection ruleset payload (for gh api --input).
+// Tune `name`, `enforce_admins`, and `conditions.ref_name.include` per intent.
+local contexts = ["test", "lint", "large-file-check", "unused-deps-check", "check-agents-md"];
 {
-  name: "main — PR reviews + required checks",
+  name: "main — enforce admins",
   target: "branch",
   enforcement: "active",
-  bypass_actors: [],
   conditions: {
     ref_name: {
       include: ["refs/heads/main"],
@@ -20,24 +17,23 @@
       parameters: {
         required_approving_review_count: 1,
         dismiss_stale_reviews_on_push: true,
+        required_reviewers: [],
         require_code_owner_review: true,
         require_last_push_approval: true,
         required_review_thread_resolution: false,
+        allowed_merge_methods: ["merge", "squash", "rebase"],
       },
     },
     {
       type: "required_status_checks",
       parameters: {
         strict_required_status_checks_policy: true,
-        required_status_checks: [
-          { context: "test" },
-          { context: "lint" },
-          { context: "large-file-check" },
-          { context: "unused-deps-check" },
-          { context: "check-agents-md" },
-        ],
+        do_not_enforce_on_create: false,
+        required_status_checks: [ { context: c } for c in contexts ],
       },
     },
     { type: "non_fast_forward" },
   ],
+  bypass_actors: [],
+  enforce_admins: true,
 }
