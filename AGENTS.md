@@ -1,6 +1,7 @@
 # animamunchmcp — Dual SOP (jcm + Serena)
 
 > **Maintenance note:** This file is the binding SOP for agentic work in this repo. When jcm releases a new tool (tracked in `CLAUDE.md` release notes), or Serena ships a new tool upstream (inventory in `serena/src/serena/tools/*`), the matching section below must be updated.
+> **Alerting:** GitHub-native error-spike alert rule lives in `.github/workflows/error-spike.yml` and `.github/actions/error-spike-to-issue/`; production error spikes turn into auto-created GitHub issues via `gh issue create`. See `docs/OBSERVABILITY.md` §1.1.
 
 ## 0. Absolute token-efficiency commitment
 
@@ -105,6 +106,9 @@ get_diagnostics_for_file(relative_path=<edited>)
 
 ### Index lifecycle
 - `index_folder` / `index_file` / `index_repo` / `invalidate_cache`, `embed_repo(force=true, batch_size=50)`, `summarize_repo(force=true)`, `register_edit(file_paths=[...])`.
+
+### Feature flags
+- New feature flags are registered as `FF.NAME = _Flag("name", ...)` in `src/jcodemunch_mcp/feature_flags.py` (single source of truth for both the live registry and the CI); `quality-gates.yml` `dead-feature-flags-check` fails PRs that leave a flag registered but unreferenced in `src/`.
 
 ## 4. Serena MCP cheatsheet (symbolic / LSP)
 
